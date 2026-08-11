@@ -1,0 +1,824 @@
+<style>
+  :root{
+    --indigo-600:#4f46e5; --indigo-700:#4338ca; --indigo-50:#eef2ff; --indigo-100:#e0e7ff;
+    --teal-500:#14b8a6;
+    --ink-900:#0f172a; --ink-700:#334155; --ink-500:#64748b; --ink-400:#94a3b8; --ink-200:#e2e8f0; --ink-100:#f1f5f9;
+    --green-600:#059669; --green-50:#ecfdf5; --green-100:#d1fae5;
+    --blue-600:#2563eb; --blue-50:#eff6ff; --blue-100:#dbeafe;
+    --amber-600:#d97706; --amber-50:#fffbeb; --amber-100:#fef3c7;
+    --red-600:#dc2626; --red-50:#fef2f2; --red-100:#fee2e2;
+    --slate-50:#f8fafc;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0; height:100%;}
+  body{font-family:'Pretendard','Apple SD Gothic Neo','Segoe UI',sans-serif;}
+
+  /* ===== ERP Shell (top nav + left sidebar) ===== */
+  .shell{display:flex; height:100vh; background:var(--slate-50); overflow:hidden;}
+
+  .sidebar{
+    width:236px; flex-shrink:0; background:#fff; border-right:1px solid var(--ink-200);
+    display:flex; flex-direction:column; padding:14px 14px 18px; overflow-y:auto;
+  }
+  .sidebar-collapse{
+    width:28px; height:28px; border:1px solid var(--ink-200); border-radius:8px; background:#fff;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--ink-500); font-size:12px;
+    margin-bottom:16px; align-self:flex-start;
+  }
+  .sidebar-collapse:hover{background:var(--ink-100);}
+  .profile-card{
+    display:flex; flex-direction:column; align-items:center; text-align:center; padding:6px 8px 18px;
+    border-bottom:1px solid var(--ink-100); margin-bottom:14px;
+  }
+  .profile-avatar{
+    width:64px; height:64px; border-radius:50%; margin-bottom:10px;
+    background:radial-gradient(circle at 35% 30%, #fbcfe8, #f472b6 65%);
+    display:flex; align-items:center; justify-content:center; font-size:26px;
+  }
+  .profile-name{font-size:14.5px; font-weight:800; color:var(--ink-900);}
+  .profile-role{font-size:12px; color:var(--ink-500); margin-top:2px;}
+  .sidebar-fav{
+    font-size:12px; color:var(--ink-500); padding:8px 6px; display:flex; align-items:center; gap:5px;
+  }
+  .sidebar-fav-hint{font-size:11px; color:var(--ink-400); padding:0 6px 14px; line-height:1.5;}
+  .sidebar-section-label{
+    font-size:11px; font-weight:700; color:var(--ink-400); padding:4px 10px; margin-top:6px; letter-spacing:.02em;
+  }
+  .sidebar-menu{list-style:none; margin:0; padding:0;}
+  .sidebar-menu li{
+    display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:9px; font-size:13.5px; font-weight:600;
+    color:var(--ink-700); cursor:pointer; margin-bottom:2px; transition:.12s background,.12s color;
+  }
+  .sidebar-menu li:hover{background:var(--ink-100);}
+  .sidebar-menu li.active{background:var(--indigo-50); color:var(--indigo-600);}
+  .sidebar-menu li .dot{width:5px; height:5px; border-radius:50%; background:var(--ink-300,#cbd5e1); flex-shrink:0;}
+  .sidebar-menu li.active .dot{background:var(--indigo-600);}
+
+  .shell-main{flex:1; display:flex; flex-direction:column; min-width:0; height:100vh;}
+
+  .topnav{
+    height:60px; flex-shrink:0; background:#fff; border-bottom:1px solid var(--ink-200);
+    display:flex; align-items:center; padding:0 22px; gap:26px; justify-content:space-between;
+  }
+  .topnav-left{display:flex; align-items:center; gap:26px; min-width:0;}
+  .company-block{display:flex; align-items:center; gap:9px; flex-shrink:0;}
+  .company-mark{
+    width:34px; height:34px; border-radius:10px; background:var(--ink-900); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:16px;
+  }
+  .company-text{line-height:1.25;}
+  .company-text .name{font-size:13.5px; font-weight:800; color:var(--ink-900);}
+  .company-text .sub{font-size:10px; color:var(--ink-400); font-weight:700; letter-spacing:.03em;}
+  .topnav-tabs{display:flex; align-items:center; gap:4px; overflow-x:auto;}
+  .topnav-tab{
+    display:flex; align-items:center; gap:6px; padding:8px 12px; border-radius:9px; font-size:13.5px; font-weight:600;
+    color:var(--ink-500); cursor:pointer; white-space:nowrap; transition:.12s all; border:1px solid transparent;
+  }
+  .topnav-tab:hover{background:var(--ink-100); color:var(--ink-700);}
+  .topnav-tab.active{background:var(--indigo-50); color:var(--indigo-600);}
+  .topnav-right{display:flex; align-items:center; gap:10px; flex-shrink:0;}
+  .hr-pill{
+    display:flex; align-items:center; gap:6px; border:1px solid var(--ink-200); border-radius:9px; padding:7px 12px;
+    font-size:12.5px; font-weight:600; color:var(--ink-700); cursor:pointer;
+  }
+  .hr-pill:hover{background:var(--ink-100);}
+  .logout-btn{
+    width:32px; height:32px; border-radius:8px; border:1px solid var(--ink-200); background:#fff; color:var(--ink-500);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:14px;
+  }
+  .logout-btn:hover{background:var(--ink-100);}
+  .breadcrumb-bar{
+    padding:18px 32px 0; display:flex; align-items:center; gap:10px; flex-shrink:0;
+  }
+  .breadcrumb-bar h1{font-size:19px; margin:0; letter-spacing:-0.02em; display:flex; align-items:center; gap:8px;}
+  .team-pills{display:flex; gap:6px; margin-left:6px;}
+  .team-pill{
+    border-radius:8px; padding:5px 12px; font-size:12.5px; font-weight:700; cursor:pointer; border:1px solid var(--ink-200); background:#fff; color:var(--ink-500);
+  }
+  .team-pill.active{background:var(--indigo-600); color:#fff; border-color:var(--indigo-600);}
+  .breadcrumb-note{font-size:12px; color:var(--ink-400); margin-left:2px;}
+
+  .content-scroll{flex:1; overflow-y:auto;}
+
+  .app{
+    font-family:'Pretendard','Apple SD Gothic Neo','Segoe UI',sans-serif;
+    background:var(--slate-50);
+    color:var(--ink-900);
+    padding:16px 32px 60px;
+  }
+  .topbar{
+    display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:22px; gap:16px; flex-wrap:wrap;
+  }
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand-mark{
+    width:34px; height:34px; border-radius:10px;
+    background:conic-gradient(from 200deg,var(--indigo-600),var(--teal-500),var(--indigo-600));
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:14px;
+  }
+  .title-block h1{font-size:20px; margin:0 0 4px; letter-spacing:-0.02em;}
+  .title-block .meta{font-size:12.5px; color:var(--ink-500);}
+  .actions{display:flex; gap:8px; align-items:center;}
+  .btn{
+    border:none; border-radius:10px; padding:10px 16px; font-size:13.5px; font-weight:600; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px; transition:.15s transform,.15s box-shadow,.15s background;
+  }
+  .btn:active{transform:scale(.97);}
+  .btn-primary{background:var(--indigo-600); color:#fff; box-shadow:0 6px 16px -6px rgba(79,70,229,.55);}
+  .btn-primary:hover{background:var(--indigo-700);}
+  .btn-ghost{background:#fff; color:var(--ink-700); border:1px solid var(--ink-200);}
+  .btn-ghost:hover{background:var(--ink-100);}
+
+  .stats{
+    display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:12px; margin-bottom:20px;
+  }
+  .stat-card{
+    background:#fff; border:1px solid var(--ink-200); border-radius:var(--radius); padding:16px 16px 14px;
+    cursor:pointer; transition:.15s border-color,.15s box-shadow,.15s transform; position:relative; overflow:hidden;
+  }
+  .stat-card:hover{transform:translateY(-2px); box-shadow:0 10px 24px -14px rgba(15,23,42,.25);}
+  .stat-card.active{border-color:var(--indigo-600); box-shadow:0 0 0 3px var(--indigo-100);}
+  .stat-num{font-size:24px; font-weight:800; letter-spacing:-0.02em; margin-bottom:4px;}
+  .stat-label{font-size:12.5px; color:var(--ink-500); font-weight:600;}
+  .stat-card[data-key="malicious"] .stat-num{color:var(--red-600);}
+
+  .panel{
+    background:#fff; border:1px solid var(--ink-200); border-radius:var(--radius); padding:18px 20px 8px; margin-bottom:16px;
+  }
+  .search-row{display:flex; gap:10px; margin-bottom:14px;}
+  .search-row input{
+    flex:1; border:1px solid var(--ink-200); border-radius:10px; padding:10px 14px; font-size:13.5px; outline:none;
+    transition:.15s border-color, .15s box-shadow;
+  }
+  .search-row input:focus{border-color:var(--indigo-600); box-shadow:0 0 0 3px var(--indigo-100);}
+
+  .filter-row{display:flex; gap:12px; align-items:center; padding:9px 0; border-top:1px solid var(--ink-100); flex-wrap:wrap;}
+  .filter-row:first-of-type{border-top:none;}
+  .filter-label{width:70px; flex-shrink:0; font-size:12.5px; font-weight:700; color:var(--ink-500);}
+  .chip-group{display:flex; gap:6px; flex-wrap:wrap;}
+  .chip{
+    border:1px solid var(--ink-200); background:#fff; color:var(--ink-700); border-radius:8px;
+    padding:6px 12px; font-size:12.5px; font-weight:600; cursor:pointer; transition:.12s all; white-space:nowrap;
+  }
+  .chip:hover{background:var(--ink-100);}
+  .chip.active{background:var(--indigo-600); border-color:var(--indigo-600); color:#fff;}
+
+  .count-row{display:flex; gap:14px; font-size:12.5px; color:var(--ink-500); font-weight:600; margin:14px 0 10px;}
+  .count-row b{color:var(--ink-900);}
+
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  thead th{
+    text-align:left; font-size:12px; color:var(--ink-500); font-weight:700; padding:10px 10px; border-bottom:1px solid var(--ink-200);
+    position:sticky; top:0; background:#fff;
+  }
+  tbody td{padding:11px 10px; border-bottom:1px solid var(--ink-100); vertical-align:middle;}
+  tbody tr:hover{background:var(--indigo-50);}
+  .spec-tags{display:flex; gap:5px; flex-wrap:wrap; align-items:center;}
+  .tag{border-radius:6px; padding:3px 8px; font-size:11px; font-weight:700; white-space:nowrap;}
+  .tag-spec-desc{background:#f5f3ff; color:#7c3aed;}
+  .tag-spec-office{background:var(--blue-50); color:var(--blue-600);}
+  .tag-spec-low{background:var(--amber-50); color:var(--amber-600);}
+  .tag-spec-check{background:#f0fdfa; color:#0d9488;}
+  .tag-screen{background:var(--ink-100); color:var(--ink-700);}
+  .tag-new{background:var(--green-50); color:var(--green-600);}
+  .asset-id{color:var(--indigo-600); font-weight:700; cursor:pointer;}
+  .badge{border-radius:7px; padding:4px 10px; font-size:11.5px; font-weight:700; display:inline-block;}
+  .badge-임대중{background:var(--blue-100); color:var(--blue-600);}
+  .badge-상품화완료{background:var(--green-100); color:var(--green-600);}
+  .badge-상품화준비중{background:var(--amber-100); color:var(--amber-600);}
+  .badge-기타{background:var(--ink-200); color:var(--ink-700);}
+  .badge-악성{background:var(--red-100); color:var(--red-600); margin-left:4px;}
+  .row-actions{display:flex; gap:6px;}
+  .icon-btn{
+    border:1px solid var(--ink-200); background:#fff; border-radius:7px; width:28px; height:28px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--ink-500); transition:.12s;
+  }
+  .icon-btn:hover{background:var(--ink-100); color:var(--ink-900);}
+  .icon-btn.danger:hover{background:var(--red-50); color:var(--red-600); border-color:var(--red-100);}
+  .empty-state{text-align:center; padding:50px 0; color:var(--ink-500); font-size:13.5px;}
+  .empty-state div:first-child{font-size:30px; margin-bottom:8px;}
+
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center;
+    z-index:50; opacity:0; pointer-events:none; transition:.18s opacity;
+  }
+  .modal-overlay.open{opacity:1; pointer-events:auto;}
+  .modal{
+    background:#fff; border-radius:16px; width:520px; max-width:92vw; max-height:88vh; overflow:auto;
+    padding:24px 26px 20px; transform:translateY(8px) scale(.98); transition:.18s transform;
+    box-shadow:0 30px 60px -20px rgba(15,23,42,.4);
+  }
+  .modal-overlay.open .modal{transform:translateY(0) scale(1);}
+  .modal h2{margin:0 0 4px; font-size:17px;}
+  .modal .sub{font-size:12.5px; color:var(--ink-500); margin-bottom:18px;}
+  .form-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px 12px;}
+  .form-field{display:flex; flex-direction:column; gap:5px;}
+  .form-field.full{grid-column:1/-1;}
+  .form-field label{font-size:12px; font-weight:700; color:var(--ink-700);}
+  .form-field input, .form-field select{
+    border:1px solid var(--ink-200); border-radius:9px; padding:9px 10px; font-size:13px; outline:none; font-family:inherit;
+    transition:.15s border-color, .15s box-shadow; background:#fff;
+  }
+  .form-field input:focus, .form-field select:focus{border-color:var(--indigo-600); box-shadow:0 0 0 3px var(--indigo-100);}
+  .toggle-row{display:flex; gap:16px; align-items:center;}
+  .toggle{display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; color:var(--ink-700); cursor:pointer;}
+  .toggle input{width:15px; height:15px; accent-color:var(--indigo-600); cursor:pointer;}
+  .modal-footer{display:flex; justify-content:flex-end; gap:8px; margin-top:20px; padding-top:14px; border-top:1px solid var(--ink-100);}
+  .required{color:var(--red-600);}
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--ink-900); color:#fff;
+    padding:11px 20px; border-radius:10px; font-size:13px; font-weight:600; opacity:0; pointer-events:none; transition:.2s all; z-index:60;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .loading-note{font-size:12px; color:var(--ink-400); margin-bottom:10px;}
+
+  @media (max-width:1100px){
+    .stats{grid-template-columns:repeat(4,minmax(0,1fr));}
+  }
+  @media (max-width:680px){
+    .app{padding:18px 14px 40px;}
+    .stats{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .filter-row{align-items:flex-start;}
+    .filter-label{width:100%;}
+    table{font-size:12px;}
+    .form-grid{grid-template-columns:1fr;}
+  }
+</style>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="sidebar-collapse" title="접기">⟨⟨</div>
+    <div class="profile-card">
+      <div class="profile-avatar">🐰</div>
+      <div class="profile-name">손영근</div>
+      <div class="profile-role">IT · 파트장</div>
+    </div>
+    <div class="sidebar-fav">⭐ 즐겨찾기</div>
+    <div class="sidebar-fav-hint">메뉴 옆 ☆ 아이콘으로<br/>자주 쓰는 메뉴를 추가하세요</div>
+    <div class="sidebar-section-label">재고관리</div>
+    <ul class="sidebar-menu">
+      <li><span class="dot"></span>현황표</li>
+      <li class="active"><span class="dot"></span>IT 재고 리스트</li>
+      <li><span class="dot"></span>재고입력</li>
+      <li><span class="dot"></span>자산 이력</li>
+      <li><span class="dot"></span>소모품 가격표</li>
+    </ul>
+  </aside>
+
+  <div class="shell-main">
+    <header class="topnav">
+      <div class="topnav-left">
+        <div class="company-block">
+          <div class="company-mark">🐰</div>
+          <div class="company-text">
+            <div class="name">(주)퍼스트전산</div>
+            <div class="sub">FIRSTOA ERP</div>
+          </div>
+        </div>
+        <nav class="topnav-tabs">
+          <div class="topnav-tab">통합 캘린더</div>
+          <div class="topnav-tab">영업관리</div>
+          <div class="topnav-tab">출고·현황</div>
+          <div class="topnav-tab">고객서비스</div>
+          <div class="topnav-tab">임대·청구</div>
+          <div class="topnav-tab active">재고관리</div>
+          <div class="topnav-tab">관리</div>
+        </nav>
+      </div>
+      <div class="topnav-right">
+        <div class="hr-pill">👥 인사관리시스템 ↗</div>
+        <div class="logout-btn" title="로그아웃">⏻</div>
+      </div>
+    </header>
+
+    <div class="breadcrumb-bar">
+      <h1>🖥️ IT 재고 리스트</h1>
+      <div class="team-pills">
+        <div class="team-pill active">IT팀</div>
+        <div class="team-pill">운영지원팀</div>
+      </div>
+      <div class="breadcrumb-note">영업 → 재고관리로 전달된 건만. 본인 팀 큐.</div>
+    </div>
+
+    <div class="content-scroll">
+    <div class="app">
+      <div class="topbar" style="margin-bottom:14px;">
+        <div class="meta" id="lastUpdated" style="font-size:12.5px;color:var(--ink-500);">마지막 업데이트: 불러오는 중…</div>
+        <div class="actions">
+          <button class="btn btn-ghost" id="resetBtn">샘플 데이터로 초기화</button>
+          <button class="btn btn-primary" id="openAddBtn">＋ 재고입력</button>
+        </div>
+      </div>
+
+      <div class="stats" id="statsRow"></div>
+
+  <div class="panel">
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="자산번호 / 모델명 / 시리얼 검색" />
+    </div>
+
+    <div class="filter-row">
+      <div class="filter-label">상태</div>
+      <div class="chip-group" data-filter="status"></div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-label">품목</div>
+      <div class="chip-group" data-filter="category"></div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-label">사양</div>
+      <div class="chip-group" data-filter="spec"></div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-label">브랜드</div>
+      <div class="chip-group" data-filter="brand"></div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-label">새기기</div>
+      <div class="chip-group" data-filter="newDevice"></div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-label">CPU종류</div>
+      <div class="chip-group" data-filter="cpu"></div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-label">화면크기</div>
+      <div class="chip-group" data-filter="screenGroup"></div>
+    </div>
+  </div>
+
+  <div class="count-row" id="cpuCountRow"></div>
+
+  <div class="panel" style="padding-top:6px;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:30%">사양</th>
+          <th>자산번호</th>
+          <th>브랜드</th>
+          <th>모델명</th>
+          <th>위치</th>
+          <th>상태</th>
+          <th>이력</th>
+          <th style="width:70px;"></th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <div>🗄️</div>
+      <div>조건에 맞는 자산이 없어요. 필터를 조정하거나 새 자산을 등록해 보세요.</div>
+    </div>
+  </div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2 id="modalTitle">재고입력</h2>
+    <div class="sub">신규 자산을 등록하면 목록과 통계에 바로 반영돼요.</div>
+    <div class="form-grid">
+      <div class="form-field">
+        <label>자산번호 <span class="required">*</span></label>
+        <input id="f_assetId" placeholder="예: P2400" />
+      </div>
+      <div class="form-field">
+        <label>품목 <span class="required">*</span></label>
+        <select id="f_category">
+          <option value="노트북">노트북</option>
+          <option value="데스크탑">데스크탑</option>
+          <option value="모니터">모니터</option>
+          <option value="기타주변기기">기타주변기기</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>브랜드 <span class="required">*</span></label>
+        <select id="f_brand">
+          <option value="삼성">삼성</option>
+          <option value="레노버">레노버</option>
+          <option value="APPLE">APPLE</option>
+          <option value="HP">HP</option>
+          <option value="LG">LG</option>
+          <option value="MSI">MSI</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>모델명 <span class="required">*</span></label>
+        <input id="f_model" placeholder="예: EliteBook 840 G7" />
+      </div>
+      <div class="form-field">
+        <label>CPU종류</label>
+        <select id="f_cpu">
+          <option value="I5">I5</option>
+          <option value="I7">I7</option>
+          <option value="U5">U5</option>
+          <option value="U7">U7</option>
+          <option value="M2">M2</option>
+          <option value="M3">M3</option>
+          <option value="미상">미상</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>사양분류</label>
+        <select id="f_spec">
+          <option value="사무용">사무용</option>
+          <option value="설계용">설계용</option>
+          <option value="저사양">저사양</option>
+          <option value="확인필요">확인필요</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>RAM(GB)</label>
+        <input id="f_ram" placeholder="예: 16" />
+      </div>
+      <div class="form-field">
+        <label>저장용량(GB)</label>
+        <input id="f_storage" placeholder="예: 256" />
+      </div>
+      <div class="form-field">
+        <label>화면크기</label>
+        <input id="f_screen" placeholder="예: 15.6인치" />
+      </div>
+      <div class="form-field">
+        <label>위치</label>
+        <input id="f_location" placeholder="예: J1" />
+      </div>
+      <div class="form-field">
+        <label>상태 <span class="required">*</span></label>
+        <select id="f_status">
+          <option value="상품화준비중">상품화준비중</option>
+          <option value="상품화완료">상품화완료</option>
+          <option value="임대중">임대중</option>
+          <option value="기타">기타</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label>이력(건)</label>
+        <input id="f_history" placeholder="예: 1건 (없으면 비워두세요)" />
+      </div>
+      <div class="form-field full toggle-row">
+        <label class="toggle"><input type="checkbox" id="f_new" /> 새기기</label>
+        <label class="toggle"><input type="checkbox" id="f_malicious" /> 악성(불량)</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="cancelBtn">취소</button>
+      <button class="btn btn-primary" id="saveBtn">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  const STORAGE_KEY = 'it-inventory-items-v1';
+
+  const seedData = [
+    {assetId:'P2300', category:'노트북', brand:'삼성', model:'NT900X5J-K58M', cpu:'I5', ram:'07', storage:'8/256', spec:'저사양', screen:'15.6인치', location:'J2', status:'상품화완료', history:'2건', isNew:false, malicious:true},
+    {assetId:'P1660', category:'노트북', brand:'HP', model:'EliteBook 840 G7', cpu:'I5', ram:'10', storage:'8/256', spec:'사무용', screen:'14인치', location:'J1', status:'상품화완료', history:'2건', isNew:false, malicious:false},
+    {assetId:'P1024', category:'노트북', brand:'HP', model:'EliteBook 840 G7', cpu:'I5', ram:'10', storage:'8/256', spec:'사무용', screen:'14인치', location:'J1', status:'상품화완료', history:'4건', isNew:false, malicious:true},
+    {assetId:'P1911', category:'노트북', brand:'HP', model:'PROBOOK 440 G7', cpu:'I5', ram:'10', storage:'8/256', spec:'사무용', screen:'14인치', location:'J1', status:'상품화완료', history:'2건', isNew:false, malicious:true},
+    {assetId:'X5006', category:'노트북', brand:'레노버', model:'IdeaPad3 15ITL3', cpu:'I5', ram:'11', storage:'8/256', spec:'사무용', screen:'15.6인치', location:'J2', status:'상품화완료', history:'', isNew:false, malicious:false},
+    {assetId:'X7368', category:'노트북', brand:'레노버', model:'THINKPAD L15 GEN 2', cpu:'I5', ram:'11', storage:'8/512', spec:'사무용', screen:'15.6인치', location:'J2', status:'상품화완료', history:'1건', isNew:false, malicious:false},
+    {assetId:'X5037', category:'노트북', brand:'LG', model:'15ZD90Q-GX30K', cpu:'I5', ram:'13', storage:'16/256', spec:'사무용', screen:'15.6인치', location:'J3', status:'상품화완료', history:'', isNew:false, malicious:false},
+    {assetId:'P2028', category:'노트북', brand:'삼성', model:'NT901X5T-K03/C', cpu:'I7', ram:'08', storage:'16/256', spec:'저사양', screen:'15.6인치', location:'J4', status:'상품화완료', history:'1건', isNew:false, malicious:true},
+    {assetId:'X7706', category:'노트북', brand:'MSI', model:'GF63 Thin 10SCSR', cpu:'I7', ram:'10', storage:'16/256', spec:'설계용', screen:'15.6인치', location:'J2', status:'상품화완료', history:'', isNew:false, malicious:false},
+    {assetId:'A5422', category:'노트북', brand:'레노버', model:'IdeaPad3 15ITL6', cpu:'I7', ram:'11', storage:'16/256', spec:'사무용', screen:'15.6인치', location:'J2', status:'상품화완료', history:'', isNew:false, malicious:false},
+    {assetId:'P1902', category:'노트북', brand:'HP', model:'ZBook Power G8', cpu:'I7', ram:'11', storage:'16/1024', spec:'설계용', screen:'15.6인치', location:'J2', status:'상품화완료', history:'1건', isNew:false, malicious:false},
+    {assetId:'X8849', category:'노트북', brand:'삼성', model:'NT750XFT-A51A', cpu:'I7', ram:'13', storage:'16/512', spec:'사무용', screen:'15.6인치', location:'J4', status:'상품화완료', history:'2건', isNew:false, malicious:false},
+    {assetId:'P1909', category:'노트북', brand:'APPLE', model:'A2338', cpu:'M2', ram:'08', storage:'16/512', spec:'확인필요', screen:'13.3인치', location:'J3', status:'상품화완료', history:'1건', isNew:false, malicious:false},
+    {assetId:'P0156', category:'노트북', brand:'APPLE', model:'MacBook Pro 16 (M3)', cpu:'M3', ram:'12', storage:'18/512', spec:'확인필요', screen:'16인치', location:'J3', status:'상품화완료', history:'1건', isNew:false, malicious:true},
+    {assetId:'P2189', category:'노트북', brand:'LG', model:'15Z90S-GP56ML', cpu:'U5', ram:'125', storage:'16/256', spec:'사무용', screen:'15.6인치', location:'C1', status:'상품화완료', history:'1건', isNew:true, malicious:false},
+    {assetId:'P2274', category:'노트북', brand:'삼성', model:'NT751XHD-KR515', cpu:'U5', ram:'225', storage:'16/512', spec:'사무용', screen:'15.6인치', location:'C2', status:'상품화완료', history:'1건', isNew:true, malicious:false},
+    {assetId:'X8678', category:'노트북', brand:'LG', model:'15ZD90T-GX56K', cpu:'U5', ram:'225', storage:'16/1024', spec:'사무용', screen:'15.6인치', location:'J3', status:'상품화완료', history:'3건', isNew:false, malicious:false},
+    {assetId:'P3041', category:'노트북', brand:'삼성', model:'NT751XHD-KR735', cpu:'U7', ram:'255', storage:'32/512', spec:'사무용', screen:'15.6인치', location:'C2', status:'상품화완료', history:'1건', isNew:true, malicious:false},
+    {assetId:'D2201', category:'데스크탑', brand:'삼성', model:'DM500S8L', cpu:'I5', ram:'8', storage:'256', spec:'사무용', screen:'-', location:'B1', status:'상품화준비중', history:'', isNew:false, malicious:false},
+    {assetId:'M1042', category:'모니터', brand:'LG', model:'27UL500', cpu:'미상', ram:'-', storage:'-', spec:'사무용', screen:'27인치', location:'B2', status:'임대중', history:'', isNew:false, malicious:false},
+    {assetId:'E3391', category:'기타주변기기', brand:'HP', model:'무선마우스 M240', cpu:'미상', ram:'-', storage:'-', spec:'사무용', screen:'-', location:'창고', status:'기타', history:'', isNew:false, malicious:false},
+  ];
+
+  const specTagClass = {
+    '사무용':'tag-spec-office', '설계용':'tag-spec-desc', '저사양':'tag-spec-low', '확인필요':'tag-spec-check'
+  };
+
+  let items = [];
+  let filters = { status:null, category:null, spec:null, brand:null, newDevice:null, cpu:null, screenGroup:null };
+  let searchTerm = '';
+  let editingId = null;
+
+  const el = (sel) => document.querySelector(sel);
+  const toast = (msg) => {
+    const t = el('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'), 1800);
+  };
+
+  async function loadItems(){
+    try{
+      const res = await window.storage.get(STORAGE_KEY, false);
+      if(res && res.value){
+        items = JSON.parse(res.value);
+      } else {
+        items = JSON.parse(JSON.stringify(seedData));
+        await window.storage.set(STORAGE_KEY, JSON.stringify(items), false);
+      }
+    } catch(e){
+      items = JSON.parse(JSON.stringify(seedData));
+    }
+    render();
+  }
+
+  async function saveItems(){
+    try{
+      await window.storage.set(STORAGE_KEY, JSON.stringify(items), false);
+    } catch(e){
+      console.error('저장 실패', e);
+    }
+  }
+
+  function screenGroupOf(screen){
+    if(!screen || screen === '-') return '기타';
+    const num = parseFloat(screen);
+    if(isNaN(num)) return '기타';
+    return num >= 15 ? '15인치 이상' : '15인치 미만';
+  }
+
+  function filteredItems(){
+    return items.filter(it=>{
+      if(filters.status && it.status !== filters.status) return false;
+      if(filters.category && it.category !== filters.category) return false;
+      if(filters.spec && it.spec !== filters.spec) return false;
+      if(filters.brand && it.brand !== filters.brand) return false;
+      if(filters.newDevice === 'new' && !it.isNew) return false;
+      if(filters.cpu && it.cpu !== filters.cpu) return false;
+      if(filters.screenGroup && screenGroupOf(it.screen) !== filters.screenGroup) return false;
+      if(searchTerm){
+        const hay = (it.assetId+' '+it.model+' '+it.brand).toLowerCase();
+        if(!hay.includes(searchTerm.toLowerCase())) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderStats(){
+    const total = items.length;
+    const counts = {
+      임대중: items.filter(i=>i.status==='임대중').length,
+      상품화완료: items.filter(i=>i.status==='상품화완료').length,
+      상품화준비중: items.filter(i=>i.status==='상품화준비중').length,
+      기타: items.filter(i=>i.status==='기타').length,
+      악성: items.filter(i=>i.malicious).length,
+    };
+    const consumable = 18; // 소모품가격표 - static demo figure, not filterable
+
+    const cards = [
+      {key:'all', label:'전체', num: total, filterVal:null},
+      {key:'임대중', label:'임대중', num: counts.임대중, filterVal:'임대중'},
+      {key:'상품화완료', label:'상품화완료', num: counts.상품화완료, filterVal:'상품화완료'},
+      {key:'상품화준비중', label:'상품화준비중', num: counts.상품화준비중, filterVal:'상품화준비중'},
+      {key:'기타', label:'기타', num: counts.기타, filterVal:'기타'},
+      {key:'malicious', label:'악성', num: counts.악성, filterVal:'__malicious__'},
+      {key:'consumable', label:'소모품가격표', num: consumable, filterVal:'__none__'},
+    ];
+
+    el('#statsRow').innerHTML = cards.map(c=>{
+      const isActive = c.filterVal === '__none__' ? false :
+        (c.filterVal === '__malicious__' ? filters.status === '__malicious__' : (filters.status === c.filterVal || (c.filterVal===null && filters.status===null)));
+      return `<div class="stat-card ${isActive?'active':''}" data-key="${c.key}" data-filterval="${c.filterVal===null?'':c.filterVal}">
+        <div class="stat-num">${c.num}</div>
+        <div class="stat-label">${c.label}</div>
+      </div>`;
+    }).join('');
+
+    el('#statsRow').querySelectorAll('.stat-card').forEach(card=>{
+      card.addEventListener('click', ()=>{
+        const val = card.getAttribute('data-filterval');
+        if(val === '__none__') { toast('소모품가격표는 별도 화면에서 관리돼요.'); return; }
+        if(val === '__malicious__'){
+          filters.status = filters.status === '__malicious__' ? null : '__malicious__';
+        } else {
+          filters.status = filters.status === val ? null : (val || null);
+        }
+        render();
+      });
+    });
+  }
+
+  function buildChipGroup(name, options, selectedValue){
+    const wrap = document.querySelector(`.chip-group[data-filter="${name}"]`);
+    wrap.innerHTML = `<button class="chip ${!selectedValue?'active':''}" data-val="">전체</button>` +
+      options.map(o=>`<button class="chip ${selectedValue===o?'active':''}" data-val="${o}">${o}</button>`).join('');
+    wrap.querySelectorAll('.chip').forEach(chip=>{
+      chip.addEventListener('click', ()=>{
+        const v = chip.getAttribute('data-val');
+        filters[name] = v === '' ? null : v;
+        render();
+      });
+    });
+  }
+
+  function renderFilters(){
+    const uniq = (arr) => [...new Set(arr)];
+    buildChipGroup('status', ['임대중','상품화완료','상품화준비중','기타'], filters.status && filters.status !== '__malicious__' ? filters.status : null);
+    buildChipGroup('category', uniq(items.map(i=>i.category)), filters.category);
+    buildChipGroup('spec', ['설계용','사무용','저사양','확인필요'], filters.spec);
+    buildChipGroup('brand', uniq(items.map(i=>i.brand)), filters.brand);
+    buildChipGroup('newDevice', ['새기기만'], filters.newDevice==='new' ? '새기기만' : null);
+    // custom handler for newDevice since value differs from label
+    document.querySelector('.chip-group[data-filter="newDevice"]').querySelectorAll('.chip').forEach(chip=>{
+      chip.onclick = ()=>{
+        const v = chip.getAttribute('data-val');
+        filters.newDevice = v === '' ? null : 'new';
+        render();
+      };
+    });
+    buildChipGroup('cpu', ['I7','I5','U7','U5','M2','M3','미상'], filters.cpu);
+    buildChipGroup('screenGroup', ['15인치 이상','15인치 미만'], filters.screenGroup);
+  }
+
+  function renderCpuCountRow(){
+    const list = filteredItems().length === items.length ? items : items; // counts always reflect full category context, like screenshot
+    const laptopItems = items.filter(i=>i.category==='노트북');
+    const cpuCounts = {};
+    laptopItems.forEach(i=>{ cpuCounts[i.cpu] = (cpuCounts[i.cpu]||0)+1; });
+    const order = ['I7','I5','U7','U5','미상'];
+    const parts = order.filter(c=>cpuCounts[c]).map(c=>`${c} <b>${cpuCounts[c]}대</b>`);
+    el('#cpuCountRow').innerHTML = `<span>노트북</span>` + parts.map(p=>`<span>${p}</span>`).join('');
+  }
+
+  function specTagsHtml(it){
+    let tags = '';
+    const specClass = specTagClass[it.spec] || 'tag-spec-office';
+    if(it.spec) tags += `<span class="tag ${specClass}">${it.spec}</span>`;
+    if(it.screen && it.screen !== '-') tags += `<span class="tag tag-screen">${it.screen}</span>`;
+    if(it.isNew) tags += `<span class="tag tag-new">새기기</span>`;
+    return `<div class="spec-tags">${tags}</div>
+      <div style="font-size:11px;color:var(--ink-400);margin-top:4px;">${it.cpu||''}${it.ram?('/'+it.ram):''}${it.storage?('/'+it.storage):''}</div>`;
+  }
+
+  function renderTable(){
+    const list = filteredItems();
+    const tbody = el('#tableBody');
+    el('#emptyState').style.display = list.length ? 'none' : 'block';
+    tbody.innerHTML = list.map(it=>`
+      <tr data-id="${it.assetId}">
+        <td>${specTagsHtml(it)}</td>
+        <td><span class="asset-id">${it.assetId}</span></td>
+        <td>${it.brand}</td>
+        <td>${it.model}</td>
+        <td>${it.location||'-'}</td>
+        <td>
+          <span class="badge badge-${it.status}">${it.status}</span>
+          ${it.malicious ? '<span class="badge badge-악성">악성</span>' : ''}
+        </td>
+        <td>${it.history || '-'}</td>
+        <td>
+          <div class="row-actions">
+            <button class="icon-btn edit-btn" title="수정">✎</button>
+            <button class="icon-btn danger del-btn" title="삭제">🗑</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('tr').forEach(row=>{
+      const id = row.getAttribute('data-id');
+      row.querySelector('.edit-btn').addEventListener('click', ()=>openModal(id));
+      row.querySelector('.del-btn').addEventListener('click', ()=>deleteItem(id));
+    });
+  }
+
+  function render(){
+    renderStats();
+    renderFilters();
+    renderCpuCountRow();
+    renderTable();
+    // fix filter chip active state for malicious quick-filter interplay
+  }
+
+  function deleteItem(id){
+    if(!confirm(`자산번호 ${id}를 삭제할까요?`)) return;
+    items = items.filter(i=>i.assetId!==id);
+    saveItems();
+    render();
+    toast('삭제했어요.');
+  }
+
+  function openModal(id){
+    editingId = id || null;
+    el('#modalTitle').textContent = id ? '자산 수정' : '재고입력';
+    const it = id ? items.find(i=>i.assetId===id) : null;
+    el('#f_assetId').value = it ? it.assetId : '';
+    el('#f_assetId').disabled = !!it;
+    el('#f_category').value = it ? it.category : '노트북';
+    el('#f_brand').value = it ? it.brand : '삼성';
+    el('#f_model').value = it ? it.model : '';
+    el('#f_cpu').value = it ? it.cpu : 'I5';
+    el('#f_spec').value = it ? it.spec : '사무용';
+    el('#f_ram').value = it ? it.ram : '';
+    el('#f_storage').value = it ? it.storage : '';
+    el('#f_screen').value = it ? it.screen : '';
+    el('#f_location').value = it ? it.location : '';
+    el('#f_status').value = it ? it.status : '상품화준비중';
+    el('#f_history').value = it ? it.history : '';
+    el('#f_new').checked = it ? !!it.isNew : false;
+    el('#f_malicious').checked = it ? !!it.malicious : false;
+    el('#modalOverlay').classList.add('open');
+  }
+
+  function closeModal(){
+    el('#modalOverlay').classList.remove('open');
+    editingId = null;
+  }
+
+  function handleSave(){
+    const assetId = el('#f_assetId').value.trim();
+    const model = el('#f_model').value.trim();
+    if(!assetId || !model){
+      toast('자산번호와 모델명은 필수예요.');
+      return;
+    }
+    if(!editingId && items.some(i=>i.assetId===assetId)){
+      toast('이미 존재하는 자산번호예요.');
+      return;
+    }
+    const data = {
+      assetId,
+      category: el('#f_category').value,
+      brand: el('#f_brand').value,
+      model,
+      cpu: el('#f_cpu').value,
+      spec: el('#f_spec').value,
+      ram: el('#f_ram').value.trim(),
+      storage: el('#f_storage').value.trim(),
+      screen: el('#f_screen').value.trim() || '-',
+      location: el('#f_location').value.trim(),
+      status: el('#f_status').value,
+      history: el('#f_history').value.trim(),
+      isNew: el('#f_new').checked,
+      malicious: el('#f_malicious').checked,
+    };
+    if(editingId){
+      const idx = items.findIndex(i=>i.assetId===editingId);
+      items[idx] = data;
+      toast('수정했어요.');
+    } else {
+      items.unshift(data);
+      toast('등록했어요.');
+    }
+    saveItems();
+    closeModal();
+    render();
+  }
+
+  // status card malicious filter override in filteredItems (translate special value)
+  const origFiltered = filteredItems;
+  filteredItems = function(){
+    return items.filter(it=>{
+      if(filters.status === '__malicious__'){
+        if(!it.malicious) return false;
+      } else if(filters.status && it.status !== filters.status) return false;
+      if(filters.category && it.category !== filters.category) return false;
+      if(filters.spec && it.spec !== filters.spec) return false;
+      if(filters.brand && it.brand !== filters.brand) return false;
+      if(filters.newDevice === 'new' && !it.isNew) return false;
+      if(filters.cpu && it.cpu !== filters.cpu) return false;
+      if(filters.screenGroup && screenGroupOf(it.screen) !== filters.screenGroup) return false;
+      if(searchTerm){
+        const hay = (it.assetId+' '+it.model+' '+it.brand).toLowerCase();
+        if(!hay.includes(searchTerm.toLowerCase())) return false;
+      }
+      return true;
+    });
+  };
+
+  el('#openAddBtn').addEventListener('click', ()=>openModal(null));
+  el('#cancelBtn').addEventListener('click', closeModal);
+  el('#modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+  el('#saveBtn').addEventListener('click', handleSave);
+  el('#searchInput').addEventListener('input', (e)=>{ searchTerm = e.target.value; render(); });
+  el('#resetBtn').addEventListener('click', async ()=>{
+    if(!confirm('샘플 데이터로 초기화할까요? 현재 입력한 내용은 사라져요.')) return;
+    items = JSON.parse(JSON.stringify(seedData));
+    filters = { status:null, category:null, spec:null, brand:null, newDevice:null, cpu:null, screenGroup:null };
+    searchTerm = '';
+    el('#searchInput').value = '';
+    await saveItems();
+    render();
+    toast('초기화했어요.');
+  });
+
+  function setLastUpdated(){
+    const now = new Date();
+    const fmt = new Intl.DateTimeFormat('ko-KR', {year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}).format(now);
+    el('#lastUpdated').textContent = `마지막 업데이트: ${fmt} · 총 ${items.length}건`;
+  }
+
+  loadItems().then(()=>{ setLastUpdated(); });
+  setInterval(setLastUpdated, 30000);
+})();
+</script>

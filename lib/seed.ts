@@ -1,0 +1,26 @@
+import type { Asset } from './types';
+
+/** '샘플 데이터로 초기화' 버튼과 supabase/seed.sql 이 공유하는 기준 데이터 */
+export const seedData: Asset[] = [
+  { assetId: 'P2300', category: '노트북', brand: '삼성', model: 'NT900X5J-K58M', cpu: 'I5', ram: '07', storage: '8/256', spec: '저사양', screen: '15.6인치', location: 'J2', status: '상품화완료', history: '2건', isNew: false, malicious: true },
+  { assetId: 'P1660', category: '노트북', brand: 'HP', model: 'EliteBook 840 G7', cpu: 'I5', ram: '10', storage: '8/256', spec: '사무용', screen: '14인치', location: 'J1', status: '상품화완료', history: '2건', isNew: false, malicious: false },
+  { assetId: 'P1024', category: '노트북', brand: 'HP', model: 'EliteBook 840 G7', cpu: 'I5', ram: '10', storage: '8/256', spec: '사무용', screen: '14인치', location: 'J1', status: '상품화완료', history: '4건', isNew: false, malicious: true },
+  { assetId: 'P1911', category: '노트북', brand: 'HP', model: 'PROBOOK 440 G7', cpu: 'I5', ram: '10', storage: '8/256', spec: '사무용', screen: '14인치', location: 'J1', status: '상품화완료', history: '2건', isNew: false, malicious: true },
+  { assetId: 'X5006', category: '노트북', brand: '레노버', model: 'IdeaPad3 15ITL3', cpu: 'I5', ram: '11', storage: '8/256', spec: '사무용', screen: '15.6인치', location: 'J2', status: '상품화완료', history: '', isNew: false, malicious: false },
+  { assetId: 'X7368', category: '노트북', brand: '레노버', model: 'THINKPAD L15 GEN 2', cpu: 'I5', ram: '11', storage: '8/512', spec: '사무용', screen: '15.6인치', location: 'J2', status: '상품화완료', history: '1건', isNew: false, malicious: false },
+  { assetId: 'X5037', category: '노트북', brand: 'LG', model: '15ZD90Q-GX30K', cpu: 'I5', ram: '13', storage: '16/256', spec: '사무용', screen: '15.6인치', location: 'J3', status: '상품화완료', history: '', isNew: false, malicious: false },
+  { assetId: 'P2028', category: '노트북', brand: '삼성', model: 'NT901X5T-K03/C', cpu: 'I7', ram: '08', storage: '16/256', spec: '저사양', screen: '15.6인치', location: 'J4', status: '상품화완료', history: '1건', isNew: false, malicious: true },
+  { assetId: 'X7706', category: '노트북', brand: 'MSI', model: 'GF63 Thin 10SCSR', cpu: 'I7', ram: '10', storage: '16/256', spec: '설계용', screen: '15.6인치', location: 'J2', status: '상품화완료', history: '', isNew: false, malicious: false },
+  { assetId: 'A5422', category: '노트북', brand: '레노버', model: 'IdeaPad3 15ITL6', cpu: 'I7', ram: '11', storage: '16/256', spec: '사무용', screen: '15.6인치', location: 'J2', status: '상품화완료', history: '', isNew: false, malicious: false },
+  { assetId: 'P1902', category: '노트북', brand: 'HP', model: 'ZBook Power G8', cpu: 'I7', ram: '11', storage: '16/1024', spec: '설계용', screen: '15.6인치', location: 'J2', status: '상품화완료', history: '1건', isNew: false, malicious: false },
+  { assetId: 'X8849', category: '노트북', brand: '삼성', model: 'NT750XFT-A51A', cpu: 'I7', ram: '13', storage: '16/512', spec: '사무용', screen: '15.6인치', location: 'J4', status: '상품화완료', history: '2건', isNew: false, malicious: false },
+  { assetId: 'P1909', category: '노트북', brand: 'APPLE', model: 'A2338', cpu: 'M2', ram: '08', storage: '16/512', spec: '확인필요', screen: '13.3인치', location: 'J3', status: '상품화완료', history: '1건', isNew: false, malicious: false },
+  { assetId: 'P0156', category: '노트북', brand: 'APPLE', model: 'MacBook Pro 16 (M3)', cpu: 'M3', ram: '12', storage: '18/512', spec: '확인필요', screen: '16인치', location: 'J3', status: '상품화완료', history: '1건', isNew: false, malicious: true },
+  { assetId: 'P2189', category: '노트북', brand: 'LG', model: '15Z90S-GP56ML', cpu: 'U5', ram: '125', storage: '16/256', spec: '사무용', screen: '15.6인치', location: 'C1', status: '상품화완료', history: '1건', isNew: true, malicious: false },
+  { assetId: 'P2274', category: '노트북', brand: '삼성', model: 'NT751XHD-KR515', cpu: 'U5', ram: '225', storage: '16/512', spec: '사무용', screen: '15.6인치', location: 'C2', status: '상품화완료', history: '1건', isNew: true, malicious: false },
+  { assetId: 'X8678', category: '노트북', brand: 'LG', model: '15ZD90T-GX56K', cpu: 'U5', ram: '225', storage: '16/1024', spec: '사무용', screen: '15.6인치', location: 'J3', status: '상품화완료', history: '3건', isNew: false, malicious: false },
+  { assetId: 'P3041', category: '노트북', brand: '삼성', model: 'NT751XHD-KR735', cpu: 'U7', ram: '255', storage: '32/512', spec: '사무용', screen: '15.6인치', location: 'C2', status: '상품화완료', history: '1건', isNew: true, malicious: false },
+  { assetId: 'D2201', category: '데스크탑', brand: '삼성', model: 'DM500S8L', cpu: 'I5', ram: '8', storage: '256', spec: '사무용', screen: '-', location: 'B1', status: '상품화준비중', history: '', isNew: false, malicious: false },
+  { assetId: 'M1042', category: '모니터', brand: 'LG', model: '27UL500', cpu: '미상', ram: '-', storage: '-', spec: '사무용', screen: '27인치', location: 'B2', status: '임대중', history: '', isNew: false, malicious: false },
+  { assetId: 'E3391', category: '기타주변기기', brand: 'HP', model: '무선마우스 M240', cpu: '미상', ram: '-', storage: '-', spec: '사무용', screen: '-', location: '창고', status: '기타', history: '', isNew: false, malicious: false },
+];

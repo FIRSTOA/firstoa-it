@@ -1,0 +1,182 @@
+'use client';
+
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { createAsset, deleteAsset, resetToSeed, updateAsset } from '@/app/actions';
+import { EMPTY_FILTERS, filterAssets, type Filters } from '@/lib/filters';
+import type { Asset } from '@/lib/types';
+import AssetModal from './AssetModal';
+import FilterPanel from './FilterPanel';
+import InventoryTable from './InventoryTable';
+import StatsRow from './StatsRow';
+
+const CPU_COUNT_ORDER = ['I7', 'I5', 'U7', 'U5', '미상'];
+
+/**
+ * `items` 는 서버 컴포넌트가 Supabase 에서 읽어 넘겨줍니다.
+ * 쓰기 작업은 Server Action → revalidatePath('/') 로 이 prop 이 갱신되므로
+ * 목록을 별도 state 로 복제하지 않습니다.
+ */
+export default function InventoryPage({ items }: { items: Asset[] }) {
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Asset | null>(null);
+  const [toast, setToast] = useState({ msg: '', show: false });
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string) {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ msg, show: true });
+    toastTimer.current = setTimeout(() => setToast((t) => ({ ...t, show: false })), 1800);
+  }
+
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+
+  // 서버/클라이언트 시각이 달라 하이드레이션이 깨지지 않도록 마운트 후에만 채웁니다.
+  useEffect(() => {
+    const format = () =>
+      new Intl.DateTimeFormat('ko-KR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      }).format(new Date());
+    setLastUpdated(format());
+    const id = setInterval(() => setLastUpdated(format()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  const visibleItems = useMemo(
+    () => filterAssets(items, filters, searchTerm),
+    [items, filters, searchTerm],
+  );
+
+  // CPU 집계는 필터와 무관하게 전체 노트북 기준으로 보여줍니다.
+  const cpuCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of items) {
+      if (item.category === '노트북') counts[item.cpu] = (counts[item.cpu] ?? 0) + 1;
+    }
+    return CPU_COUNT_ORDER.filter((cpu) => counts[cpu]).map((cpu) => ({ cpu, count: counts[cpu] }));
+  }, [items]);
+
+  function changeFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleSave(asset: Asset) {
+    const target = editing;
+    startTransition(async () => {
+      const result = target ? await updateAsset(target.assetId, asset) : await createAsset(asset);
+      if (!result.ok) {
+        showToast(result.error);
+        return;
+      }
+      setModalOpen(false);
+      setEditing(null);
+      showToast(target ? '수정했어요.' : '등록했어요.');
+    });
+  }
+
+  function handleDelete(assetId: string) {
+    if (!confirm(`자산번호 ${assetId}를 삭제할까요?`)) return;
+    startTransition(async () => {
+      const result = await deleteAsset(assetId);
+      showToast(result.ok ? '삭제했어요.' : result.error);
+    });
+  }
+
+  function handleReset() {
+    if (!confirm('샘플 데이터로 초기화할까요? 현재 입력한 내용은 사라져요.')) return;
+    startTransition(async () => {
+      const result = await resetToSeed();
+      if (!result.ok) {
+        showToast(result.error);
+        return;
+      }
+      setFilters(EMPTY_FILTERS);
+      setSearchTerm('');
+      showToast('초기화했어요.');
+    });
+  }
+
+  return (
+    <div className="app">
+      <div className="topbar" style={{ marginBottom: '14px' }}>
+        <div className="meta" style={{ fontSize: '12.5px', color: 'var(--ink-500)' }}>
+          마지막 업데이트: {lastUpdated ?? '불러오는 중…'} · 총 {items.length}건
+        </div>
+        <div className="actions">
+          <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={pending}>
+            샘플 데이터로 초기화
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={pending}
+            onClick={() => {
+              setEditing(null);
+              setModalOpen(true);
+            }}
+          >
+            ＋ 재고입력
+          </button>
+        </div>
+      </div>
+
+      <StatsRow
+        items={items}
+        statusFilter={filters.status}
+        onSelectStatus={(value) => changeFilter('status', value)}
+        onSelectConsumable={() => showToast('소모품가격표는 별도 화면에서 관리돼요.')}
+      />
+
+      <FilterPanel
+        items={items}
+        filters={filters}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        onFilterChange={changeFilter}
+      />
+
+      <div className="count-row">
+        <span>노트북</span>
+        {cpuCounts.map(({ cpu, count }) => (
+          <span key={cpu}>
+            {cpu} <b>{count}대</b>
+          </span>
+        ))}
+      </div>
+
+      <InventoryTable
+        items={visibleItems}
+        disabled={pending}
+        onEdit={(item) => {
+          setEditing(item);
+          setModalOpen(true);
+        }}
+        onDelete={handleDelete}
+      />
+
+      <AssetModal
+        open={modalOpen}
+        editing={editing}
+        pending={pending}
+        onClose={() => {
+          setModalOpen(false);
+          setEditing(null);
+        }}
+        onSave={handleSave}
+      />
+
+      <div className={`toast${toast.show ? ' show' : ''}`}>{toast.msg}</div>
+    </div>
+  );
+}
