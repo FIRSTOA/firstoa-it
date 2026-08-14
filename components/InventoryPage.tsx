@@ -5,6 +5,7 @@ import { createAsset, deleteAsset, resetToSeed, updateAsset } from '@/app/action
 import { EMPTY_FILTERS, filterAssets, type Filters } from '@/lib/filters';
 import type { Asset } from '@/lib/types';
 import AssetModal from './AssetModal';
+import ExcelActions from './ExcelActions';
 import FilterPanel from './FilterPanel';
 import InventoryTable from './InventoryTable';
 import StatsRow from './StatsRow';
@@ -114,6 +115,7 @@ export default function InventoryPage({ items }: { items: Asset[] }) {
           마지막 업데이트: {lastUpdated ?? '불러오는 중…'} · 총 {items.length}건
         </div>
         <div className="actions">
+          <ExcelActions items={items} disabled={pending} onToast={showToast} />
           <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={pending}>
             샘플 데이터로 초기화
           </button>

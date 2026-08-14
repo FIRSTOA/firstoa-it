@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function Page() {
   if (!isSupabaseConfigured()) {
     return (
-      <Shell>
+      <Shell activeMenu="IT 재고 리스트" title="🖥️ IT 재고 리스트">
         <SetupGuide />
       </Shell>
     );
@@ -26,7 +26,7 @@ export default async function Page() {
 
   if (error) {
     return (
-      <Shell>
+      <Shell activeMenu="IT 재고 리스트" title="🖥️ IT 재고 리스트">
         <SetupGuide error={error.message} />
       </Shell>
     );
@@ -35,7 +35,11 @@ export default async function Page() {
   const items = ((data ?? []) as AssetRow[]).map(rowToAsset);
 
   return (
-    <Shell>
+    <Shell
+      activeMenu="IT 재고 리스트"
+      title="🖥️ IT 재고 리스트"
+      note="영업 → 재고관리로 전달된 건만. 본인 팀 큐."
+    >
       <InventoryPage items={items} />
     </Shell>
   );

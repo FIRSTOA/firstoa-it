@@ -6,6 +6,7 @@ import { seedData } from '@/lib/seed';
 import { assetToRow, type Asset } from '@/lib/types';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
+export type BulkResult = { ok: true; count: number } | { ok: false; error: string };
 
 function validate(asset: Asset): string | null {
   if (!asset.assetId.trim()) return '자산번호는 필수예요.';
@@ -55,6 +56,20 @@ export async function deleteAsset(assetId: string): Promise<ActionResult> {
 
   revalidatePath('/');
   return { ok: true };
+}
+
+/** 엑셀 업로드로 읽은 자산을 자산번호 기준으로 한 번에 등록/수정합니다. */
+export async function bulkUpsertAssets(assets: Asset[]): Promise<BulkResult> {
+  if (assets.length === 0) return { ok: false, error: '가져올 데이터가 없어요.' };
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from(ASSETS_TABLE)
+    .upsert(assets.map(assetToRow), { onConflict: 'asset_id' });
+  if (error) return { ok: false, error: toMessage(error) };
+
+  revalidatePath('/');
+  return { ok: true, count: assets.length };
 }
 
 /** 테이블을 비우고 lib/seed.ts 의 샘플 데이터로 되돌립니다. */

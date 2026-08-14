@@ -1,13 +1,39 @@
-import type { ReactNode } from 'react';
+'use client';
 
-const SIDEBAR_MENU = ['현황표', 'IT 재고 리스트', '재고입력', '자산 이력', '소모품 가격표'];
+import Link from 'next/link';
+import { useRef, useState, type ReactNode } from 'react';
+
+const SIDEBAR_MENU = [
+  { label: '현황표', href: null },
+  { label: 'IT 재고 리스트', href: '/' },
+  { label: '입고', href: null },
+  { label: '출고', href: '/dispatch' },
+  { label: '재고입력', href: null },
+  { label: '자산 이력', href: null },
+  { label: '소모품 가격표', href: null },
+] as const;
+
 const TOP_TABS = ['통합 캘린더', '영업관리', '출고·현황', '고객서비스', '임대·청구', '재고관리', '관리'];
-
-const ACTIVE_MENU = 'IT 재고 리스트';
 const ACTIVE_TAB = '재고관리';
 
-/** ERP 공통 껍데기 — 왼쪽 사이드바 + 상단 네비 + 브레드크럼. */
-export default function Shell({ children }: { children: ReactNode }) {
+type Props = {
+  children: ReactNode;
+  activeMenu: (typeof SIDEBAR_MENU)[number]['label'];
+  title: string;
+  note?: string;
+};
+
+/** ERP 공통 껍데기 — 왼쪽 사이드바 + 상단 네비 + 브레드크럼. 여러 페이지가 공유합니다. */
+export default function Shell({ children, activeMenu, title, note }: Props) {
+  const [toast, setToast] = useState({ msg: '', show: false });
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showComingSoon(label: string) {
+    if (timer.current) clearTimeout(timer.current);
+    setToast({ msg: `${label} 화면은 준비 중이에요.`, show: true });
+    timer.current = setTimeout(() => setToast((t) => ({ ...t, show: false })), 1800);
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -27,10 +53,23 @@ export default function Shell({ children }: { children: ReactNode }) {
         </div>
         <div className="sidebar-section-label">재고관리</div>
         <ul className="sidebar-menu">
-          {SIDEBAR_MENU.map((label) => (
-            <li key={label} className={label === ACTIVE_MENU ? 'active' : undefined}>
-              <span className="dot" />
-              {label}
+          {SIDEBAR_MENU.map(({ label, href }) => (
+            <li
+              key={label}
+              className={label === activeMenu ? 'active' : undefined}
+              onClick={href ? undefined : () => showComingSoon(label)}
+            >
+              {href ? (
+                <Link href={href} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'inherit', textDecoration: 'none', width: '100%' }}>
+                  <span className="dot" />
+                  {label}
+                </Link>
+              ) : (
+                <>
+                  <span className="dot" />
+                  {label}
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -63,16 +102,18 @@ export default function Shell({ children }: { children: ReactNode }) {
         </header>
 
         <div className="breadcrumb-bar">
-          <h1>🖥️ IT 재고 리스트</h1>
+          <h1>{title}</h1>
           <div className="team-pills">
             <div className="team-pill active">IT팀</div>
             <div className="team-pill">운영지원팀</div>
           </div>
-          <div className="breadcrumb-note">영업 → 재고관리로 전달된 건만. 본인 팀 큐.</div>
+          {note && <div className="breadcrumb-note">{note}</div>}
         </div>
 
         <div className="content-scroll">{children}</div>
       </div>
+
+      <div className={`toast${toast.show ? ' show' : ''}`}>{toast.msg}</div>
     </div>
   );
 }

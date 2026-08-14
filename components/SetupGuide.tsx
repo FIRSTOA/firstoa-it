@@ -2,7 +2,7 @@
  * Supabase 환경변수가 없거나 조회에 실패했을 때 보여주는 안내 화면입니다.
  * 설정 전에도 앱이 죽지 않고 다음에 할 일을 알려주도록 합니다.
  */
-export default function SetupGuide({ error }: { error?: string }) {
+export default function SetupGuide({ error, schemaFile = 'supabase/schema.sql' }: { error?: string; schemaFile?: string }) {
   return (
     <div className="app">
       <div className="panel setup" style={{ paddingBottom: '20px' }}>
@@ -12,7 +12,7 @@ export default function SetupGuide({ error }: { error?: string }) {
             <div className="setup-alert">{error}</div>
             <p>
               대부분 테이블이 아직 없어서 생기는 오류예요. Supabase 대시보드의 <b>SQL Editor</b> 에서{' '}
-              <code>supabase/schema.sql</code> 과 <code>supabase/seed.sql</code> 을 차례로 실행하세요.
+              <code>{schemaFile}</code> 을 실행하세요.
             </p>
           </>
         ) : (
