@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createAsset, deleteAsset, resetToSeed, updateAsset } from '@/app/actions';
+import type { DataSource } from '@/lib/dataSource';
 import { EMPTY_FILTERS, filterAssets, type Filters } from '@/lib/filters';
 import type { Asset } from '@/lib/types';
 import AssetModal from './AssetModal';
@@ -17,7 +18,9 @@ const CPU_COUNT_ORDER = ['I7', 'I5', 'U7', 'U5', '미상'];
  * 쓰기 작업은 Server Action → revalidatePath('/') 로 이 prop 이 갱신되므로
  * 목록을 별도 state 로 복제하지 않습니다.
  */
-export default function InventoryPage({ items }: { items: Asset[] }) {
+type Props = { items: Asset[]; dataSource: DataSource };
+
+export default function InventoryPage({ items, dataSource }: Props) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [searchTerm, setSearchTerm] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -86,10 +89,10 @@ export default function InventoryPage({ items }: { items: Asset[] }) {
     });
   }
 
-  function handleDelete(assetId: string) {
+  function handleDelete(assetId: string, category: string) {
     if (!confirm(`자산번호 ${assetId}를 삭제할까요?`)) return;
     startTransition(async () => {
-      const result = await deleteAsset(assetId);
+      const result = await deleteAsset(assetId, category);
       showToast(result.ok ? '삭제했어요.' : result.error);
     });
   }
@@ -116,9 +119,11 @@ export default function InventoryPage({ items }: { items: Asset[] }) {
         </div>
         <div className="actions">
           <ExcelActions items={items} disabled={pending} onToast={showToast} />
-          <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={pending}>
-            샘플 데이터로 초기화
-          </button>
+          {dataSource === 'supabase' && (
+            <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={pending}>
+              샘플 데이터로 초기화
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-primary"
@@ -171,6 +176,7 @@ export default function InventoryPage({ items }: { items: Asset[] }) {
         open={modalOpen}
         editing={editing}
         pending={pending}
+        dataSource={dataSource}
         onClose={() => {
           setModalOpen(false);
           setEditing(null);

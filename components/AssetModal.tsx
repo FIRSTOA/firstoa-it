@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { BRANDS, CATEGORIES, CPUS, SPECS, STATUSES, type Asset } from '@/lib/types';
+import { useEffect, useMemo, useState } from 'react';
+import { lookupRentalAsset } from '@/app/actions';
+import type { DataSource } from '@/lib/dataSource';
+import { parseLocationStatus_ } from '@/lib/inventory/status';
+import { BRANDS, CATEGORIES, SPECS, STATUSES, type Asset } from '@/lib/types';
 
 const BLANK: Asset = {
   assetId: '',
   category: '노트북',
   brand: '삼성',
   model: '',
-  cpu: 'I5',
+  cpu: '',
   spec: '사무용',
   ram: '',
   storage: '',
@@ -18,26 +21,68 @@ const BLANK: Asset = {
   history: '',
   isNew: false,
   malicious: false,
+  serialNo: '',
 };
+
+type RentalLookupState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'found'; specHint: string }
+  | { status: 'not-found' };
 
 type Props = {
   open: boolean;
   editing: Asset | null;
   pending: boolean;
+  dataSource: DataSource;
   onClose: () => void;
   onSave: (asset: Asset) => void;
 };
 
-export default function AssetModal({ open, editing, pending, onClose, onSave }: Props) {
+export default function AssetModal({ open, editing, pending, dataSource, onClose, onSave }: Props) {
   const [form, setForm] = useState<Asset>(BLANK);
+  const [rentalLookup, setRentalLookup] = useState<RentalLookupState>({ status: 'idle' });
 
   // 모달을 열 때마다 수정 대상(또는 빈 값)으로 폼을 다시 채웁니다.
   useEffect(() => {
-    if (open) setForm(editing ?? BLANK);
+    if (open) {
+      setForm(editing ?? BLANK);
+      setRentalLookup({ status: 'idle' });
+    }
   }, [open, editing]);
 
   const set = <K extends keyof Asset>(key: K, value: Asset[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  // 구글시트 소스일 때는 "상태"가 별도 컬럼이 아니라 위치값에서 파생되므로,
+  // 위치를 입력하는 대로 실시간으로 예상 상태를 미리 보여줍니다 (저장은 안 함).
+  const derivedStatus = useMemo(
+    () => parseLocationStatus_(form.location, form.category, form.history).status,
+    [form.location, form.category, form.history],
+  );
+
+  // 신규 등록 시 자산번호를 입력하고 다른 칸으로 넘어가면 임대리스트(구글시트)에서
+  // 모델명/시리얼을 찾아 자동으로 채워줍니다. 수정 모드에서는 자산번호가 잠겨 있어 동작하지 않습니다.
+  async function handleAssetIdBlur() {
+    if (editing) return;
+    const assetId = form.assetId.trim();
+    if (!assetId) {
+      setRentalLookup({ status: 'idle' });
+      return;
+    }
+    setRentalLookup({ status: 'loading' });
+    const result = await lookupRentalAsset(assetId);
+    if (!result.found) {
+      setRentalLookup({ status: 'not-found' });
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      model: result.model || prev.model,
+      serialNo: result.serialNo || prev.serialNo,
+    }));
+    setRentalLookup({ status: 'found', specHint: result.specHint ?? '' });
+  }
 
   function handleSave() {
     onSave({
@@ -49,6 +94,7 @@ export default function AssetModal({ open, editing, pending, onClose, onSave }: 
       screen: form.screen.trim() || '-',
       location: form.location.trim(),
       history: form.history.trim(),
+      serialNo: form.serialNo.trim(),
     });
   }
 
@@ -71,8 +117,20 @@ export default function AssetModal({ open, editing, pending, onClose, onSave }: 
               value={form.assetId}
               disabled={!!editing}
               onChange={(e) => set('assetId', e.target.value)}
+              onBlur={handleAssetIdBlur}
               placeholder="예: P2400"
             />
+            {!editing && rentalLookup.status !== 'idle' && (
+              <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
+                {rentalLookup.status === 'loading' && '임대리스트 조회 중…'}
+                {rentalLookup.status === 'not-found' &&
+                  '임대리스트에서 못 찾았어요 — 직접 입력해주세요.'}
+                {rentalLookup.status === 'found' &&
+                  `임대리스트에서 모델명/시리얼을 채웠어요.${
+                    rentalLookup.specHint ? ` (${rentalLookup.specHint})` : ''
+                  }`}
+              </div>
+            )}
           </div>
           <div className="form-field">
             <label>
@@ -110,13 +168,11 @@ export default function AssetModal({ open, editing, pending, onClose, onSave }: 
           </div>
           <div className="form-field">
             <label>CPU종류</label>
-            <select value={form.cpu} onChange={(e) => set('cpu', e.target.value)}>
-              {CPUS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <input
+              value={form.cpu}
+              onChange={(e) => set('cpu', e.target.value)}
+              placeholder="예: i7-1165G7"
+            />
           </div>
           <div className="form-field">
             <label>사양분류</label>
@@ -155,25 +211,43 @@ export default function AssetModal({ open, editing, pending, onClose, onSave }: 
               onChange={(e) => set('location', e.target.value)}
               placeholder="예: J1"
             />
+            {dataSource === 'sheets' && (
+              <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
+                예상 상태: {derivedStatus} (구글시트에는 상태 컬럼이 따로 없어서 위치값으로 자동
+                계산돼요 — 저장되는 값 아님)
+              </div>
+            )}
+          </div>
+          {dataSource === 'supabase' && (
+            <div className="form-field">
+              <label>
+                상태 <span className="required">*</span>
+              </label>
+              <select value={form.status} onChange={(e) => set('status', e.target.value)}>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="form-field">
+            <label>시리얼번호</label>
+            <input
+              value={form.serialNo}
+              onChange={(e) => set('serialNo', e.target.value)}
+              placeholder="예: 5CG0444MXO"
+            />
           </div>
           <div className="form-field">
-            <label>
-              상태 <span className="required">*</span>
-            </label>
-            <select value={form.status} onChange={(e) => set('status', e.target.value)}>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field">
-            <label>이력(건)</label>
+            <label>{dataSource === 'sheets' ? '이력(비고)' : '이력(건)'}</label>
             <input
               value={form.history}
               onChange={(e) => set('history', e.target.value)}
-              placeholder="예: 1건 (없으면 비워두세요)"
+              placeholder={
+                dataSource === 'sheets' ? '예: 26.05.06 고객사명 / 새기기' : '예: 1건 (없으면 비워두세요)'
+              }
             />
           </div>
           <div className="form-field full toggle-row">

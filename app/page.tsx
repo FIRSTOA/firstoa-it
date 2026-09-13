@@ -1,6 +1,8 @@
 import InventoryPage from '@/components/InventoryPage';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
+import { DATA_SOURCE } from '@/lib/dataSource';
+import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import { ASSETS_TABLE, createAdminClient, isSupabaseConfigured } from '@/lib/supabase/server';
 import { rowToAsset, type AssetRow } from '@/lib/types';
 
@@ -8,6 +10,37 @@ import { rowToAsset, type AssetRow } from '@/lib/types';
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
+  if (DATA_SOURCE === 'sheets') {
+    if (!isInventorySheetConfigured()) {
+      return (
+        <Shell activeMenu="IT 재고 리스트" title="🖥️ IT 재고 리스트">
+          <SetupGuide source="sheets" />
+        </Shell>
+      );
+    }
+
+    let items;
+    try {
+      items = await listAllAssets();
+    } catch (err) {
+      return (
+        <Shell activeMenu="IT 재고 리스트" title="🖥️ IT 재고 리스트">
+          <SetupGuide source="sheets" error={err instanceof Error ? err.message : String(err)} />
+        </Shell>
+      );
+    }
+
+    return (
+      <Shell
+        activeMenu="IT 재고 리스트"
+        title="🖥️ IT 재고 리스트"
+        note="영업 → 재고관리로 전달된 건만. 본인 팀 큐."
+      >
+        <InventoryPage items={items} dataSource="sheets" />
+      </Shell>
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return (
       <Shell activeMenu="IT 재고 리스트" title="🖥️ IT 재고 리스트">
@@ -40,7 +73,7 @@ export default async function Page() {
       title="🖥️ IT 재고 리스트"
       note="영업 → 재고관리로 전달된 건만. 본인 팀 큐."
     >
-      <InventoryPage items={items} />
+      <InventoryPage items={items} dataSource="supabase" />
     </Shell>
   );
 }

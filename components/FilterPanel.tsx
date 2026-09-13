@@ -1,7 +1,7 @@
 'use client';
 
 import { MALICIOUS, type Filters } from '@/lib/filters';
-import { CPUS, SPECS, STATUSES, type Asset } from '@/lib/types';
+import { SPECS, STATUSES, type Asset } from '@/lib/types';
 
 type ChipGroupProps = {
   label: string;
@@ -92,7 +92,7 @@ export default function FilterPanel({ items, filters, searchTerm, onSearchChange
       />
       <ChipGroup
         label="CPU종류"
-        options={[...CPUS]}
+        options={uniq(items.map((i) => i.cpu).filter(Boolean))}
         selected={filters.cpu}
         onSelect={(v) => onFilterChange('cpu', v)}
       />

@@ -29,7 +29,7 @@ type Props = {
   items: Asset[];
   disabled: boolean;
   onEdit: (item: Asset) => void;
-  onDelete: (assetId: string) => void;
+  onDelete: (assetId: string, category: string) => void;
 };
 
 export default function InventoryTable({ items, disabled, onEdit, onDelete }: Props) {
@@ -81,7 +81,7 @@ export default function InventoryTable({ items, disabled, onEdit, onDelete }: Pr
                     className="icon-btn danger"
                     title="삭제"
                     disabled={disabled}
-                    onClick={() => onDelete(item.assetId)}
+                    onClick={() => onDelete(item.assetId, item.category)}
                   >
                     🗑
                   </button>

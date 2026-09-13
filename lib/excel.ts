@@ -16,6 +16,7 @@ export const EXCEL_HEADERS = [
   '이력',
   '새기기',
   '악성',
+  '시리얼번호',
 ] as const;
 
 type ExcelRow = Record<(typeof EXCEL_HEADERS)[number], string>;
@@ -36,6 +37,7 @@ export function assetToExcelRow(asset: Asset): ExcelRow {
     이력: asset.history,
     새기기: asset.isNew ? 'Y' : 'N',
     악성: asset.malicious ? 'Y' : 'N',
+    시리얼번호: asset.serialNo,
   };
 }
 
@@ -102,6 +104,7 @@ export function parseExcelRows(rows: Record<string, unknown>[]): ParsedExcelResu
       history: cell(row, '이력'),
       isNew: truthy(row['새기기']),
       malicious: truthy(row['악성']),
+      serialNo: cell(row, '시리얼번호'),
     });
   });
 

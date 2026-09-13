@@ -1,6 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { DATA_SOURCE } from '@/lib/dataSource';
+import { createAssetInSheet, deleteAssetFromSheet, updateAssetInSheet } from '@/lib/inventory/sheets';
+import { lookupRentalByAssetId } from '@/lib/rentals/server';
 import { ASSETS_TABLE, createAdminClient } from '@/lib/supabase/server';
 import { seedData } from '@/lib/seed';
 import { assetToRow, type Asset } from '@/lib/types';
@@ -22,9 +25,24 @@ function toMessage(error: { code?: string; message: string }): string {
   return `저장에 실패했어요: ${error.message}`;
 }
 
+/** lib/inventory/sheets.ts 가 던진 에러를 토스트에 보여줄 메시지로 바꿉니다. */
+function toSheetMessage(err: unknown): string {
+  return err instanceof Error ? err.message : '구글시트 작업에 실패했어요.';
+}
+
 export async function createAsset(asset: Asset): Promise<ActionResult> {
   const invalid = validate(asset);
   if (invalid) return { ok: false, error: invalid };
+
+  if (DATA_SOURCE === 'sheets') {
+    try {
+      await createAssetInSheet(asset);
+    } catch (err) {
+      return { ok: false, error: toSheetMessage(err) };
+    }
+    revalidatePath('/');
+    return { ok: true };
+  }
 
   const supabase = createAdminClient();
   const { error } = await supabase.from(ASSETS_TABLE).insert(assetToRow(asset));
@@ -38,6 +56,16 @@ export async function updateAsset(originalAssetId: string, asset: Asset): Promis
   const invalid = validate(asset);
   if (invalid) return { ok: false, error: invalid };
 
+  if (DATA_SOURCE === 'sheets') {
+    try {
+      await updateAssetInSheet(originalAssetId, asset);
+    } catch (err) {
+      return { ok: false, error: toSheetMessage(err) };
+    }
+    revalidatePath('/');
+    return { ok: true };
+  }
+
   const supabase = createAdminClient();
   const { error } = await supabase
     .from(ASSETS_TABLE)
@@ -49,7 +77,17 @@ export async function updateAsset(originalAssetId: string, asset: Asset): Promis
   return { ok: true };
 }
 
-export async function deleteAsset(assetId: string): Promise<ActionResult> {
+export async function deleteAsset(assetId: string, category?: string): Promise<ActionResult> {
+  if (DATA_SOURCE === 'sheets') {
+    try {
+      await deleteAssetFromSheet(assetId, category);
+    } catch (err) {
+      return { ok: false, error: toSheetMessage(err) };
+    }
+    revalidatePath('/');
+    return { ok: true };
+  }
+
   const supabase = createAdminClient();
   const { error } = await supabase.from(ASSETS_TABLE).delete().eq('asset_id', assetId);
   if (error) return { ok: false, error: `삭제에 실패했어요: ${error.message}` };
@@ -62,6 +100,10 @@ export async function deleteAsset(assetId: string): Promise<ActionResult> {
 export async function bulkUpsertAssets(assets: Asset[]): Promise<BulkResult> {
   if (assets.length === 0) return { ok: false, error: '가져올 데이터가 없어요.' };
 
+  if (DATA_SOURCE === 'sheets') {
+    return { ok: false, error: '지금은 구글시트 연동 중이라 엑셀 일괄 업로드는 꺼져 있어요.' };
+  }
+
   const supabase = createAdminClient();
   const { error } = await supabase
     .from(ASSETS_TABLE)
@@ -70,6 +112,17 @@ export async function bulkUpsertAssets(assets: Asset[]): Promise<BulkResult> {
 
   revalidatePath('/');
   return { ok: true, count: assets.length };
+}
+
+export type RentalLookupActionResult =
+  | { found: true; model: string | null; serialNo: string | null; specHint: string | null }
+  | { found: false };
+
+/** 자산번호로 임대리스트(구글시트)에서 모델명/시리얼을 조회합니다. AssetModal의 자동완성이 씁니다. */
+export async function lookupRentalAsset(assetId: string): Promise<RentalLookupActionResult> {
+  const result = await lookupRentalByAssetId(assetId);
+  if (!result) return { found: false };
+  return { found: true, model: result.model, serialNo: result.serialNo, specHint: result.specHint };
 }
 
 /** 테이블을 비우고 lib/seed.ts 의 샘플 데이터로 되돌립니다. */
