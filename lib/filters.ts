@@ -47,19 +47,28 @@ export function normalizeForCompare(value: string): string {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function normalizedIncludes(list: string[], value: string): boolean {
-  if (list.length === 0) return true;
-  const target = normalizeForCompare(value);
-  return list.some((v) => normalizeForCompare(v) === target);
-}
-
 function normalizedEquals(a: string, b: string): boolean {
   return normalizeForCompare(a) === normalizeForCompare(b);
 }
 
+/** 실제로 배열 안에 그 값이 있는지 확인합니다 (빈 배열이면 당연히 false). */
+function normalizedMembership(list: string[], value: string): boolean {
+  return list.some((v) => normalizedEquals(v, value));
+}
+
+/**
+ * 필터 매칭용: 빈 배열은 "전체"(=조건 없음)라서 무엇이든 통과시킵니다.
+ * normalizedMembership과 반드시 구분해서 써야 합니다 — 토글(있으면 빼고 없으면 더하기)에
+ * 이 함수를 쓰면 빈 배열에서 "이미 있다"고 잘못 판단해서 첫 클릭이 항상 무시됩니다.
+ */
+function normalizedIncludes(list: string[], value: string): boolean {
+  if (list.length === 0) return true;
+  return normalizedMembership(list, value);
+}
+
 /** 다중선택 칩 토글: 이미 있으면 빼고, 없으면 더합니다. 항상 중복 없는 배열을 돌려줍니다. */
 export function toggleMultiValue(list: string[], value: string): string[] {
-  return normalizedIncludes(list, value)
+  return normalizedMembership(list, value)
     ? list.filter((v) => !normalizedEquals(v, value))
     : [...list, value];
 }

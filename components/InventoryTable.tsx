@@ -49,8 +49,10 @@ export default function InventoryTable({ items, disabled, onEdit, onDelete }: Pr
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => (
-            <tr key={item.assetId}>
+          {items.map((item, index) => (
+            // 자산번호가 시트에 중복 입력돼 있거나("P1024"가 두 카테고리에 걸쳐 있는 등) 비어있는
+            // 경우("없음" 같은 오입력 포함)가 실제로 있어서, index까지 합쳐 항상 고유한 key로 만듭니다.
+            <tr key={`${item.category}-${item.assetId}-${index}`}>
               <td>
                 <SpecCell item={item} />
               </td>
