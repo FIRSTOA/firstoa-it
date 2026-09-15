@@ -3,26 +3,37 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createAsset, deleteAsset, resetToSeed, updateAsset } from '@/app/actions';
 import type { DataSource } from '@/lib/dataSource';
-import { EMPTY_FILTERS, filterAssets, type Filters } from '@/lib/filters';
+import { filterAssets, toggleMultiValue } from '@/lib/filters';
+import { useFilterState } from '@/lib/useFilterState';
 import type { Asset } from '@/lib/types';
+import ActiveFilters from './ActiveFilters';
 import AssetModal from './AssetModal';
+import CategoryCards from './CategoryCards';
 import ExcelActions from './ExcelActions';
 import FilterPanel from './FilterPanel';
 import InventoryTable from './InventoryTable';
+import SpreadsheetLinkButton from './SpreadsheetLinkButton';
 import StatsRow from './StatsRow';
 
 const CPU_COUNT_ORDER = ['I7', 'I5', 'U7', 'U5', '미상'];
+
+const CATEGORY_DASHBOARD_TITLES: Record<string, string> = {
+  데스크탑: '데스크탑 현황',
+  노트북: '노트북 현황',
+  모니터: '모니터 현황',
+  빔프로젝트: '빔프로젝터 현황',
+  기타주변기기: '기타주변기기 현황',
+};
+
+type Props = { items: Asset[]; dataSource: DataSource; spreadsheetUrl: string | null };
 
 /**
  * `items` 는 서버 컴포넌트가 Supabase 에서 읽어 넘겨줍니다.
  * 쓰기 작업은 Server Action → revalidatePath('/') 로 이 prop 이 갱신되므로
  * 목록을 별도 state 로 복제하지 않습니다.
  */
-type Props = { items: Asset[]; dataSource: DataSource };
-
-export default function InventoryPage({ items, dataSource }: Props) {
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [searchTerm, setSearchTerm] = useState('');
+export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Props) {
+  const { filters, searchTerm, setSearchTerm, setFilter, resetAll } = useFilterState();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [toast, setToast] = useState({ msg: '', show: false });
@@ -62,6 +73,14 @@ export default function InventoryPage({ items, dataSource }: Props) {
     [items, filters, searchTerm],
   );
 
+  const dashboardTitle = useMemo(() => {
+    if (filters.category.length === 0) return '전체 자산';
+    if (filters.category.length === 1) {
+      return CATEGORY_DASHBOARD_TITLES[filters.category[0]] ?? `${filters.category[0]} 현황`;
+    }
+    return '선택 품목 현황';
+  }, [filters.category]);
+
   // CPU 집계는 필터와 무관하게 전체 노트북 기준으로 보여줍니다.
   const cpuCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -70,10 +89,6 @@ export default function InventoryPage({ items, dataSource }: Props) {
     }
     return CPU_COUNT_ORDER.filter((cpu) => counts[cpu]).map((cpu) => ({ cpu, count: counts[cpu] }));
   }, [items]);
-
-  function changeFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-  }
 
   function handleSave(asset: Asset) {
     const target = editing;
@@ -105,19 +120,27 @@ export default function InventoryPage({ items, dataSource }: Props) {
         showToast(result.error);
         return;
       }
-      setFilters(EMPTY_FILTERS);
-      setSearchTerm('');
+      resetAll();
       showToast('초기화했어요.');
     });
   }
 
   return (
     <div className="app">
+      <div className="dashboard-title-block">
+        <h2>{dashboardTitle}</h2>
+        {filters.category.length > 0 && (
+          <div className="dashboard-subtitle">{filters.category.join(' · ')}</div>
+        )}
+      </div>
+
       <div className="topbar" style={{ marginBottom: '14px' }}>
         <div className="meta" style={{ fontSize: '12.5px', color: 'var(--ink-500)' }}>
-          마지막 업데이트: {lastUpdated ?? '불러오는 중…'} · 총 {items.length}건
+          마지막 업데이트: {lastUpdated ?? '불러오는 중…'} · 표시 {visibleItems.length}건 / 전체{' '}
+          {items.length}건
         </div>
         <div className="actions">
+          <SpreadsheetLinkButton url={spreadsheetUrl} />
           <ExcelActions items={items} disabled={pending} onToast={showToast} />
           {dataSource === 'supabase' && (
             <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={pending}>
@@ -140,9 +163,19 @@ export default function InventoryPage({ items, dataSource }: Props) {
 
       <StatsRow
         items={items}
-        statusFilter={filters.status}
-        onSelectStatus={(value) => changeFilter('status', value)}
+        filters={filters}
+        searchTerm={searchTerm}
+        onToggleStatus={(status) => setFilter('status', toggleMultiValue(filters.status, status))}
+        onClearStatus={() => setFilter('status', [])}
+        onToggleMalicious={() => setFilter('malicious', !filters.malicious)}
         onSelectConsumable={() => showToast('소모품가격표는 별도 화면에서 관리돼요.')}
+      />
+
+      <CategoryCards
+        items={items}
+        filters={filters}
+        searchTerm={searchTerm}
+        onToggle={(category) => setFilter('category', toggleMultiValue(filters.category, category))}
       />
 
       <FilterPanel
@@ -150,7 +183,15 @@ export default function InventoryPage({ items, dataSource }: Props) {
         filters={filters}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
-        onFilterChange={changeFilter}
+        onSetFilter={setFilter}
+      />
+
+      <ActiveFilters
+        filters={filters}
+        searchTerm={searchTerm}
+        onSetFilter={setFilter}
+        onSetSearchTerm={setSearchTerm}
+        onResetAll={resetAll}
       />
 
       <div className="count-row">

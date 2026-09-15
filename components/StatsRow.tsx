@@ -1,58 +1,66 @@
 'use client';
 
-import { MALICIOUS } from '@/lib/filters';
-import type { Asset } from '@/lib/types';
+import { countExcluding, filterAssets, type Filters } from '@/lib/filters';
+import { STATUSES, type Asset } from '@/lib/types';
 
 /** 소모품가격표는 별도 화면에서 관리하는 정적 수치입니다. */
 const CONSUMABLE_COUNT = 18;
-const NOT_FILTERABLE = '__none__';
 
 type Props = {
   items: Asset[];
-  statusFilter: string | null;
-  onSelectStatus: (value: string | null) => void;
+  filters: Filters;
+  searchTerm: string;
+  onToggleStatus: (status: string) => void;
+  onClearStatus: () => void;
+  onToggleMalicious: () => void;
   onSelectConsumable: () => void;
 };
 
-export default function StatsRow({ items, statusFilter, onSelectStatus, onSelectConsumable }: Props) {
-  const countByStatus = (status: string) => items.filter((i) => i.status === status).length;
+export default function StatsRow({
+  items,
+  filters,
+  searchTerm,
+  onToggleStatus,
+  onClearStatus,
+  onToggleMalicious,
+  onSelectConsumable,
+}: Props) {
+  // "전체" 카드/악성 카드는 자기 자신 조건을 뺀 나머지 필터+검색어만 적용했을 때의 건수입니다.
+  const allCount = filterAssets(items, { ...filters, status: [] }, searchTerm).length;
+  const maliciousCount = filterAssets(items, { ...filters, malicious: false }, searchTerm).filter(
+    (it) => it.malicious,
+  ).length;
+
+  const statusCards = STATUSES.map((status) => ({
+    key: status,
+    label: status,
+    num: countExcluding(items, filters, searchTerm, 'status', status),
+    active: filters.status.includes(status),
+    onClick: () => onToggleStatus(status),
+  }));
 
   const cards = [
-    { key: 'all', label: '전체', num: items.length, filterVal: null as string | null },
-    { key: '임대중', label: '임대중', num: countByStatus('임대중'), filterVal: '임대중' },
-    { key: '상품화완료', label: '상품화완료', num: countByStatus('상품화완료'), filterVal: '상품화완료' },
-    { key: '상품화준비중', label: '상품화준비중', num: countByStatus('상품화준비중'), filterVal: '상품화준비중' },
-    { key: '수리중', label: '수리중', num: countByStatus('수리중'), filterVal: '수리중' },
-    { key: '미정', label: '미정', num: countByStatus('미정'), filterVal: '미정' },
-    { key: '기타', label: '기타', num: countByStatus('기타'), filterVal: '기타' },
-    { key: 'malicious', label: '악성', num: items.filter((i) => i.malicious).length, filterVal: MALICIOUS },
-    { key: 'consumable', label: '소모품가격표', num: CONSUMABLE_COUNT, filterVal: NOT_FILTERABLE },
+    { key: 'all', label: '전체', num: allCount, active: filters.status.length === 0, onClick: onClearStatus },
+    ...statusCards,
+    { key: 'malicious', label: '악성', num: maliciousCount, active: filters.malicious, onClick: onToggleMalicious },
+    { key: 'consumable', label: '소모품가격표', num: CONSUMABLE_COUNT, active: false, onClick: onSelectConsumable },
   ];
 
   return (
     <div className="stats">
-      {cards.map((card) => {
-        const isActive = card.filterVal !== NOT_FILTERABLE && statusFilter === card.filterVal;
-        return (
-          <button
-            type="button"
-            key={card.key}
-            className={`stat-card${isActive ? ' active' : ''}`}
-            data-key={card.key}
-            onClick={() => {
-              if (card.filterVal === NOT_FILTERABLE) {
-                onSelectConsumable();
-                return;
-              }
-              // 같은 카드를 다시 누르면 필터 해제
-              onSelectStatus(statusFilter === card.filterVal ? null : card.filterVal);
-            }}
-          >
-            <div className="stat-num">{card.num}</div>
-            <div className="stat-label">{card.label}</div>
-          </button>
-        );
-      })}
+      {cards.map((card) => (
+        <button
+          type="button"
+          key={card.key}
+          className={`stat-card${card.active ? ' active' : ''}`}
+          data-key={card.key}
+          aria-pressed={card.key === 'consumable' ? undefined : card.active}
+          onClick={card.onClick}
+        >
+          <div className="stat-num">{card.num}</div>
+          <div className="stat-label">{card.label}</div>
+        </button>
+      ))}
     </div>
   );
 }

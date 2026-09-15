@@ -3,6 +3,7 @@ import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
 import { DATA_SOURCE } from '@/lib/dataSource';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
+import { getInventorySpreadsheetUrl } from '@/lib/spreadsheetLink';
 import { ASSETS_TABLE, createAdminClient, isSupabaseConfigured } from '@/lib/supabase/server';
 import { rowToAsset, type AssetRow } from '@/lib/types';
 
@@ -36,7 +37,7 @@ export default async function Page() {
         title="🖥️ IT 재고 리스트"
         note="영업 → 재고관리로 전달된 건만. 본인 팀 큐."
       >
-        <InventoryPage items={items} dataSource="sheets" />
+        <InventoryPage items={items} dataSource="sheets" spreadsheetUrl={getInventorySpreadsheetUrl()} />
       </Shell>
     );
   }
@@ -73,7 +74,7 @@ export default async function Page() {
       title="🖥️ IT 재고 리스트"
       note="영업 → 재고관리로 전달된 건만. 본인 팀 큐."
     >
-      <InventoryPage items={items} dataSource="supabase" />
+      <InventoryPage items={items} dataSource="supabase" spreadsheetUrl={getInventorySpreadsheetUrl()} />
     </Shell>
   );
 }
