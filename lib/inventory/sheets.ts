@@ -2,7 +2,11 @@ import 'server-only';
 import { columnLetter, getSheetsClient, isGoogleServiceAccountConfigured } from '@/lib/googleAuth';
 import { CATEGORIES, type Asset } from '@/lib/types';
 import { logAssetMovement } from './movements';
+import { parseGubunAndSpec_ } from './specClassification';
 import { deriveIsNew, deriveMalicious, parseLocationStatus_ } from './status';
+
+// parseGubunAndSpec_(구분→사양등급 분류)은 원본 대시보드도 이 두 카테고리에만 적용합니다.
+const SPEC_CLASSIFIED_CATEGORIES = new Set(['노트북', '데스크탑']);
 
 /**
  * 데스크탑/노트북/모니터/빔프로젝트/기타주변기기 5개 구글시트를 재고 데이터의
@@ -53,6 +57,10 @@ type HeaderMap = {
   ssdCol: number;
   hddCol: number;
   screenCol: number;
+  gubunCol: number; // "구분" — 사양등급 분류 코드 원문 (예: "I7고사데")
+  specCodeCol: number; // "사양(PC라벨)" — "I7/12/32/1024/2/3060" 형식, 세대 추출용
+  reserverCol: number; // "예약자"
+  reserveDateCol: number; // "예약일"
   columnCount: number;
 };
 
@@ -99,6 +107,10 @@ async function buildCache(category: string): Promise<SheetCache> {
     ssdCol: findExact(header, 'SSD'),
     hddCol: findExact(header, 'HDD'),
     screenCol: findIncludes(header, '화면크기'),
+    gubunCol: findExact(header, '구분'),
+    specCodeCol: findIncludes(header, '사양'),
+    reserverCol: findIncludes(header, '예약자'),
+    reserveDateCol: findIncludes(header, '예약일'),
     columnCount: header.length,
   };
 
@@ -155,13 +167,23 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
     const ssd = cell(row, header.ssdCol);
     const hdd = cell(row, header.hddCol);
 
+    let spec = '확인필요';
+    if (SPEC_CLASSIFIED_CATEGORIES.has(category)) {
+      const gubun = cell(row, header.gubunCol);
+      const specCode = cell(row, header.specCodeCol);
+      const classified = parseGubunAndSpec_(gubun, specCode);
+      if (!classified.needsReview && classified.tierGroup) spec = classified.tierGroup;
+    }
+
+    const reservedBy = cell(row, header.reserverCol);
+
     assets.push({
       assetId,
       category,
       brand: cell(row, header.brandCol),
       model: cell(row, header.modelCol),
       cpu: cell(row, header.cpuCol),
-      spec: '확인필요', // 사양 자동 분류(parseGubunAndSpec_)는 Phase 2에서 이식 예정
+      spec,
       ram: cell(row, header.memoryCol),
       storage: [ssd, hdd].filter(Boolean).join(' / '),
       screen: cell(row, header.screenCol) || '-',
@@ -171,6 +193,8 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
       isNew: deriveIsNew(remark),
       malicious: deriveMalicious(remark),
       serialNo: cell(row, header.serialCol),
+      reservedBy: reservedBy || undefined,
+      reservedAt: cell(row, header.reserveDateCol) || undefined,
     });
   }
   return assets;
@@ -405,4 +429,56 @@ export async function deleteAssetFromSheet(assetId: string, category?: string): 
     toStatus: '삭제됨',
     memo: '앱에서 삭제됨',
   });
+}
+
+async function writeReservationCells(
+  category: string,
+  rowNumber: number,
+  header: HeaderMap,
+  reserverValue: string,
+  reserveDateValue: string,
+): Promise<void> {
+  const tab = requireTab(category);
+  if (header.reserverCol === -1 || header.reserveDateCol === -1) {
+    throw new Error(`"${tab}" 시트에서 "예약자"/"예약일" 헤더를 찾지 못했어요.`);
+  }
+  const sheets = getSheetsClient();
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: requireSheetId(),
+    requestBody: {
+      valueInputOption: 'USER_ENTERED',
+      data: [
+        { range: `${tab}!${columnLetter(header.reserverCol)}${rowNumber}`, values: [[reserverValue]] },
+        { range: `${tab}!${columnLetter(header.reserveDateCol)}${rowNumber}`, values: [[reserveDateValue]] },
+      ],
+    },
+  });
+}
+
+/** 자산번호가 일치하는 행의 예약자/예약일 칸에 기록합니다. 다른 컬럼은 건드리지 않습니다. */
+export async function reserveAssetInSheet(
+  category: string,
+  assetId: string,
+  reserverName: string,
+): Promise<void> {
+  const name = reserverName.trim();
+  if (!name) throw new Error('예약자 이름을 입력해주세요.');
+
+  const found = await findAssetAnywhere(assetId, category);
+  if (!found) {
+    throw new Error(`자산번호 ${assetId}를 ${CATEGORIES.join('/')} 어느 시트에서도 찾지 못했어요.`);
+  }
+  const { header } = await getCache(found.category);
+  const today = new Date().toISOString().slice(0, 10);
+  await writeReservationCells(found.category, found.rowNumber, header, name, today);
+}
+
+/** 예약자/예약일 칸을 비웁니다. */
+export async function cancelReservationInSheet(category: string, assetId: string): Promise<void> {
+  const found = await findAssetAnywhere(assetId, category);
+  if (!found) {
+    throw new Error(`자산번호 ${assetId}를 ${CATEGORIES.join('/')} 어느 시트에서도 찾지 못했어요.`);
+  }
+  const { header } = await getCache(found.category);
+  await writeReservationCells(found.category, found.rowNumber, header, '', '');
 }

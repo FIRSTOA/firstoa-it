@@ -23,6 +23,10 @@ export type Asset = {
   isNew: boolean;
   malicious: boolean;
   serialNo: string;
+  // 예약 기능은 지금 구글시트 소스에서만 씁니다 (Supabase it_assets엔 대응 컬럼이 없어서
+  // 옵셔널로 둡니다 — rowToAsset/assetToRow는 안 건드려도 됨).
+  reservedBy?: string;
+  reservedAt?: string;
 };
 
 /** Supabase `it_assets` 테이블 행 (snake_case) */

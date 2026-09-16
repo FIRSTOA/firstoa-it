@@ -2,7 +2,13 @@
 
 import { revalidatePath } from 'next/cache';
 import { DATA_SOURCE } from '@/lib/dataSource';
-import { createAssetInSheet, deleteAssetFromSheet, updateAssetInSheet } from '@/lib/inventory/sheets';
+import {
+  cancelReservationInSheet,
+  createAssetInSheet,
+  deleteAssetFromSheet,
+  reserveAssetInSheet,
+  updateAssetInSheet,
+} from '@/lib/inventory/sheets';
 import { lookupRentalByAssetId } from '@/lib/rentals/server';
 import { ASSETS_TABLE, createAdminClient } from '@/lib/supabase/server';
 import { seedData } from '@/lib/seed';
@@ -112,6 +118,36 @@ export async function bulkUpsertAssets(assets: Asset[]): Promise<BulkResult> {
 
   revalidatePath('/');
   return { ok: true, count: assets.length };
+}
+
+export async function reserveAsset(
+  assetId: string,
+  category: string,
+  reserverName: string,
+): Promise<ActionResult> {
+  if (DATA_SOURCE !== 'sheets') {
+    return { ok: false, error: '지금은 구글시트 연동 중이 아니라 예약 기능이 꺼져 있어요.' };
+  }
+  try {
+    await reserveAssetInSheet(category, assetId, reserverName);
+  } catch (err) {
+    return { ok: false, error: toSheetMessage(err) };
+  }
+  revalidatePath('/');
+  return { ok: true };
+}
+
+export async function cancelReservation(assetId: string, category: string): Promise<ActionResult> {
+  if (DATA_SOURCE !== 'sheets') {
+    return { ok: false, error: '지금은 구글시트 연동 중이 아니라 예약 기능이 꺼져 있어요.' };
+  }
+  try {
+    await cancelReservationInSheet(category, assetId);
+  } catch (err) {
+    return { ok: false, error: toSheetMessage(err) };
+  }
+  revalidatePath('/');
+  return { ok: true };
 }
 
 export type RentalLookupActionResult =

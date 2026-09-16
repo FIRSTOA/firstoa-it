@@ -30,9 +30,18 @@ type Props = {
   disabled: boolean;
   onEdit: (item: Asset) => void;
   onDelete: (assetId: string, category: string) => void;
+  onReserve: (item: Asset) => void;
+  onCancelReservation: (item: Asset) => void;
 };
 
-export default function InventoryTable({ items, disabled, onEdit, onDelete }: Props) {
+export default function InventoryTable({
+  items,
+  disabled,
+  onEdit,
+  onDelete,
+  onReserve,
+  onCancelReservation,
+}: Props) {
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
       <table>
@@ -45,6 +54,7 @@ export default function InventoryTable({ items, disabled, onEdit, onDelete }: Pr
             <th>위치</th>
             <th>상태</th>
             <th>이력</th>
+            <th>예약</th>
             <th style={{ width: '70px' }} />
           </tr>
         </thead>
@@ -67,6 +77,30 @@ export default function InventoryTable({ items, disabled, onEdit, onDelete }: Pr
                 {item.malicious && <span className="badge badge-악성">악성</span>}
               </td>
               <td>{item.history || '-'}</td>
+              <td style={{ fontSize: '12px' }}>
+                {item.reservedBy ? (
+                  <div>
+                    <div>
+                      {item.reservedBy}
+                      {item.reservedAt ? ` (${item.reservedAt})` : ''}
+                    </div>
+                    <button
+                      type="button"
+                      className="chip"
+                      title="예약 취소"
+                      disabled={disabled}
+                      onClick={() => onCancelReservation(item)}
+                      style={{ marginTop: '4px' }}
+                    >
+                      취소
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" className="chip" disabled={disabled} onClick={() => onReserve(item)}>
+                    예약
+                  </button>
+                )}
+              </td>
               <td>
                 <div className="row-actions">
                   <button

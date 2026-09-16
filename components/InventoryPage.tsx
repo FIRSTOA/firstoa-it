@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { createAsset, deleteAsset, resetToSeed, updateAsset } from '@/app/actions';
+import { cancelReservation, createAsset, deleteAsset, reserveAsset, resetToSeed, updateAsset } from '@/app/actions';
 import type { DataSource } from '@/lib/dataSource';
 import { filterAssets, toggleMultiValue } from '@/lib/filters';
 import { useFilterState } from '@/lib/useFilterState';
@@ -112,6 +112,27 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
     });
   }
 
+  function handleReserve(item: Asset) {
+    const name = prompt('예약자 이름을 입력해주세요.');
+    if (name === null) return; // 취소
+    if (!name.trim()) {
+      showToast('예약자 이름을 입력해주세요.');
+      return;
+    }
+    startTransition(async () => {
+      const result = await reserveAsset(item.assetId, item.category, name.trim());
+      showToast(result.ok ? '예약했어요.' : result.error);
+    });
+  }
+
+  function handleCancelReservation(item: Asset) {
+    if (!confirm(`${item.assetId}의 예약을 취소할까요?`)) return;
+    startTransition(async () => {
+      const result = await cancelReservation(item.assetId, item.category);
+      showToast(result.ok ? '예약을 취소했어요.' : result.error);
+    });
+  }
+
   function handleReset() {
     if (!confirm('샘플 데이터로 초기화할까요? 현재 입력한 내용은 사라져요.')) return;
     startTransition(async () => {
@@ -211,6 +232,8 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
           setModalOpen(true);
         }}
         onDelete={handleDelete}
+        onReserve={handleReserve}
+        onCancelReservation={handleCancelReservation}
       />
 
       <AssetModal
