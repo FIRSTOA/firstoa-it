@@ -14,6 +14,9 @@ export type Asset = {
   model: string;
   cpu: string;
   spec: string;
+  // 시트 B열("사양(PC라벨)"/"사양") 원문 — 카테고리 구분 없이 전부 채워짐. 표에서는 이 값을
+  // cpu/ram/storage를 이어붙인 긴 문구 대신 간략 사양으로 보여줍니다.
+  specLabel: string;
   ram: string;
   storage: string;
   screen: string;
@@ -70,6 +73,7 @@ export function rowToAsset(row: AssetRow): Asset {
     isNew: row.is_new,
     malicious: row.malicious,
     serialNo: row.serial_no,
+    specLabel: '',
     cpuType: '',
     gubunCode: '',
   };

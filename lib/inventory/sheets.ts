@@ -167,13 +167,17 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
     const ssd = cell(row, header.ssdCol);
     const hdd = cell(row, header.hddCol);
 
+    // "사양(PC라벨)"/"사양" B열 — 카테고리별로 형식은 달라도(노트북/데스크탑은 "I5/11/8/256/X/내장"
+    // 코드, 모니터는 "삼성 24인치", 기타주변기기는 "4TB * 2" 등) 다 그 시트의 간략 사양이라
+    // 카테고리 구분 없이 그대로 읽어서 보여줍니다.
+    const specLabel = cell(row, header.specCodeCol);
+
     let spec = '확인필요';
     let cpuType = '';
     let gubunCode = '';
     if (SPEC_CLASSIFIED_CATEGORIES.has(category)) {
       const gubun = cell(row, header.gubunCol);
-      const specCode = cell(row, header.specCodeCol);
-      const classified = parseGubunAndSpec_(gubun, specCode);
+      const classified = parseGubunAndSpec_(gubun, specLabel);
       if (!classified.needsReview && classified.tierGroup) spec = classified.tierGroup;
       cpuType = classified.cpuType || '미상';
       gubunCode = gubun;
@@ -188,6 +192,7 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
       model: cell(row, header.modelCol),
       cpu: cell(row, header.cpuCol),
       spec,
+      specLabel,
       cpuType,
       gubunCode,
       ram: cell(row, header.memoryCol),

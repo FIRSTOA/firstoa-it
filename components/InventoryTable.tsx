@@ -10,7 +10,10 @@ const SPEC_TAG_CLASS: Record<string, string> = {
 };
 
 function SpecCell({ item }: { item: Asset }) {
-  const detail = [item.cpu, item.ram, item.storage].filter(Boolean).join('/');
+  // 시트 B열("사양(PC라벨)"/"사양") 원문을 그대로 보여줍니다 — cpu/ram/storage를 길게 이어붙인
+  // 문구보다 간략해서 읽기 쉽습니다. 새로 등록해서 아직 그 칸이 비어있는 자산만 예전 방식으로
+  // 대체 표시합니다.
+  const detail = item.specLabel || [item.cpu, item.ram, item.storage].filter(Boolean).join('/');
   return (
     <>
       <div className="spec-tags">

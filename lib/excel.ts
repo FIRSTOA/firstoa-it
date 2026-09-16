@@ -96,6 +96,7 @@ export function parseExcelRows(rows: Record<string, unknown>[]): ParsedExcelResu
       model,
       cpu: cell(row, 'CPU종류') || '미상',
       spec: cell(row, '사양분류') || '사무용',
+      specLabel: '',
       cpuType: '',
       gubunCode: '',
       ram: cell(row, 'RAM(GB)'),
