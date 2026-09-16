@@ -44,6 +44,22 @@ export async function createReceiving(entry: ReceivingInput, quantity: number): 
   return { ok: true };
 }
 
+/**
+ * 붙여넣기 파싱(lib/receivingParser.ts) 미리보기에서 이미 펼쳐진 행들을 한 번에 등록합니다.
+ * createReceiving과 달리 quantity 반복이 없고, 호출부가 넘긴 배열을 그대로 insert합니다.
+ */
+export async function createReceivingBatch(entries: ReceivingInput[]): Promise<ActionResult> {
+  if (entries.length === 0) return { ok: false, error: '등록할 내용이 없어요.' };
+
+  const supabase = createAdminClient();
+  const rows = entries.map(receivingInputToRow);
+  const { error } = await supabase.from(RECEIVING_TABLE).insert(rows);
+  if (error) return { ok: false, error: toMessage(error) };
+
+  revalidatePath('/receiving');
+  return { ok: true };
+}
+
 export async function updateReceiving(id: string, entry: ReceivingInput): Promise<ActionResult> {
   const invalid = validate(entry);
   if (invalid) return { ok: false, error: invalid };

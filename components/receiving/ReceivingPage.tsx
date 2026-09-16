@@ -1,13 +1,21 @@
 'use client';
 
 import { useMemo, useRef, useState, useTransition } from 'react';
-import { completeReceiving, createReceiving, deleteReceiving, updateReceiving } from '@/app/receiving/actions';
+import {
+  completeReceiving,
+  createReceiving,
+  createReceivingBatch,
+  deleteReceiving,
+  updateReceiving,
+} from '@/app/receiving/actions';
 import {
   EMPTY_RECEIVING_FILTERS,
   filterReceivingEntries,
   type ReceivingEntry,
   type ReceivingInput,
 } from '@/lib/receiving';
+import { expandParsedGroup, type ParsedReceivingGroup } from '@/lib/receivingParser';
+import PasteImportModal from './PasteImportModal';
 import ReceivingFilters from './ReceivingFilters';
 import ReceivingModal from './ReceivingModal';
 import ReceivingStats from './ReceivingStats';
@@ -17,6 +25,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
   const [filters, setFilters] = useState(EMPTY_RECEIVING_FILTERS);
   const [searchTerm, setSearchTerm] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [editing, setEditing] = useState<ReceivingEntry | null>(null);
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
@@ -57,6 +66,19 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
     });
   }
 
+  function handlePasteImport(groups: ParsedReceivingGroup[]) {
+    const entries: ReceivingInput[] = groups.flatMap(expandParsedGroup);
+    startTransition(async () => {
+      const result = await createReceivingBatch(entries);
+      if (!result.ok) {
+        showToast(result.error);
+        return;
+      }
+      setPasteModalOpen(false);
+      showToast(`${entries.length}건 등록했어요.`);
+    });
+  }
+
   function handleComplete(entry: ReceivingEntry) {
     if (!confirm(`자산번호 "${entry.assetId}"를 IT재고에 등록하고 입고완료 처리할까요?`)) return;
     startTransition(async () => {
@@ -72,6 +94,9 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
           총 {entries.length}건
         </div>
         <div className="actions">
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setPasteModalOpen(true)}>
+            📋 붙여넣기로 등록
+          </button>
           <button
             type="button"
             className="btn btn-primary"
@@ -120,6 +145,13 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
           setEditing(null);
         }}
         onSave={handleSave}
+      />
+
+      <PasteImportModal
+        open={pasteModalOpen}
+        pending={pending}
+        onClose={() => setPasteModalOpen(false)}
+        onImport={handlePasteImport}
       />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>{toast.msg}</div>

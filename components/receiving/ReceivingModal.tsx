@@ -17,6 +17,7 @@ const BLANK: ReceivingInput = {
   storage: '',
   screen: '',
   vendor: '',
+  purchasePrice: '',
   expectedDate: '',
   manager: '',
   notes: '',
@@ -89,6 +90,7 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
         storage: form.storage.trim(),
         screen: form.screen.trim(),
         vendor: form.vendor.trim(),
+        purchasePrice: form.purchasePrice.trim(),
         manager: form.manager.trim(),
         notes: form.notes.trim(),
         assetId: form.assetId.trim(),
@@ -209,6 +211,14 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
               <input value={form.vendor} onChange={(e) => set('vendor', e.target.value)} placeholder="예: 다온디지털" />
             </div>
           )}
+          <div className="form-field">
+            <label>매입가</label>
+            <input
+              value={form.purchasePrice}
+              onChange={(e) => set('purchasePrice', e.target.value)}
+              placeholder="예: 116,000원(vat별도)"
+            />
+          </div>
           <div className="form-field">
             <label>예상입고일</label>
             <input type="date" value={form.expectedDate} onChange={(e) => set('expectedDate', e.target.value)} />

@@ -24,6 +24,7 @@ create table if not exists public.it_receiving_log (
   screen         text not null default '',
 
   vendor         text not null default '', -- 발주처 (구매만 의미, 렌탈은 빈 값)
+  purchase_price text not null default '', -- 매입가 원문 (예: "116,000원(vat별도)")
   expected_date  date,
   manager        text not null default '',
   notes          text not null default '',
@@ -37,6 +38,9 @@ create table if not exists public.it_receiving_log (
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
+
+-- 기존에 이미 테이블이 있는 경우(create table if not exists가 no-op)에도 새 컬럼이 생기도록.
+alter table public.it_receiving_log add column if not exists purchase_price text not null default '';
 
 create index if not exists it_receiving_log_created_at_idx on public.it_receiving_log (created_at desc, seq desc);
 create index if not exists it_receiving_log_status_idx     on public.it_receiving_log (status);

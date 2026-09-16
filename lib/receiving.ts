@@ -21,6 +21,7 @@ export type ReceivingEntry = {
   storage: string;
   screen: string;
   vendor: string;
+  purchasePrice: string;
   expectedDate: string;
   manager: string;
   notes: string;
@@ -44,6 +45,7 @@ export type ReceivingRow = {
   storage: string;
   screen: string;
   vendor: string;
+  purchase_price: string;
   expected_date: string | null;
   manager: string;
   notes: string;
@@ -68,6 +70,7 @@ export function rowToReceiving(row: ReceivingRow): ReceivingEntry {
     storage: row.storage,
     screen: row.screen,
     vendor: row.vendor,
+    purchasePrice: row.purchase_price,
     expectedDate: row.expected_date ?? '',
     manager: row.manager,
     notes: row.notes,
@@ -93,6 +96,7 @@ export function receivingInputToRow(entry: ReceivingInput) {
     storage: entry.storage,
     screen: entry.screen,
     vendor: entry.vendor,
+    purchase_price: entry.purchasePrice,
     expected_date: entry.expectedDate || null,
     manager: entry.manager,
     notes: entry.notes,
