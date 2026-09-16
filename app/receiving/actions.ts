@@ -1,7 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { createAsset } from '@/app/actions';
+import { createAsset, updateAsset } from '@/app/actions';
+import { DATA_SOURCE } from '@/lib/dataSource';
+import { getAssetFromSheets } from '@/lib/inventory/sheets';
 import {
   missingRequiredFields,
   receivingInputToRow,
@@ -9,8 +11,8 @@ import {
   type ReceivingInput,
   type ReceivingRow,
 } from '@/lib/receiving';
-import type { Asset } from '@/lib/types';
-import { createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
+import { rowToAsset, type Asset, type AssetRow } from '@/lib/types';
+import { ASSETS_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -81,11 +83,24 @@ export async function deleteReceiving(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/** DATA_SOURCE에 맞는 쪽에서 자산번호로 기존 자산을 찾습니다 (귀환자산 판별용). */
+async function findExistingAsset(assetId: string): Promise<Asset | null> {
+  if (DATA_SOURCE === 'sheets') return getAssetFromSheets(assetId);
+
+  const supabase = createAdminClient();
+  const { data } = await supabase.from(ASSETS_TABLE).select('*').eq('asset_id', assetId).maybeSingle();
+  return data ? rowToAsset(data as AssetRow) : null;
+}
+
 /**
- * 입고완료 처리: 입고 대장 행을 실제 IT재고 자산으로 등록합니다. 재고 등록은 새로 만들지 않고
- * 기존 createAsset(app/actions.ts)을 그대로 호출합니다 — DATA_SOURCE에 따른 시트/Supabase 분기,
- * 검증, 재고 화면 revalidate가 이미 다 처리돼 있습니다. 재고 등록이 실패하면(예: 이미 존재하는
- * 자산번호) 입고 행은 '입고대기' 그대로 남겨서 입고 기록이 깨지지 않게 합니다.
+ * 입고완료 처리: 입고 대장 행을 실제 IT재고에 반영합니다.
+ * - 자산번호가 재고에 이미 있으면(렌탈 등으로 나갔다가 돌아오는 귀환자산) 새로 만들지 않고
+ *   기존 자산의 위치만 입고 대장의 위치로 업데이트합니다(브랜드/모델/사양 등 나머지는 재고 쪽
+ *   기존 값을 그대로 유지 — 입고 대장 값으로 덮어쓰지 않음).
+ * - 없으면 신규 자산으로 등록합니다.
+ * 두 경우 다 기존 createAsset/updateAsset(app/actions.ts)을 그대로 호출합니다 — DATA_SOURCE에
+ * 따른 시트/Supabase 분기, 검증, 재고 화면 revalidate가 이미 다 처리돼 있습니다. 재고 쪽이
+ * 실패하면(예: 검증 오류) 입고 행은 '입고대기' 그대로 남겨서 입고 기록이 깨지지 않게 합니다.
  */
 export async function completeReceiving(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
@@ -100,29 +115,32 @@ export async function completeReceiving(id: string): Promise<ActionResult> {
     return { ok: false, error: `다음 항목을 먼저 입력해주세요: ${missing.join(', ')}` };
   }
 
-  const asset: Asset = {
-    assetId: entry.assetId.trim(),
-    category: entry.category,
-    brand: entry.brand,
-    model: entry.model,
-    cpu: entry.cpu,
-    spec: entry.spec || '확인필요',
-    specLabel: '',
-    cpuType: '',
-    gubunCode: '',
-    subItem: '',
-    ram: entry.ram,
-    storage: entry.storage,
-    screen: entry.screen || '-',
-    location: entry.location,
-    status: '상품화준비중',
-    history: entry.kind === '렌탈입고예정' ? '렌탈입고' : '구매입고',
-    isNew: true,
-    malicious: false,
-    serialNo: entry.serialNumber,
-  };
+  const trimmedAssetId = entry.assetId.trim();
+  const existing = await findExistingAsset(trimmedAssetId);
 
-  const result = await createAsset(asset);
+  const result = existing
+    ? await updateAsset(trimmedAssetId, { ...existing, location: entry.location })
+    : await createAsset({
+        assetId: trimmedAssetId,
+        category: entry.category,
+        brand: entry.brand,
+        model: entry.model,
+        cpu: entry.cpu,
+        spec: entry.spec || '확인필요',
+        specLabel: '',
+        cpuType: '',
+        gubunCode: '',
+        subItem: '',
+        ram: entry.ram,
+        storage: entry.storage,
+        screen: entry.screen || '-',
+        location: entry.location,
+        status: '상품화준비중',
+        history: entry.kind === '렌탈입고예정' ? '렌탈입고' : '구매입고',
+        isNew: true,
+        malicious: false,
+        serialNo: entry.serialNumber,
+      });
   if (!result.ok) return result;
 
   const { error: updateError } = await supabase

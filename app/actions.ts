@@ -6,6 +6,7 @@ import {
   cancelReservationInSheet,
   createAssetInSheet,
   deleteAssetFromSheet,
+  getAssetFromSheets,
   reserveAssetInSheet,
   updateAssetInSheet,
 } from '@/lib/inventory/sheets';
@@ -163,6 +164,70 @@ export async function lookupRentalAsset(assetId: string): Promise<RentalLookupAc
   const result = await lookupRentalByAssetId(assetId);
   if (!result) return { found: false };
   return { found: true, model: result.model, serialNo: result.serialNo, specHint: result.specHint };
+}
+
+export type KnownAssetLookupResult =
+  | {
+      found: true;
+      source: 'inventory' | 'rental';
+      category: string;
+      brand: string;
+      model: string;
+      cpu: string;
+      spec: string;
+      ram: string;
+      storage: string;
+      screen: string;
+      serialNo: string;
+    }
+  | { found: false };
+
+/**
+ * 자산번호로 "기존에 이미 있는 데이터"를 통합 조회합니다 — 먼저 IT재고 구글시트(더 정확/최신)를
+ * 찾아보고, 없으면 임대리스트에서 재시도합니다. 입고 대장의 붙여넣기 등록(자산번호가 이미
+ * 정해진 귀환자산 케이스)과 수동 등록 폼(ReceivingModal)의 자산번호 자동조회가 함께 씁니다.
+ */
+export async function lookupKnownAsset(assetId: string): Promise<KnownAssetLookupResult> {
+  const trimmed = assetId.trim();
+  if (!trimmed) return { found: false };
+
+  if (DATA_SOURCE === 'sheets') {
+    const asset = await getAssetFromSheets(trimmed);
+    if (asset) {
+      return {
+        found: true,
+        source: 'inventory',
+        category: asset.category,
+        brand: asset.brand,
+        model: asset.model,
+        cpu: asset.cpu,
+        spec: asset.spec,
+        ram: asset.ram,
+        storage: asset.storage,
+        screen: asset.screen,
+        serialNo: asset.serialNo,
+      };
+    }
+  }
+
+  const rental = await lookupRentalByAssetId(trimmed);
+  if (rental) {
+    return {
+      found: true,
+      source: 'rental',
+      category: '',
+      brand: '',
+      model: rental.model ?? '',
+      cpu: '',
+      spec: '',
+      ram: '',
+      storage: '',
+      screen: '',
+      serialNo: rental.serialNo ?? '',
+    };
+  }
+
+  return { found: false };
 }
 
 /** 테이블을 비우고 lib/seed.ts 의 샘플 데이터로 되돌립니다. */

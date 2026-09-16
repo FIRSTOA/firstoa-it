@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { lookupRentalAsset } from '@/app/actions';
+import { lookupKnownAsset } from '@/app/actions';
 import { RECEIVING_KINDS, type ReceivingEntry, type ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES, SPECS } from '@/lib/types';
 
@@ -26,10 +26,10 @@ const BLANK: ReceivingInput = {
   location: '',
 };
 
-type RentalLookupState =
+type KnownAssetLookupState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'found'; specHint: string }
+  | { status: 'found'; source: 'inventory' | 'rental' }
   | { status: 'not-found' };
 
 type Props = {
@@ -43,40 +43,49 @@ type Props = {
 export default function ReceivingModal({ open, editing, pending, onClose, onSave }: Props) {
   const [form, setForm] = useState<ReceivingInput>(BLANK);
   const [quantity, setQuantity] = useState(1);
-  const [rentalLookup, setRentalLookup] = useState<RentalLookupState>({ status: 'idle' });
+  const [knownLookup, setKnownLookup] = useState<KnownAssetLookupState>({ status: 'idle' });
 
   useEffect(() => {
     if (open) {
       setForm(editing ?? BLANK);
       setQuantity(1);
-      setRentalLookup({ status: 'idle' });
+      setKnownLookup({ status: 'idle' });
     }
   }, [open, editing]);
 
   const set = <K extends keyof ReceivingInput>(key: K, value: ReceivingInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  // 렌탈입고예정: 자산번호만 입력하면 임대리스트(구글시트)에서 모델명/시리얼/사양을 자동으로
-  // 채워줍니다 — AssetModal.tsx의 handleAssetIdBlur와 동일한 조회를 재사용합니다.
+  // 자산번호를 입력하고 다른 칸으로 넘어가면 기존 데이터(IT재고 구글시트 → 임대리스트 순서로
+  // 조회, app/actions.ts의 lookupKnownAsset)에서 사양을 자동으로 채워줍니다 — 렌탈입고예정뿐
+  // 아니라 구매입고예정도 귀환자산(예: 렌탈 나갔다가 돌아오는 건)이면 도움이 되므로 유형
+  // 상관없이 조회합니다. 이미 사람이 입력한 값은 덮어쓰지 않고 빈 칸만 채웁니다.
   async function handleAssetIdBlur() {
-    if (form.kind !== '렌탈입고예정') return;
+    if (editing) return;
     const assetId = form.assetId.trim();
     if (!assetId) {
-      setRentalLookup({ status: 'idle' });
+      setKnownLookup({ status: 'idle' });
       return;
     }
-    setRentalLookup({ status: 'loading' });
-    const result = await lookupRentalAsset(assetId);
+    setKnownLookup({ status: 'loading' });
+    const result = await lookupKnownAsset(assetId);
     if (!result.found) {
-      setRentalLookup({ status: 'not-found' });
+      setKnownLookup({ status: 'not-found' });
       return;
     }
     setForm((prev) => ({
       ...prev,
-      model: result.model || prev.model,
-      serialNumber: result.serialNo || prev.serialNumber,
+      category: prev.category || result.category || prev.category,
+      brand: prev.brand || result.brand,
+      model: prev.model || result.model,
+      cpu: prev.cpu || result.cpu,
+      spec: prev.spec || result.spec,
+      ram: prev.ram || result.ram,
+      storage: prev.storage || result.storage,
+      screen: prev.screen || result.screen,
+      serialNumber: prev.serialNumber || result.serialNo,
     }));
-    setRentalLookup({ status: 'found', specHint: result.specHint ?? '' });
+    setKnownLookup({ status: 'found', source: result.source });
   }
 
   function handleSave() {
@@ -149,15 +158,14 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
               onBlur={handleAssetIdBlur}
               placeholder="예: P2400"
             />
-            {isRental && rentalLookup.status !== 'idle' && (
+            {!editing && knownLookup.status !== 'idle' && (
               <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
-                {rentalLookup.status === 'loading' && '임대리스트 조회 중…'}
-                {rentalLookup.status === 'not-found' &&
-                  '임대리스트에서 못 찾았어요 — 직접 입력해주세요.'}
-                {rentalLookup.status === 'found' &&
-                  `임대리스트에서 모델명/시리얼을 채웠어요.${
-                    rentalLookup.specHint ? ` (${rentalLookup.specHint})` : ''
-                  }`}
+                {knownLookup.status === 'loading' && '기존 데이터 조회 중…'}
+                {knownLookup.status === 'not-found' && '기존 데이터를 못 찾았어요 — 직접 입력해주세요.'}
+                {knownLookup.status === 'found' &&
+                  (knownLookup.source === 'inventory'
+                    ? 'IT재고에 이미 있는 자산이에요 — 빈 칸을 자동으로 채웠어요.'
+                    : '임대리스트에서 모델명/시리얼을 채웠어요.')}
               </div>
             )}
           </div>

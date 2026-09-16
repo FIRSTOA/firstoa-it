@@ -150,6 +150,62 @@ function cell(row: unknown[], col: number): string {
   return col >= 0 ? String(row[col] ?? '').trim() : '';
 }
 
+/**
+ * 시트 행 하나를 Asset으로 변환합니다. listAssetsFromSheet(전체 목록)와
+ * getAssetFromSheets(자산번호 단건 조회, 입고 기능의 기존자산 자동조회/귀환자산 처리에 씀)가
+ * 이 매핑을 공유합니다 — assetId가 비어있는지 확인하는 건 호출부 책임입니다.
+ */
+function mapRowToAsset(row: unknown[], header: HeaderMap, category: string): Asset {
+  const assetId = cell(row, header.assetIdCol);
+  const remark = cell(row, header.remarkCol);
+  const location = cell(row, header.locationCol);
+  const ssd = cell(row, header.ssdCol);
+  const hdd = cell(row, header.hddCol);
+
+  // "사양(PC라벨)"/"사양" B열 — 카테고리별로 형식은 달라도(노트북/데스크탑은 "I5/11/8/256/X/내장"
+  // 코드, 모니터는 "삼성 24인치", 기타주변기기는 "4TB * 2" 등) 다 그 시트의 간략 사양이라
+  // 카테고리 구분 없이 그대로 읽어서 보여줍니다.
+  const specLabel = cell(row, header.specCodeCol);
+
+  let spec = '확인필요';
+  let cpuType = '';
+  let gubunCode = '';
+  if (SPEC_CLASSIFIED_CATEGORIES.has(category)) {
+    const gubun = cell(row, header.gubunCol);
+    const classified = parseGubunAndSpec_(gubun, specLabel);
+    if (!classified.needsReview && classified.tierGroup) spec = classified.tierGroup;
+    cpuType = classified.cpuType || '미상';
+    gubunCode = gubun;
+  }
+
+  const reservedBy = cell(row, header.reserverCol);
+  const subItem = SUB_ITEM_CATEGORIES.has(category) ? cell(row, header.itemCol) : '';
+
+  return {
+    assetId,
+    category,
+    brand: cell(row, header.brandCol),
+    model: cell(row, header.modelCol),
+    cpu: cell(row, header.cpuCol),
+    spec,
+    specLabel,
+    cpuType,
+    gubunCode,
+    subItem,
+    ram: cell(row, header.memoryCol),
+    storage: [ssd, hdd].filter(Boolean).join(' / '),
+    screen: cell(row, header.screenCol) || '-',
+    location,
+    status: parseLocationStatus_(location, category, remark).status,
+    history: remark,
+    isNew: deriveIsNew(remark),
+    malicious: deriveMalicious(remark),
+    serialNo: cell(row, header.serialCol),
+    reservedBy: reservedBy || undefined,
+    reservedAt: cell(row, header.reserveDateCol) || undefined,
+  };
+}
+
 /** 카테고리 하나의 시트를 전부 읽어 Asset[] 로 변환합니다. */
 export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
   const tab = requireTab(category);
@@ -165,56 +221,8 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
 
   const assets: Asset[] = [];
   for (const row of rows) {
-    const assetId = cell(row, header.assetIdCol);
-    if (!assetId) continue;
-
-    const remark = cell(row, header.remarkCol);
-    const location = cell(row, header.locationCol);
-    const ssd = cell(row, header.ssdCol);
-    const hdd = cell(row, header.hddCol);
-
-    // "사양(PC라벨)"/"사양" B열 — 카테고리별로 형식은 달라도(노트북/데스크탑은 "I5/11/8/256/X/내장"
-    // 코드, 모니터는 "삼성 24인치", 기타주변기기는 "4TB * 2" 등) 다 그 시트의 간략 사양이라
-    // 카테고리 구분 없이 그대로 읽어서 보여줍니다.
-    const specLabel = cell(row, header.specCodeCol);
-
-    let spec = '확인필요';
-    let cpuType = '';
-    let gubunCode = '';
-    if (SPEC_CLASSIFIED_CATEGORIES.has(category)) {
-      const gubun = cell(row, header.gubunCol);
-      const classified = parseGubunAndSpec_(gubun, specLabel);
-      if (!classified.needsReview && classified.tierGroup) spec = classified.tierGroup;
-      cpuType = classified.cpuType || '미상';
-      gubunCode = gubun;
-    }
-
-    const reservedBy = cell(row, header.reserverCol);
-    const subItem = SUB_ITEM_CATEGORIES.has(category) ? cell(row, header.itemCol) : '';
-
-    assets.push({
-      assetId,
-      category,
-      brand: cell(row, header.brandCol),
-      model: cell(row, header.modelCol),
-      cpu: cell(row, header.cpuCol),
-      spec,
-      specLabel,
-      cpuType,
-      gubunCode,
-      subItem,
-      ram: cell(row, header.memoryCol),
-      storage: [ssd, hdd].filter(Boolean).join(' / '),
-      screen: cell(row, header.screenCol) || '-',
-      location,
-      status: parseLocationStatus_(location, category, remark).status,
-      history: remark,
-      isNew: deriveIsNew(remark),
-      malicious: deriveMalicious(remark),
-      serialNo: cell(row, header.serialCol),
-      reservedBy: reservedBy || undefined,
-      reservedAt: cell(row, header.reserveDateCol) || undefined,
-    });
+    if (!cell(row, header.assetIdCol)) continue;
+    assets.push(mapRowToAsset(row, header, category));
   }
   return assets;
 }
@@ -357,6 +365,29 @@ async function findAssetAnywhere(
     if (rowNumber) return { category, rowNumber };
   }
   return null;
+}
+
+/**
+ * 자산번호로 IT재고 5개 탭 전체를 뒤져서 이미 등록된 자산인지 확인합니다. 입고 대장에서
+ * "귀환자산"(렌탈 등으로 나갔다가 돌아오는 이미 있는 자산번호)을 자동으로 알아보는 데 씁니다
+ * (app/actions.ts의 lookupKnownAsset, app/receiving/actions.ts의 completeReceiving).
+ */
+export async function getAssetFromSheets(assetId: string): Promise<Asset | null> {
+  const trimmed = assetId.trim();
+  if (!trimmed) return null;
+
+  const found = await findAssetAnywhere(trimmed, CATEGORIES[0]);
+  if (!found) return null;
+
+  const tab = requireTab(found.category);
+  const { header } = await getCache(found.category);
+  const sheets = getSheetsClient();
+  const rowRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: requireSheetId(),
+    range: `${tab}!${found.rowNumber}:${found.rowNumber}`,
+  });
+  const row = (rowRes.data.values?.[0] ?? []).map((v) => String(v ?? ''));
+  return mapRowToAsset(row, header, found.category);
 }
 
 /**

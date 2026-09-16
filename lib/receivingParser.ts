@@ -11,11 +11,19 @@ import type { ReceivingInput } from './receiving';
 export type ParsedReceivingGroup = {
   kind: string;
   category: string;
+  brand: string;
   model: string;
+  cpu: string;
+  spec: string;
+  ram: string;
+  storage: string;
+  screen: string;
   vendor: string;
   purchasePrice: string;
+  expectedDate: string;
   manager: string;
   notes: string;
+  serialNumber: string;
   quantity: number;
   /** 채워져 있으면 quantity 대신 이 자산번호들로 한 건씩 생성됩니다. */
   assetIds: string[];
@@ -24,6 +32,30 @@ export type ParsedReceivingGroup = {
 const QUANTITY_RE = /(\d+)\s*대/;
 const VENDOR_RE = /(\S+?)에서/;
 const ASSET_ID_TOKEN_RE = /^[A-Za-z]{1,3}\d{1,6}$/;
+const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토']; // Date.getDay() 순서(0=일요일)와 동일
+
+function formatDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * "월요일까지"처럼 뚜렷한 요일 마감 표현만 실제 날짜로 계산합니다. "차주 중"처럼 모호한 표현은
+ * 잘못 추측하는 것보다 빈 칸으로 두고 사람이 직접 입력하는 게 안전해서 일부러 처리하지 않습니다.
+ */
+export function parseExpectedDateHint(headingLine: string, today: Date = new Date()): string {
+  const match = headingLine.match(/(월|화|수|목|금|토|일)요일까지/);
+  if (!match) return '';
+  const targetIdx = WEEKDAY_NAMES.indexOf(match[1]);
+  if (targetIdx === -1) return '';
+  const todayIdx = today.getDay();
+  const diff = (targetIdx - todayIdx + 7) % 7; // 오늘이 그 요일이면 0(오늘)로 취급
+  const result = new Date(today);
+  result.setDate(today.getDate() + diff);
+  return formatDate(result);
+}
 
 function stripLeadingBullet(line: string): string {
   return line.replace(/^[-•]\s*/, '');
@@ -78,11 +110,13 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
 
   let kind = defaultKind;
   let vendor = '';
+  let expectedDate = '';
   if (headingIndex >= 0) {
     const heading = lines[headingIndex];
     const vendorMatch = heading.match(VENDOR_RE);
     if (vendorMatch) vendor = vendorMatch[1];
     if (heading.includes('렌탈')) kind = '렌탈입고예정';
+    expectedDate = parseExpectedDateHint(heading);
   }
 
   const groups: ParsedReceivingGroup[] = [];
@@ -118,11 +152,19 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
       current = {
         kind,
         category: item.category,
+        brand: '',
         model: item.model,
+        cpu: '',
+        spec: '',
+        ram: '',
+        storage: '',
+        screen: '',
         vendor,
         purchasePrice: '',
+        expectedDate,
         manager: '',
         notes: '',
+        serialNumber: '',
         quantity: item.quantity,
         assetIds: [],
       };
@@ -149,11 +191,19 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
     groups.push({
       kind,
       category: '',
+      brand: '',
       model: '',
+      cpu: '',
+      spec: '',
+      ram: '',
+      storage: '',
+      screen: '',
       vendor,
       purchasePrice: '',
+      expectedDate,
       manager: '',
       notes: text.trim(),
+      serialNumber: '',
       quantity: 1,
       assetIds: [],
     });
@@ -168,19 +218,19 @@ export function expandParsedGroup(group: ParsedReceivingGroup): ReceivingInput[]
     kind: group.kind,
     status: '입고대기',
     category: group.category,
-    brand: '',
+    brand: group.brand,
     model: group.model,
-    cpu: '',
-    spec: '',
-    ram: '',
-    storage: '',
-    screen: '',
+    cpu: group.cpu,
+    spec: group.spec,
+    ram: group.ram,
+    storage: group.storage,
+    screen: group.screen,
     vendor: group.vendor,
     purchasePrice: group.purchasePrice,
-    expectedDate: '',
+    expectedDate: group.expectedDate,
     manager: group.manager,
     notes: group.notes,
-    serialNumber: '',
+    serialNumber: group.serialNumber,
     location: '',
   };
 

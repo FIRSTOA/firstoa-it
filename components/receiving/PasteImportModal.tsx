@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { lookupKnownAsset } from '@/app/actions';
 import { RECEIVING_KINDS } from '@/lib/receiving';
-import { expandParsedGroup, parseReceivingPaste, type ParsedReceivingGroup } from '@/lib/receivingParser';
-import { CATEGORIES } from '@/lib/types';
+import { parseReceivingPaste, type ParsedReceivingGroup } from '@/lib/receivingParser';
+import { CATEGORIES, SPECS } from '@/lib/types';
 
 type Props = {
   open: boolean;
@@ -21,6 +22,7 @@ export default function PasteImportModal({ open, pending, onClose, onImport }: P
   const [kind, setKind] = useState<string>(RECEIVING_KINDS[0]);
   const [text, setText] = useState('');
   const [groups, setGroups] = useState<ParsedReceivingGroup[] | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   function reset() {
     setText('');
@@ -28,9 +30,40 @@ export default function PasteImportModal({ open, pending, onClose, onImport }: P
     setKind(RECEIVING_KINDS[0]);
   }
 
-  function handlePreview() {
+  // 자산번호가 이미 정해진 그룹(형식 C — 귀환자산일 수 있음)은 그 번호로 기존 데이터를 조회해서
+  // 비어있는 품목/브랜드/사양 칸을 채워줍니다. 첫 번째 자산번호만 대표로 조회합니다(같은 묶음은
+  // 보통 같은 모델이라고 가정 — 다르면 미리보기에서 직접 고치면 됨).
+  async function enrichFromKnownAssets(parsed: ParsedReceivingGroup[]): Promise<ParsedReceivingGroup[]> {
+    return Promise.all(
+      parsed.map(async (g) => {
+        if (g.assetIds.length === 0) return g;
+        const result = await lookupKnownAsset(g.assetIds[0]);
+        if (!result.found) return g;
+        return {
+          ...g,
+          category: g.category || result.category,
+          brand: g.brand || result.brand,
+          model: g.model || result.model,
+          cpu: g.cpu || result.cpu,
+          spec: g.spec || result.spec,
+          ram: g.ram || result.ram,
+          storage: g.storage || result.storage,
+          screen: g.screen || result.screen,
+          serialNumber: g.serialNumber || result.serialNo,
+        };
+      }),
+    );
+  }
+
+  async function handlePreview() {
     if (!text.trim()) return;
-    setGroups(parseReceivingPaste(text, kind));
+    const parsed = parseReceivingPaste(text, kind);
+    setLoadingPreview(true);
+    try {
+      setGroups(await enrichFromKnownAssets(parsed));
+    } finally {
+      setLoadingPreview(false);
+    }
   }
 
   function updateGroup(index: number, patch: Partial<ParsedReceivingGroup>) {
@@ -138,9 +171,47 @@ export default function PasteImportModal({ open, pending, onClose, onImport }: P
                       ))}
                     </select>
                   </div>
+                  <div className="form-field">
+                    <label>브랜드</label>
+                    <input value={g.brand} onChange={(e) => updateGroup(i, { brand: e.target.value })} />
+                  </div>
                   <div className="form-field full">
                     <label>모델명/설명</label>
                     <input value={g.model} onChange={(e) => updateGroup(i, { model: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label>CPU종류</label>
+                    <input value={g.cpu} onChange={(e) => updateGroup(i, { cpu: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label>사양분류</label>
+                    <select value={g.spec} onChange={(e) => updateGroup(i, { spec: e.target.value })}>
+                      <option value="">(미정)</option>
+                      {SPECS.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label>RAM(GB)</label>
+                    <input value={g.ram} onChange={(e) => updateGroup(i, { ram: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label>저장용량(GB)</label>
+                    <input value={g.storage} onChange={(e) => updateGroup(i, { storage: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label>화면크기</label>
+                    <input value={g.screen} onChange={(e) => updateGroup(i, { screen: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label>시리얼번호</label>
+                    <input
+                      value={g.serialNumber}
+                      onChange={(e) => updateGroup(i, { serialNumber: e.target.value })}
+                    />
                   </div>
                   <div className="form-field">
                     <label>발주처</label>
@@ -151,6 +222,14 @@ export default function PasteImportModal({ open, pending, onClose, onImport }: P
                     <input
                       value={g.purchasePrice}
                       onChange={(e) => updateGroup(i, { purchasePrice: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label>예상입고일</label>
+                    <input
+                      type="date"
+                      value={g.expectedDate}
+                      onChange={(e) => updateGroup(i, { expectedDate: e.target.value })}
                     />
                   </div>
                   <div className="form-field">
@@ -224,8 +303,13 @@ export default function PasteImportModal({ open, pending, onClose, onImport }: P
             취소
           </button>
           {!groups ? (
-            <button type="button" className="btn btn-primary" onClick={handlePreview} disabled={pending || !text.trim()}>
-              미리보기
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handlePreview}
+              disabled={pending || loadingPreview || !text.trim()}
+            >
+              {loadingPreview ? '기존 자산 조회 중…' : '미리보기'}
             </button>
           ) : (
             <>
