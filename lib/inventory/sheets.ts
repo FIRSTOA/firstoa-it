@@ -1,6 +1,7 @@
 import 'server-only';
 import { columnLetter, getSheetsClient, isGoogleServiceAccountConfigured } from '@/lib/googleAuth';
 import { CATEGORIES, type Asset } from '@/lib/types';
+import { logAssetMovement } from './movements';
 import { deriveIsNew, deriveMalicious, parseLocationStatus_ } from './status';
 
 /**
@@ -229,8 +230,15 @@ function parseRowNumberFromRange(range?: string | null): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** 대상 카테고리 시트 맨 아래에 새 행을 추가합니다. 이미 있는 자산번호면 에러. */
-export async function createAssetInSheet(asset: Asset): Promise<void> {
+/**
+ * 대상 카테고리 시트 맨 아래에 새 행을 추가합니다. 이미 있는 자산번호면 에러.
+ * movementContext는 카테고리를 바꿔서 수정하는 경우(updateAssetInSheet가 내부적으로 호출) 이전
+ * 위치/상태를 넘겨주기 위한 것 — 일반적인 신규 등록에서는 안 넘기면 "신규 등록"으로 기록됩니다.
+ */
+export async function createAssetInSheet(
+  asset: Asset,
+  movementContext?: { fromLocation: string | null; fromStatus: string | null },
+): Promise<void> {
   const tab = requireTab(asset.category);
   const cache = await getCache(asset.category);
   if (cache.rowByAssetId.has(asset.assetId)) {
@@ -249,6 +257,17 @@ export async function createAssetInSheet(asset: Asset): Promise<void> {
 
   const rowNumber = parseRowNumberFromRange(appendRes.data.updates?.updatedRange);
   if (rowNumber) cache.rowByAssetId.set(asset.assetId, rowNumber);
+
+  const toStatus = parseLocationStatus_(asset.location, asset.category, asset.history).status;
+  await logAssetMovement({
+    assetNumber: asset.assetId,
+    category: asset.category,
+    fromLocation: movementContext?.fromLocation ?? null,
+    toLocation: asset.location || null,
+    fromStatus: movementContext?.fromStatus ?? null,
+    toStatus,
+    memo: movementContext ? '품목 변경(다른 시트로 이동)' : '신규 등록',
+  });
 }
 
 async function getSheetGid(tab: string): Promise<number> {
@@ -311,26 +330,44 @@ export async function updateAssetInSheet(originalAssetId: string, asset: Asset):
     );
   }
 
+  const foundTab = requireTab(found.category);
+  const { header: foundHeader } = await getCache(found.category);
+  const sheets = getSheetsClient();
+  const rowRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: requireSheetId(),
+    range: `${foundTab}!${found.rowNumber}:${found.rowNumber}`,
+  });
+  const existingRow = (rowRes.data.values?.[0] ?? []).map((v) => String(v ?? ''));
+  const oldLocation = cell(existingRow, foundHeader.locationCol);
+  const oldRemark = cell(existingRow, foundHeader.remarkCol);
+  const oldStatus = parseLocationStatus_(oldLocation, found.category, oldRemark).status;
+
   if (found.category === asset.category) {
-    const tab = requireTab(found.category);
-    const { header } = await getCache(found.category);
-    const sheets = getSheetsClient();
-    const rowRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: requireSheetId(),
-      range: `${tab}!${found.rowNumber}:${found.rowNumber}`,
-    });
-    const existingRow = (rowRes.data.values?.[0] ?? []).map((v) => String(v ?? ''));
-    const newRow = buildRowArray(header, asset, existingRow);
+    const newRow = buildRowArray(foundHeader, asset, existingRow);
 
     await sheets.spreadsheets.values.update({
       spreadsheetId: requireSheetId(),
-      range: `${tab}!A${found.rowNumber}:${columnLetter(newRow.length - 1)}${found.rowNumber}`,
+      range: `${foundTab}!A${found.rowNumber}:${columnLetter(newRow.length - 1)}${found.rowNumber}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [newRow] },
     });
+
+    // 위치가 실제로 바뀐 경우만 이동 이력으로 기록합니다 (모델명 등만 고친 편집은 기록 안 함).
+    if (oldLocation.trim() !== asset.location.trim()) {
+      const newStatus = parseLocationStatus_(asset.location, asset.category, asset.history).status;
+      await logAssetMovement({
+        assetNumber: asset.assetId,
+        category: asset.category,
+        fromLocation: oldLocation || null,
+        toLocation: asset.location || null,
+        fromStatus: oldStatus,
+        toStatus: newStatus,
+        memo: '위치 수정',
+      });
+    }
   } else {
     // 카테고리 변경: 새 시트에 먼저 추가 성공한 뒤에만 기존 행을 지웁니다.
-    await createAssetInSheet(asset);
+    await createAssetInSheet(asset, { fromLocation: oldLocation || null, fromStatus: oldStatus });
     await deleteRowAt(found.category, found.rowNumber);
   }
 }
@@ -344,5 +381,28 @@ export async function deleteAssetFromSheet(assetId: string, category?: string): 
   if (!found) {
     throw new Error(`자산번호 ${assetId}를 ${CATEGORIES.join('/')} 어느 시트에서도 찾지 못했어요.`);
   }
+
+  const tab = requireTab(found.category);
+  const { header } = await getCache(found.category);
+  const sheets = getSheetsClient();
+  const rowRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: requireSheetId(),
+    range: `${tab}!${found.rowNumber}:${found.rowNumber}`,
+  });
+  const existingRow = (rowRes.data.values?.[0] ?? []).map((v) => String(v ?? ''));
+  const oldLocation = cell(existingRow, header.locationCol);
+  const oldRemark = cell(existingRow, header.remarkCol);
+  const oldStatus = parseLocationStatus_(oldLocation, found.category, oldRemark).status;
+
   await deleteRowAt(found.category, found.rowNumber);
+
+  await logAssetMovement({
+    assetNumber: assetId,
+    category: found.category,
+    fromLocation: oldLocation || null,
+    toLocation: null,
+    fromStatus: oldStatus,
+    toStatus: '삭제됨',
+    memo: '앱에서 삭제됨',
+  });
 }

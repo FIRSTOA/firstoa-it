@@ -9,7 +9,7 @@ const SIDEBAR_MENU = [
   { label: '입고', href: null },
   { label: '출고', href: '/dispatch' },
   { label: '재고입력', href: null },
-  { label: '자산 이력', href: null },
+  { label: '자산 이력', href: '/asset-history' },
   { label: '소모품 가격표', href: null },
 ] as const;
 
