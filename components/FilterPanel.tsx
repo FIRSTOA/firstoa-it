@@ -94,6 +94,20 @@ export default function FilterPanel({ items, filters, searchTerm, onSearchChange
         onToggle={(v) => onSetFilter('spec', toggleMultiValue(filters.spec, v))}
         onClearAll={() => onSetFilter('spec', [])}
       />
+      <ChipGroup
+        label="CPU종류"
+        options={uniq(items.map((i) => i.cpuType).filter(Boolean))}
+        selected={filters.cpuType}
+        onToggle={(v) => onSetFilter('cpuType', toggleMultiValue(filters.cpuType, v))}
+        onClearAll={() => onSetFilter('cpuType', [])}
+      />
+      <ChipGroup
+        label="구분코드"
+        options={uniq(items.map((i) => i.gubunCode).filter(Boolean))}
+        selected={filters.gubunCode}
+        onToggle={(v) => onSetFilter('gubunCode', toggleMultiValue(filters.gubunCode, v))}
+        onClearAll={() => onSetFilter('gubunCode', [])}
+      />
 
       {/* 브랜드·새기기·화면크기: 기존과 동일하게 단일 선택 유지 */}
       <ChipGroup

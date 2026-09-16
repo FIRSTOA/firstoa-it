@@ -168,11 +168,15 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
     const hdd = cell(row, header.hddCol);
 
     let spec = '확인필요';
+    let cpuType = '';
+    let gubunCode = '';
     if (SPEC_CLASSIFIED_CATEGORIES.has(category)) {
       const gubun = cell(row, header.gubunCol);
       const specCode = cell(row, header.specCodeCol);
       const classified = parseGubunAndSpec_(gubun, specCode);
       if (!classified.needsReview && classified.tierGroup) spec = classified.tierGroup;
+      cpuType = classified.cpuType || '미상';
+      gubunCode = gubun;
     }
 
     const reservedBy = cell(row, header.reserverCol);
@@ -184,6 +188,8 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
       model: cell(row, header.modelCol),
       cpu: cell(row, header.cpuCol),
       spec,
+      cpuType,
+      gubunCode,
       ram: cell(row, header.memoryCol),
       storage: [ssd, hdd].filter(Boolean).join(' / '),
       screen: cell(row, header.screenCol) || '-',

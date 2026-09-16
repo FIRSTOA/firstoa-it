@@ -13,6 +13,8 @@ const BLANK: Asset = {
   model: '',
   cpu: '',
   spec: '사무용',
+  cpuType: '',
+  gubunCode: '',
   ram: '',
   storage: '',
   screen: '',

@@ -1,13 +1,15 @@
 import type { Asset } from './types';
 
-/** 다중 선택(OR 안에서, 필터끼리는 AND)이 적용되는 필드 3개 */
-export const MULTI_FILTER_KEYS = ['status', 'category', 'spec'] as const;
+/** 다중 선택(OR 안에서, 필터끼리는 AND)이 적용되는 필드 5개 */
+export const MULTI_FILTER_KEYS = ['status', 'category', 'spec', 'cpuType', 'gubunCode'] as const;
 export type MultiFilterKey = (typeof MULTI_FILTER_KEYS)[number];
 
 export type Filters = {
   status: string[]; // [] = 전체
   category: string[]; // [] = 전체
   spec: string[]; // [] = 전체
+  cpuType: string[]; // [] = 전체 (데스크탑/노트북만 값이 있음)
+  gubunCode: string[]; // [] = 전체 (데스크탑/노트북만 값이 있음, "I5고설데" 같은 세부 구분코드)
   malicious: boolean; // 기존 '__malicious__' 특수값을 진짜 boolean 필드로 분리
   brand: string | null;
   newDevice: 'new' | null;
@@ -18,6 +20,8 @@ export const EMPTY_FILTERS: Filters = {
   status: [],
   category: [],
   spec: [],
+  cpuType: [],
+  gubunCode: [],
   malicious: false,
   brand: null,
   newDevice: null,
@@ -29,6 +33,8 @@ export function hasActiveFilters(filters: Filters, searchTerm: string): boolean 
     filters.status.length > 0 ||
     filters.category.length > 0 ||
     filters.spec.length > 0 ||
+    filters.cpuType.length > 0 ||
+    filters.gubunCode.length > 0 ||
     filters.malicious ||
     filters.brand !== null ||
     filters.newDevice !== null ||
@@ -87,6 +93,8 @@ export function filterAssets(items: Asset[], filters: Filters, searchTerm: strin
     if (!normalizedIncludes(filters.status, it.status)) return false;
     if (!normalizedIncludes(filters.category, it.category)) return false;
     if (!normalizedIncludes(filters.spec, it.spec)) return false;
+    if (!normalizedIncludes(filters.cpuType, it.cpuType)) return false;
+    if (!normalizedIncludes(filters.gubunCode, it.gubunCode)) return false;
     if (filters.brand && !normalizedEquals(it.brand, filters.brand)) return false;
     if (filters.newDevice === 'new' && !it.isNew) return false;
     if (filters.screenGroup && screenGroupOf(it.screen) !== filters.screenGroup) return false;

@@ -23,6 +23,11 @@ export type Asset = {
   isNew: boolean;
   malicious: boolean;
   serialNo: string;
+  // 데스크탑/노트북에만 parseGubunAndSpec_로 채워짐 (구분값 원문 그대로 두 필드). Supabase엔
+  // 대응 컬럼이 없어서 rowToAsset은 빈 문자열로 채웁니다 — filterAssets/countExcluding이
+  // it[dimension]을 항상 string으로 가정하므로 다른 필드들처럼 옵셔널이 아닌 빈 문자열로 둡니다.
+  cpuType: string;
+  gubunCode: string;
   // 예약 기능은 지금 구글시트 소스에서만 씁니다 (Supabase it_assets엔 대응 컬럼이 없어서
   // 옵셔널로 둡니다 — rowToAsset/assetToRow는 안 건드려도 됨).
   reservedBy?: string;
@@ -65,6 +70,8 @@ export function rowToAsset(row: AssetRow): Asset {
     isNew: row.is_new,
     malicious: row.malicious,
     serialNo: row.serial_no,
+    cpuType: '',
+    gubunCode: '',
   };
 }
 

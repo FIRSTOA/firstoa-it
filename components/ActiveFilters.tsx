@@ -16,6 +16,8 @@ const DIMENSION_LABEL: Record<MultiFilterKey, string> = {
   status: '상태',
   category: '품목',
   spec: '사양',
+  cpuType: 'CPU종류',
+  gubunCode: '구분코드',
 };
 
 /** 현재 선택된 모든 조건을 요약해서 보여주고, 조건별로 개별 해제 + 전체 초기화를 제공합니다. */

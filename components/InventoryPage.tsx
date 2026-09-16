@@ -12,6 +12,7 @@ import CategoryCards from './CategoryCards';
 import ExcelActions from './ExcelActions';
 import FilterPanel from './FilterPanel';
 import InventoryTable from './InventoryTable';
+import SpecBreakdownPanels from './SpecBreakdownPanels';
 import SpreadsheetLinkButton from './SpreadsheetLinkButton';
 import StatsRow from './StatsRow';
 
@@ -197,6 +198,13 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         filters={filters}
         searchTerm={searchTerm}
         onToggle={(category) => setFilter('category', toggleMultiValue(filters.category, category))}
+      />
+
+      <SpecBreakdownPanels
+        items={items}
+        filters={filters}
+        searchTerm={searchTerm}
+        onToggle={(dimension, value) => setFilter(dimension, toggleMultiValue(filters[dimension], value))}
       />
 
       <FilterPanel
