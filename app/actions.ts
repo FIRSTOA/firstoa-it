@@ -107,7 +107,11 @@ export async function bulkUpsertAssets(assets: Asset[]): Promise<BulkResult> {
   if (assets.length === 0) return { ok: false, error: '가져올 데이터가 없어요.' };
 
   if (DATA_SOURCE === 'sheets') {
-    return { ok: false, error: '지금은 구글시트 연동 중이라 엑셀 일괄 업로드는 꺼져 있어요.' };
+    return {
+      ok: false,
+      error:
+        '지금은 구글시트로 운영 중이라 엑셀 일괄 업로드는 꺼져 있어요. "템플릿 다운로드" 형식으로 미리 준비해두시면, 나중에 다른 데이터 소스로 전환할 때 그대로 쓸 수 있어요.',
+    };
   }
 
   const supabase = createAdminClient();
