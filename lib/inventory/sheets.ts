@@ -7,6 +7,8 @@ import { deriveIsNew, deriveMalicious, parseLocationStatus_ } from './status';
 
 // parseGubunAndSpec_(구분→사양등급 분류)은 원본 대시보드도 이 두 카테고리에만 적용합니다.
 const SPEC_CLASSIFIED_CATEGORIES = new Set(['노트북', '데스크탑']);
+// "품목" 컬럼이 세부 항목명(나스/마우스 등)으로 실제 쓰이는 건 기타주변기기 시트뿐입니다.
+const SUB_ITEM_CATEGORIES = new Set(['기타주변기기']);
 
 /**
  * 데스크탑/노트북/모니터/빔프로젝트/기타주변기기 5개 구글시트를 재고 데이터의
@@ -61,6 +63,9 @@ type HeaderMap = {
   specCodeCol: number; // "사양(PC라벨)" — "I7/12/32/1024/2/3060" 형식, 세대 추출용
   reserverCol: number; // "예약자"
   reserveDateCol: number; // "예약일"
+  // "품목" — 노트북/데스크탑/모니터는 카테고리명 고정값이라 의미 없고, 기타주변기기 시트에서만
+  // "나스"/"마우스" 같은 세부 항목명이 들어있어서 그 카테고리에 한해 subItem으로 씁니다.
+  itemCol: number;
   columnCount: number;
 };
 
@@ -111,6 +116,7 @@ async function buildCache(category: string): Promise<SheetCache> {
     specCodeCol: findIncludes(header, '사양'),
     reserverCol: findIncludes(header, '예약자'),
     reserveDateCol: findIncludes(header, '예약일'),
+    itemCol: findExact(header, '품목'),
     columnCount: header.length,
   };
 
@@ -184,6 +190,7 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
     }
 
     const reservedBy = cell(row, header.reserverCol);
+    const subItem = SUB_ITEM_CATEGORIES.has(category) ? cell(row, header.itemCol) : '';
 
     assets.push({
       assetId,
@@ -195,6 +202,7 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
       specLabel,
       cpuType,
       gubunCode,
+      subItem,
       ram: cell(row, header.memoryCol),
       storage: [ssd, hdd].filter(Boolean).join(' / '),
       screen: cell(row, header.screenCol) || '-',

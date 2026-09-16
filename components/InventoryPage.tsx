@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { cancelReservation, createAsset, deleteAsset, reserveAsset, resetToSeed, updateAsset } from '@/app/actions';
 import type { DataSource } from '@/lib/dataSource';
-import { filterAssets, toggleMultiValue } from '@/lib/filters';
+import { filterAssets, toggleInternalStock, toggleMultiValue } from '@/lib/filters';
 import { useFilterState } from '@/lib/useFilterState';
 import type { Asset } from '@/lib/types';
 import ActiveFilters from './ActiveFilters';
@@ -34,7 +34,7 @@ type Props = { items: Asset[]; dataSource: DataSource; spreadsheetUrl: string | 
  * 목록을 별도 state 로 복제하지 않습니다.
  */
 export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Props) {
-  const { filters, searchTerm, setSearchTerm, setFilter, resetAll } = useFilterState();
+  const { filters, searchTerm, setSearchTerm, setFilter, setCategory, resetAll } = useFilterState();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [toast, setToast] = useState({ msg: '', show: false });
@@ -189,6 +189,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         searchTerm={searchTerm}
         onToggleStatus={(status) => setFilter('status', toggleMultiValue(filters.status, status))}
         onClearStatus={() => setFilter('status', [])}
+        onToggleInternalStock={() => setFilter('status', toggleInternalStock(filters.status))}
         onToggleMalicious={() => setFilter('malicious', !filters.malicious)}
         onSelectConsumable={() => showToast('소모품가격표는 별도 화면에서 관리돼요.')}
       />
@@ -197,7 +198,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         items={items}
         filters={filters}
         searchTerm={searchTerm}
-        onToggle={(category) => setFilter('category', toggleMultiValue(filters.category, category))}
+        onToggle={(category) => setCategory(toggleMultiValue(filters.category, category))}
       />
 
       <SpecBreakdownPanels
@@ -213,12 +214,14 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         onSetFilter={setFilter}
+        onCategoryChange={setCategory}
       />
 
       <ActiveFilters
         filters={filters}
         searchTerm={searchTerm}
         onSetFilter={setFilter}
+        onCategoryChange={setCategory}
         onSetSearchTerm={setSearchTerm}
         onResetAll={resetAll}
       />

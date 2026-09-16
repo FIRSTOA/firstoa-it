@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EMPTY_FILTERS, MULTI_FILTER_KEYS, type Filters } from './filters';
+import { applyCategoryChange, EMPTY_FILTERS, MULTI_FILTER_KEYS, type Filters } from './filters';
 
 /**
  * 필터/검색어 상태와 URL 쿼리스트링 동기화를 한 곳에서 관리합니다.
@@ -76,10 +76,17 @@ export function useFilterState() {
     setFilters((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  // 품목 필터 전용 setter: 화면에서 숨겨지는 필터 줄(사양/CPU종류/화면크기/세부품목 등)의
+  // 선택값도 applyCategoryChange로 같이 정리합니다 — setFilter('category', ...)로 직접 바꾸면
+  // 이 정리가 빠집니다.
+  const setCategory = useCallback((newCategory: string[]) => {
+    setFilters((prev) => applyCategoryChange(prev, newCategory));
+  }, []);
+
   const resetAll = useCallback(() => {
     setFilters(EMPTY_FILTERS);
     setSearchTerm('');
   }, []);
 
-  return { filters, searchTerm, setSearchTerm, setFilter, resetAll };
+  return { filters, searchTerm, setSearchTerm, setFilter, setCategory, resetAll };
 }

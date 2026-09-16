@@ -1,7 +1,17 @@
 'use client';
 
-import { toggleMultiValue, type Filters } from '@/lib/filters';
+import {
+  cascadingBrandOptions,
+  cascadingOptions,
+  categoryVisibility,
+  toggleInternalStock,
+  toggleMultiValue,
+  isInternalStockActive,
+  type Filters,
+} from '@/lib/filters';
 import { SPECS, STATUSES, type Asset } from '@/lib/types';
+
+type ExtraChip = { label: string; active: boolean; onClick: () => void };
 
 type ChipGroupProps = {
   label: string;
@@ -10,6 +20,8 @@ type ChipGroupProps = {
   selected: string[];
   onToggle: (value: string) => void;
   onClearAll: () => void;
+  /** "전체" 칩 다음에 끼워 넣는 프리셋 칩 — 지금은 상태 줄의 "내부재고"에만 씁니다. */
+  extraChip?: ExtraChip;
 };
 
 /**
@@ -17,7 +29,7 @@ type ChipGroupProps = {
  * 값이 들어갈 수 있고, 단일선택 필드는 호출부가 onToggle에서 "같은 값 다시 누르면 해제,
  * 다른 값 누르면 그 값 하나로 교체"로 감싸서 selected가 항상 0~1개만 갖도록 넘겨줍니다.
  */
-function ChipGroup({ label, options, selected, onToggle, onClearAll }: ChipGroupProps) {
+function ChipGroup({ label, options, selected, onToggle, onClearAll, extraChip }: ChipGroupProps) {
   const allActive = selected.length === 0;
   return (
     <div className="filter-row">
@@ -31,6 +43,16 @@ function ChipGroup({ label, options, selected, onToggle, onClearAll }: ChipGroup
         >
           전체
         </button>
+        {extraChip && (
+          <button
+            type="button"
+            className={`chip${extraChip.active ? ' active' : ''}`}
+            aria-pressed={extraChip.active}
+            onClick={extraChip.onClick}
+          >
+            {extraChip.label}
+          </button>
+        )}
         {options.map((option) => {
           const isActive = selected.includes(option);
           return (
@@ -56,10 +78,25 @@ type Props = {
   searchTerm: string;
   onSearchChange: (value: string) => void;
   onSetFilter: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
+  onCategoryChange: (newCategory: string[]) => void;
 };
 
-export default function FilterPanel({ items, filters, searchTerm, onSearchChange, onSetFilter }: Props) {
+export default function FilterPanel({
+  items,
+  filters,
+  searchTerm,
+  onSearchChange,
+  onSetFilter,
+  onCategoryChange,
+}: Props) {
   const uniq = (values: string[]) => [...new Set(values)];
+  const visibility = categoryVisibility(filters.category);
+
+  const specPresent = new Set(cascadingOptions(items, filters, searchTerm, 'spec'));
+  const specOptions = SPECS.filter((s) => specPresent.has(s));
+  const cpuTypeOptions = cascadingOptions(items, filters, searchTerm, 'cpuType');
+  const subItemOptions = cascadingOptions(items, filters, searchTerm, 'subItem');
+  const brandOptions = cascadingBrandOptions(items, filters, searchTerm);
 
   return (
     <div className="panel">
@@ -79,40 +116,51 @@ export default function FilterPanel({ items, filters, searchTerm, onSearchChange
         selected={filters.status}
         onToggle={(v) => onSetFilter('status', toggleMultiValue(filters.status, v))}
         onClearAll={() => onSetFilter('status', [])}
+        extraChip={{
+          label: '내부재고',
+          active: isInternalStockActive(filters.status),
+          onClick: () => onSetFilter('status', toggleInternalStock(filters.status)),
+        }}
       />
       <ChipGroup
         label="품목"
         options={uniq(items.map((i) => i.category))}
         selected={filters.category}
-        onToggle={(v) => onSetFilter('category', toggleMultiValue(filters.category, v))}
-        onClearAll={() => onSetFilter('category', [])}
+        onToggle={(v) => onCategoryChange(toggleMultiValue(filters.category, v))}
+        onClearAll={() => onCategoryChange([])}
       />
-      <ChipGroup
-        label="사양"
-        options={[...SPECS]}
-        selected={filters.spec}
-        onToggle={(v) => onSetFilter('spec', toggleMultiValue(filters.spec, v))}
-        onClearAll={() => onSetFilter('spec', [])}
-      />
-      <ChipGroup
-        label="CPU종류"
-        options={uniq(items.map((i) => i.cpuType).filter(Boolean))}
-        selected={filters.cpuType}
-        onToggle={(v) => onSetFilter('cpuType', toggleMultiValue(filters.cpuType, v))}
-        onClearAll={() => onSetFilter('cpuType', [])}
-      />
-      <ChipGroup
-        label="구분코드"
-        options={uniq(items.map((i) => i.gubunCode).filter(Boolean))}
-        selected={filters.gubunCode}
-        onToggle={(v) => onSetFilter('gubunCode', toggleMultiValue(filters.gubunCode, v))}
-        onClearAll={() => onSetFilter('gubunCode', [])}
-      />
+      {visibility.showSpec && (
+        <ChipGroup
+          label="사양"
+          options={specOptions}
+          selected={filters.spec}
+          onToggle={(v) => onSetFilter('spec', toggleMultiValue(filters.spec, v))}
+          onClearAll={() => onSetFilter('spec', [])}
+        />
+      )}
+      {visibility.showCpuType && (
+        <ChipGroup
+          label="CPU종류"
+          options={cpuTypeOptions}
+          selected={filters.cpuType}
+          onToggle={(v) => onSetFilter('cpuType', toggleMultiValue(filters.cpuType, v))}
+          onClearAll={() => onSetFilter('cpuType', [])}
+        />
+      )}
+      {visibility.showSubItem && (
+        <ChipGroup
+          label="세부품목"
+          options={subItemOptions}
+          selected={filters.subItem}
+          onToggle={(v) => onSetFilter('subItem', toggleMultiValue(filters.subItem, v))}
+          onClearAll={() => onSetFilter('subItem', [])}
+        />
+      )}
 
       {/* 브랜드·새기기·화면크기: 기존과 동일하게 단일 선택 유지 */}
       <ChipGroup
         label="브랜드"
-        options={uniq(items.map((i) => i.brand))}
+        options={brandOptions}
         selected={filters.brand ? [filters.brand] : []}
         onToggle={(v) => onSetFilter('brand', filters.brand === v ? null : v)}
         onClearAll={() => onSetFilter('brand', null)}
@@ -124,13 +172,15 @@ export default function FilterPanel({ items, filters, searchTerm, onSearchChange
         onToggle={() => onSetFilter('newDevice', filters.newDevice === 'new' ? null : 'new')}
         onClearAll={() => onSetFilter('newDevice', null)}
       />
-      <ChipGroup
-        label="화면크기"
-        options={['15인치 이상', '15인치 미만']}
-        selected={filters.screenGroup ? [filters.screenGroup] : []}
-        onToggle={(v) => onSetFilter('screenGroup', filters.screenGroup === v ? null : v)}
-        onClearAll={() => onSetFilter('screenGroup', null)}
-      />
+      {visibility.showScreen && (
+        <ChipGroup
+          label="화면크기"
+          options={['15인치 이상', '15인치 미만']}
+          selected={filters.screenGroup ? [filters.screenGroup] : []}
+          onToggle={(v) => onSetFilter('screenGroup', filters.screenGroup === v ? null : v)}
+          onClearAll={() => onSetFilter('screenGroup', null)}
+        />
+      )}
     </div>
   );
 }

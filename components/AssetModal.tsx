@@ -16,6 +16,7 @@ const BLANK: Asset = {
   specLabel: '',
   cpuType: '',
   gubunCode: '',
+  subItem: '',
   ram: '',
   storage: '',
   screen: '',

@@ -1,6 +1,6 @@
 'use client';
 
-import { countExcluding, filterAssets, type Filters } from '@/lib/filters';
+import { countExcluding, filterAssets, INTERNAL_STOCK_STATUSES, isInternalStockActive, type Filters } from '@/lib/filters';
 import { STATUSES, type Asset } from '@/lib/types';
 
 /** 소모품가격표는 별도 화면에서 관리하는 정적 수치입니다. */
@@ -12,6 +12,7 @@ type Props = {
   searchTerm: string;
   onToggleStatus: (status: string) => void;
   onClearStatus: () => void;
+  onToggleInternalStock: () => void;
   onToggleMalicious: () => void;
   onSelectConsumable: () => void;
 };
@@ -22,11 +23,15 @@ export default function StatsRow({
   searchTerm,
   onToggleStatus,
   onClearStatus,
+  onToggleInternalStock,
   onToggleMalicious,
   onSelectConsumable,
 }: Props) {
   // "전체" 카드/악성 카드는 자기 자신 조건을 뺀 나머지 필터+검색어만 적용했을 때의 건수입니다.
   const allCount = filterAssets(items, { ...filters, status: [] }, searchTerm).length;
+  const internalStockCount = filterAssets(items, { ...filters, status: [] }, searchTerm).filter((it) =>
+    INTERNAL_STOCK_STATUSES.includes(it.status),
+  ).length;
   const maliciousCount = filterAssets(items, { ...filters, malicious: false }, searchTerm).filter(
     (it) => it.malicious,
   ).length;
@@ -41,6 +46,13 @@ export default function StatsRow({
 
   const cards = [
     { key: 'all', label: '전체', num: allCount, active: filters.status.length === 0, onClick: onClearStatus },
+    {
+      key: 'internal-stock',
+      label: '내부재고',
+      num: internalStockCount,
+      active: isInternalStockActive(filters.status),
+      onClick: onToggleInternalStock,
+    },
     ...statusCards,
     { key: 'malicious', label: '악성', num: maliciousCount, active: filters.malicious, onClick: onToggleMalicious },
     { key: 'consumable', label: '소모품가격표', num: CONSUMABLE_COUNT, active: false, onClick: onSelectConsumable },

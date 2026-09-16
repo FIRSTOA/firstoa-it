@@ -31,6 +31,9 @@ export type Asset = {
   // it[dimension]을 항상 string으로 가정하므로 다른 필드들처럼 옵셔널이 아닌 빈 문자열로 둡니다.
   cpuType: string;
   gubunCode: string;
+  // 기타주변기기 시트 자체의 "품목" 컬럼(나스/마우스/키보드 등 세부 항목명) — 다른 카테고리는
+  // 그 컬럼이 카테고리명 고정값이라 의미가 없어서 기타주변기기에만 채웁니다.
+  subItem: string;
   // 예약 기능은 지금 구글시트 소스에서만 씁니다 (Supabase it_assets엔 대응 컬럼이 없어서
   // 옵셔널로 둡니다 — rowToAsset/assetToRow는 안 건드려도 됨).
   reservedBy?: string;
@@ -76,6 +79,7 @@ export function rowToAsset(row: AssetRow): Asset {
     specLabel: '',
     cpuType: '',
     gubunCode: '',
+    subItem: '',
   };
 }
 

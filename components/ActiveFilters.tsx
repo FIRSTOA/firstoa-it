@@ -6,6 +6,7 @@ type Props = {
   filters: Filters;
   searchTerm: string;
   onSetFilter: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
+  onCategoryChange: (newCategory: string[]) => void;
   onSetSearchTerm: (value: string) => void;
   onResetAll: () => void;
 };
@@ -18,10 +19,18 @@ const DIMENSION_LABEL: Record<MultiFilterKey, string> = {
   spec: '사양',
   cpuType: 'CPU종류',
   gubunCode: '구분코드',
+  subItem: '세부품목',
 };
 
 /** 현재 선택된 모든 조건을 요약해서 보여주고, 조건별로 개별 해제 + 전체 초기화를 제공합니다. */
-export default function ActiveFilters({ filters, searchTerm, onSetFilter, onSetSearchTerm, onResetAll }: Props) {
+export default function ActiveFilters({
+  filters,
+  searchTerm,
+  onSetFilter,
+  onCategoryChange,
+  onSetSearchTerm,
+  onResetAll,
+}: Props) {
   const conditions: Condition[] = [];
 
   for (const key of MULTI_FILTER_KEYS) {
@@ -29,7 +38,11 @@ export default function ActiveFilters({ filters, searchTerm, onSetFilter, onSetS
       conditions.push({
         key: `${key}:${value}`,
         label: `${DIMENSION_LABEL[key]}: ${value}`,
-        onRemove: () => onSetFilter(key, filters[key].filter((v) => v !== value)),
+        // 품목 조건 해제는 숨겨지는 필터 줄 정리가 같이 필요해서 onCategoryChange를 씁니다.
+        onRemove:
+          key === 'category'
+            ? () => onCategoryChange(filters.category.filter((v) => v !== value))
+            : () => onSetFilter(key, filters[key].filter((v) => v !== value)),
       });
     }
   }

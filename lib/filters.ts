@@ -1,7 +1,7 @@
 import type { Asset } from './types';
 
-/** 다중 선택(OR 안에서, 필터끼리는 AND)이 적용되는 필드 5개 */
-export const MULTI_FILTER_KEYS = ['status', 'category', 'spec', 'cpuType', 'gubunCode'] as const;
+/** 다중 선택(OR 안에서, 필터끼리는 AND)이 적용되는 필드 6개 */
+export const MULTI_FILTER_KEYS = ['status', 'category', 'spec', 'cpuType', 'gubunCode', 'subItem'] as const;
 export type MultiFilterKey = (typeof MULTI_FILTER_KEYS)[number];
 
 export type Filters = {
@@ -10,6 +10,7 @@ export type Filters = {
   spec: string[]; // [] = 전체
   cpuType: string[]; // [] = 전체 (데스크탑/노트북만 값이 있음)
   gubunCode: string[]; // [] = 전체 (데스크탑/노트북만 값이 있음, "I5고설데" 같은 세부 구분코드)
+  subItem: string[]; // [] = 전체 (기타주변기기만 값이 있음, "나스"/"마우스" 등 세부 품목명)
   malicious: boolean; // 기존 '__malicious__' 특수값을 진짜 boolean 필드로 분리
   brand: string | null;
   newDevice: 'new' | null;
@@ -22,6 +23,7 @@ export const EMPTY_FILTERS: Filters = {
   spec: [],
   cpuType: [],
   gubunCode: [],
+  subItem: [],
   malicious: false,
   brand: null,
   newDevice: null,
@@ -35,12 +37,68 @@ export function hasActiveFilters(filters: Filters, searchTerm: string): boolean 
     filters.spec.length > 0 ||
     filters.cpuType.length > 0 ||
     filters.gubunCode.length > 0 ||
+    filters.subItem.length > 0 ||
     filters.malicious ||
     filters.brand !== null ||
     filters.newDevice !== null ||
     filters.screenGroup !== null ||
     searchTerm.trim() !== ''
   );
+}
+
+/** "내부재고" 상태 프리셋 — 실제 상태값이 아니라 이 두 상태를 한번에 켜는 단축 칩입니다. */
+export const INTERNAL_STOCK_STATUSES = ['상품화준비중', '상품화완료'];
+
+/** 상태 필터가 정확히 "내부재고" 프리셋(순서 무관, 이 두 값만) 상태인지 확인합니다. */
+export function isInternalStockActive(status: string[]): boolean {
+  if (status.length !== INTERNAL_STOCK_STATUSES.length) return false;
+  return INTERNAL_STOCK_STATUSES.every((s) => normalizedMembership(status, s));
+}
+
+/** "내부재고" 칩 클릭: 이미 그 프리셋이면 전체 해제, 아니면 프리셋 두 값으로 교체합니다. */
+export function toggleInternalStock(status: string[]): string[] {
+  return isInternalStockActive(status) ? [] : [...INTERNAL_STOCK_STATUSES];
+}
+
+export type CategoryVisibility = {
+  showSpec: boolean;
+  showCpuType: boolean;
+  showScreen: boolean;
+  showSubItem: boolean;
+};
+
+/**
+ * 품목 선택에 따라 어떤 필터 줄을 보여줄지 결정합니다 (원본 대시보드 캡처 기준). 품목을
+ * 하나만 선택했을 때만 의미가 있고, 미선택이거나 여러 개 선택했을 때는 "사양"만 보입니다.
+ * FilterPanel(필터 줄 표시)과 applyCategoryChange(숨겨진 줄의 선택값 정리)가 이 함수 하나를
+ * 공통으로 써서 기준이 갈라지지 않게 합니다.
+ */
+export function categoryVisibility(categorySelection: string[]): CategoryVisibility {
+  const single = categorySelection.length === 1 ? categorySelection[0] : null;
+  return {
+    showSpec: single === null || single === '노트북' || single === '데스크탑',
+    showCpuType: single === '노트북' || single === '데스크탑',
+    showScreen: single !== null && ['노트북', '모니터', '빔프로젝트'].includes(single),
+    showSubItem: single === '기타주변기기',
+  };
+}
+
+/**
+ * 품목 필터가 바뀔 때 호출합니다. 새 품목 선택 기준으로 숨겨지는 줄(사양/CPU종류/구분코드/
+ * 화면크기/세부품목)의 선택값을 같이 비워서, 화면엔 안 보이는데 필터만 몰래 걸려있는 상태를
+ * 막습니다.
+ */
+export function applyCategoryChange(filters: Filters, newCategory: string[]): Filters {
+  const v = categoryVisibility(newCategory);
+  return {
+    ...filters,
+    category: newCategory,
+    spec: v.showSpec ? filters.spec : [],
+    cpuType: v.showCpuType ? filters.cpuType : [],
+    gubunCode: v.showCpuType ? filters.gubunCode : [],
+    screenGroup: v.showScreen ? filters.screenGroup : null,
+    subItem: v.showSubItem ? filters.subItem : [],
+  };
 }
 
 /**
@@ -95,6 +153,7 @@ export function filterAssets(items: Asset[], filters: Filters, searchTerm: strin
     if (!normalizedIncludes(filters.spec, it.spec)) return false;
     if (!normalizedIncludes(filters.cpuType, it.cpuType)) return false;
     if (!normalizedIncludes(filters.gubunCode, it.gubunCode)) return false;
+    if (!normalizedIncludes(filters.subItem, it.subItem)) return false;
     if (filters.brand && !normalizedEquals(it.brand, filters.brand)) return false;
     if (filters.newDevice === 'new' && !it.isNew) return false;
     if (filters.screenGroup && screenGroupOf(it.screen) !== filters.screenGroup) return false;
@@ -121,4 +180,28 @@ export function countExcluding(
   const relaxed: Filters = { ...filters, [dimension]: [] };
   return filterAssets(items, relaxed, searchTerm).filter((it) => normalizedEquals(it[dimension], value))
     .length;
+}
+
+/**
+ * 캐스케이딩 옵션 목록: 한 필터 줄(dimension)의 선택만 뺀 나머지 조건(검색어 포함)으로 좁힌
+ * 데이터에서 실제 존재하는 값만 뽑습니다. 예: 품목=데스크탑, 사양=설계용인 상태에서 브랜드
+ * 줄의 옵션을 구하면 실제 데이터에 있는 브랜드("조립PC")만 나옵니다 — 상태/품목처럼 항상 고정
+ * 옵션을 보여주는 줄에는 쓰지 않습니다.
+ */
+export function cascadingOptions(
+  items: Asset[],
+  filters: Filters,
+  searchTerm: string,
+  dimension: MultiFilterKey,
+): string[] {
+  const relaxed: Filters = { ...filters, [dimension]: [] };
+  const scoped = filterAssets(items, relaxed, searchTerm);
+  return [...new Set(scoped.map((it) => it[dimension]).filter(Boolean))];
+}
+
+/** brand처럼 MultiFilterKey가 아닌 단일선택 필드용 캐스케이딩 옵션. */
+export function cascadingBrandOptions(items: Asset[], filters: Filters, searchTerm: string): string[] {
+  const relaxed: Filters = { ...filters, brand: null };
+  const scoped = filterAssets(items, relaxed, searchTerm);
+  return [...new Set(scoped.map((it) => it.brand).filter(Boolean))];
 }

@@ -150,6 +150,7 @@ export function parseExcelRows(rows: Record<string, unknown>[]): ParsedExcelResu
       specLabel: '',
       cpuType: '',
       gubunCode: '',
+      subItem: '',
       ram: cell(row, 'RAM(GB)'),
       storage: cell(row, '저장용량(GB)'),
       screen: cell(row, '화면크기') || '-',
