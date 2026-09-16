@@ -6,7 +6,7 @@ import { useRef, useState, type ReactNode } from 'react';
 const SIDEBAR_MENU = [
   { label: '현황표', href: null },
   { label: 'IT 재고 리스트', href: '/' },
-  { label: '입고', href: null },
+  { label: '입고', href: '/receiving' },
   { label: '출고', href: '/dispatch' },
   { label: '재고입력', href: null },
   { label: '자산 이력', href: '/asset-history' },

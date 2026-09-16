@@ -30,6 +30,7 @@ export function createAdminClient(): SupabaseClient {
 
 export const ASSETS_TABLE = 'it_assets';
 export const DISPATCH_TABLE = 'it_dispatch_log';
+export const RECEIVING_TABLE = 'it_receiving_log';
 export const ASSET_HISTORY_TABLE = 'asset_history';
 export const ASSET_MOVEMENTS_TABLE = 'asset_movements';
 export const ASSET_OVERHAUL_TABLE = 'asset_overhaul_records';
