@@ -15,16 +15,14 @@ function SpecCell({ item }: { item: Asset }) {
   // 대체 표시합니다.
   const detail = item.specLabel || [item.cpu, item.ram, item.storage].filter(Boolean).join('/');
   return (
-    <>
-      <div className="spec-tags">
-        {item.spec && (
-          <span className={`tag ${SPEC_TAG_CLASS[item.spec] ?? 'tag-spec-office'}`}>{item.spec}</span>
-        )}
-        {item.screen && item.screen !== '-' && <span className="tag tag-screen">{item.screen}</span>}
-        {item.isNew && <span className="tag tag-new">새기기</span>}
-      </div>
-      <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>{detail}</div>
-    </>
+    <div className="spec-cell">
+      {detail && <span className="spec-code">{detail}</span>}
+      {item.spec && (
+        <span className={`tag ${SPEC_TAG_CLASS[item.spec] ?? 'tag-spec-office'}`}>{item.spec}</span>
+      )}
+      {item.screen && item.screen !== '-' && <span className="tag tag-screen">{item.screen}</span>}
+      {item.isNew && <span className="tag tag-new">새기기</span>}
+    </div>
   );
 }
 
