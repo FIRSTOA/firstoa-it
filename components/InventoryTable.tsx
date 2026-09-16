@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { Asset } from '@/lib/types';
 
 const SPEC_TAG_CLASS: Record<string, string> = {
@@ -22,6 +23,37 @@ function SpecCell({ item }: { item: Asset }) {
       )}
       {item.screen && item.screen !== '-' && <span className="tag tag-screen">{item.screen}</span>}
       {item.isNew && <span className="tag tag-new">새기기</span>}
+    </div>
+  );
+}
+
+/**
+ * 이력(비고)을 긴 원문 그대로 보여주지 않고 "이력 N건"으로 접어둡니다 — 여러 건이 이어붙어
+ * 있으면 표 가독성이 떨어져서, 클릭했을 때만 원문 전체(건별로 한 줄씩)를 펼쳐 보여줍니다.
+ * deriveIsNew/deriveMalicious(lib/inventory/status.ts)와 동일하게 "/"를 건 구분자로 씁니다.
+ */
+function HistoryCell({ history }: { history: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = history
+    .split('/')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (entries.length === 0) return <span>-</span>;
+
+  if (!expanded) {
+    return (
+      <button type="button" className="chip" onClick={() => setExpanded(true)}>
+        이력 {entries.length}건
+      </button>
+    );
+  }
+
+  return (
+    <div className="history-expanded" onClick={() => setExpanded(false)} title="클릭하면 접어요">
+      {entries.map((entry, i) => (
+        <div key={i}>{entry}</div>
+      ))}
     </div>
   );
 }
@@ -77,7 +109,9 @@ export default function InventoryTable({
                 <span className={`badge badge-${item.status}`}>{item.status}</span>
                 {item.malicious && <span className="badge badge-악성">악성</span>}
               </td>
-              <td>{item.history || '-'}</td>
+              <td>
+                <HistoryCell history={item.history} />
+              </td>
               <td style={{ fontSize: '12px' }}>
                 {item.reservedBy ? (
                   <div>

@@ -201,13 +201,6 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         onToggle={(category) => setCategory(toggleMultiValue(filters.category, category))}
       />
 
-      <SpecBreakdownPanels
-        items={items}
-        filters={filters}
-        searchTerm={searchTerm}
-        onToggle={(dimension, value) => setFilter(dimension, toggleMultiValue(filters[dimension], value))}
-      />
-
       <FilterPanel
         items={items}
         filters={filters}
@@ -234,6 +227,14 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
           </span>
         ))}
       </div>
+
+      {/* 세부리스트 바로 위 — 사양그룹별/CPU종류별/세부 구분코드 집계 */}
+      <SpecBreakdownPanels
+        items={items}
+        filters={filters}
+        searchTerm={searchTerm}
+        onToggle={(dimension, value) => setFilter(dimension, toggleMultiValue(filters[dimension], value))}
+      />
 
       <InventoryTable
         items={visibleItems}

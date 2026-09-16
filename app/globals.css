@@ -237,6 +237,7 @@ tbody tr:hover{background:var(--indigo-50);}
 .tag-screen{background:var(--ink-100); color:var(--ink-700);}
 .tag-new{background:var(--green-50); color:var(--green-600);}
 .asset-id{color:var(--indigo-600); font-weight:700; cursor:pointer;}
+.history-expanded{cursor:pointer; font-size:12px; color:var(--ink-700); line-height:1.5;}
 .badge{border-radius:7px; padding:4px 10px; font-size:11.5px; font-weight:700; display:inline-block;}
 .badge-임대중{background:var(--blue-100); color:var(--blue-600);}
 .badge-상품화완료{background:var(--green-100); color:var(--green-600);}
