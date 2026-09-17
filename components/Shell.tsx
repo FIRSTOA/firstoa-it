@@ -3,22 +3,36 @@
 import Link from 'next/link';
 import { useRef, useState, type ReactNode } from 'react';
 
-const SIDEBAR_MENU = [
-  { label: '현황표', href: null },
-  { label: 'IT 재고 리스트', href: '/' },
-  { label: '입고', href: '/receiving' },
-  { label: '출고', href: '/dispatch' },
-  { label: '재고입력', href: null },
-  { label: '자산 이력', href: '/asset-history' },
-  { label: '소모품 가격표', href: null },
+const SIDEBAR_SECTIONS = [
+  {
+    label: '재고관리',
+    items: [
+      { label: '현황표', href: null },
+      { label: 'IT 재고 리스트', href: '/' },
+      { label: '입고', href: '/receiving' },
+      { label: '출고', href: '/dispatch' },
+      { label: '재고입력', href: null },
+      { label: '자산 이력', href: '/asset-history' },
+      { label: '소모품 가격표', href: null },
+    ],
+  },
+  {
+    label: '임대·청구',
+    items: [
+      { label: '임대리스트', href: '/rentals' },
+      { label: '청구리스트', href: null },
+    ],
+  },
 ] as const;
+
+type SidebarItem = (typeof SIDEBAR_SECTIONS)[number]['items'][number];
 
 const TOP_TABS = ['통합 캘린더', '영업관리', '출고·현황', '고객서비스', '임대·청구', '재고관리', '관리'];
 const ACTIVE_TAB = '재고관리';
 
 type Props = {
   children: ReactNode;
-  activeMenu: (typeof SIDEBAR_MENU)[number]['label'];
+  activeMenu: SidebarItem['label'];
   title: string;
   note?: string;
 };
@@ -51,28 +65,32 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
           <br />
           자주 쓰는 메뉴를 추가하세요
         </div>
-        <div className="sidebar-section-label">재고관리</div>
-        <ul className="sidebar-menu">
-          {SIDEBAR_MENU.map(({ label, href }) => (
-            <li
-              key={label}
-              className={label === activeMenu ? 'active' : undefined}
-              onClick={href ? undefined : () => showComingSoon(label)}
-            >
-              {href ? (
-                <Link href={href} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'inherit', textDecoration: 'none', width: '100%' }}>
-                  <span className="dot" />
-                  {label}
-                </Link>
-              ) : (
-                <>
-                  <span className="dot" />
-                  {label}
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+        {SIDEBAR_SECTIONS.map((section) => (
+          <div key={section.label}>
+            <div className="sidebar-section-label">{section.label}</div>
+            <ul className="sidebar-menu">
+              {section.items.map(({ label, href }) => (
+                <li
+                  key={label}
+                  className={label === activeMenu ? 'active' : undefined}
+                  onClick={href ? undefined : () => showComingSoon(label)}
+                >
+                  {href ? (
+                    <Link href={href} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'inherit', textDecoration: 'none', width: '100%' }}>
+                      <span className="dot" />
+                      {label}
+                    </Link>
+                  ) : (
+                    <>
+                      <span className="dot" />
+                      {label}
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </aside>
 
       <div className="shell-main">
