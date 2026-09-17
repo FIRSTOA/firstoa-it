@@ -220,7 +220,7 @@ export default function RentalListPage({ sheetUrl }: { sheetUrl: string | null }
             ))}
           </tbody>
         </table>
-        {!loading && rows.length === 0 && (
+        {!loading && !error && rows.length === 0 && (
           <div className="empty-state">
             <div>📋</div>
             <div>
