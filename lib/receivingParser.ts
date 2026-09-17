@@ -32,6 +32,9 @@ export type ParsedReceivingGroup = {
 const QUANTITY_RE = /(\d+)\s*대/;
 const VENDOR_RE = /(\S+?)에서/;
 const ASSET_ID_TOKEN_RE = /^[A-Za-z]{1,3}\d{1,6}$/;
+// "20365   P2263   0YU8HNCL207262      27인치 모니터" 같은, 스프레드시트에서 그대로 복사한
+// 표 형식(순번(있을 수도 없을 수도)/자산번호/시리얼번호/설명, 탭 또는 여러 칸으로 구분) 한 줄.
+const TABULAR_ROW_RE = /^(?:\d+\s+)?([A-Za-z]{1,3}\d{1,6})\s+(\S+)\s+(.+)$/;
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토']; // Date.getDay() 순서(0=일요일)와 동일
 
 function formatDate(d: Date): string {
@@ -89,6 +92,28 @@ function parseItemLine(rawLine: string): { category: string; model: string; quan
   return { category, model, quantity };
 }
 
+/**
+ * "20365  P2263  0YU8HNCL207262  27인치 모니터" 처럼 이미 자산번호/시리얼/설명이 한 줄에 다
+ * 정해진 표 형식 한 줄을 파싱합니다 — 이런 줄 하나가 그 자체로 완결된 1건짜리 그룹이 됩니다.
+ */
+function parseTabularRow(
+  rawLine: string,
+): { assetId: string; serialNumber: string; category: string; screen: string; model: string } | null {
+  const match = rawLine.trim().match(TABULAR_ROW_RE);
+  if (!match) return null;
+  const [, assetId, serialNumber, description] = match;
+  const { category, rest } = extractCategory(description.trim());
+  const cleanRest = rest.replace(/\s+/g, ' ').trim();
+  const screenMatch = cleanRest.match(/^(\d+(?:\.\d+)?인치)$/);
+  return {
+    assetId,
+    serialNumber,
+    category,
+    screen: screenMatch ? screenMatch[1] : '',
+    model: screenMatch ? '' : cleanRest,
+  };
+}
+
 /** "X8783, X0024, ..." 처럼 자산번호만 콤마로 나열된 줄인지 확인합니다. */
 function isAssetIdListLine(line: string): boolean {
   const tokens = line
@@ -111,12 +136,20 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
   let kind = defaultKind;
   let vendor = '';
   let expectedDate = '';
+  let skipHeading = false;
   if (headingIndex >= 0) {
-    const heading = lines[headingIndex];
-    const vendorMatch = heading.match(VENDOR_RE);
-    if (vendorMatch) vendor = vendorMatch[1];
-    if (heading.includes('렌탈')) kind = '렌탈입고예정';
-    expectedDate = parseExpectedDateHint(heading);
+    const heading = lines[headingIndex].trim();
+    // 첫 줄 자체가 이미 데이터 줄(품목/자산번호 목록/표 형식)이면 "제목줄"이 아니므로
+    // 건너뛰지 않고 그대로 처리합니다 — 표만 덜렁 붙여넣는 경우(제목줄이 아예 없음) 대비.
+    const looksLikeData =
+      parseItemLine(heading) !== null || isAssetIdListLine(heading) || parseTabularRow(heading) !== null;
+    if (!looksLikeData) {
+      const vendorMatch = heading.match(VENDOR_RE);
+      if (vendorMatch) vendor = vendorMatch[1];
+      if (heading.includes('렌탈')) kind = '렌탈입고예정';
+      expectedDate = parseExpectedDateHint(heading);
+      skipHeading = true;
+    }
   }
 
   const groups: ParsedReceivingGroup[] = [];
@@ -134,7 +167,7 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
   }
 
   for (let i = 0; i < lines.length; i++) {
-    if (i === headingIndex) continue;
+    if (skipHeading && i === headingIndex) continue;
     const line = lines[i].trim();
     if (!line) continue;
 
@@ -143,6 +176,31 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean);
+      continue;
+    }
+
+    const tabularRow = parseTabularRow(line);
+    if (tabularRow) {
+      pushCurrent();
+      groups.push({
+        kind,
+        category: tabularRow.category,
+        brand: '',
+        model: tabularRow.model,
+        cpu: '',
+        spec: '',
+        ram: '',
+        storage: '',
+        screen: tabularRow.screen,
+        vendor,
+        purchasePrice: '',
+        expectedDate,
+        manager: '',
+        notes: '',
+        serialNumber: tabularRow.serialNumber,
+        quantity: 1,
+        assetIds: [tabularRow.assetId],
+      });
       continue;
     }
 
