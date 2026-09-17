@@ -9,6 +9,7 @@ type Props = {
   onSearchChange: (value: string) => void;
   onKindChange: (value: string | null) => void;
   onCategoryChange: (value: string | null) => void;
+  onOpenPurchaseEntry: () => void;
 };
 
 export default function ReceivingFilters({
@@ -17,6 +18,7 @@ export default function ReceivingFilters({
   onSearchChange,
   onKindChange,
   onCategoryChange,
+  onOpenPurchaseEntry,
 }: Props) {
   return (
     <div className="panel">
@@ -37,6 +39,14 @@ export default function ReceivingFilters({
             onClick={() => onKindChange(null)}
           >
             전체
+          </button>
+          <button
+            type="button"
+            className="chip"
+            onClick={onOpenPurchaseEntry}
+            title="실제 매입 확정 전표를 입력하면 구매입고예정 건이 자동으로 생겨요."
+          >
+            📝 구매입력
           </button>
           {RECEIVING_KINDS.map((kind) => (
             <button

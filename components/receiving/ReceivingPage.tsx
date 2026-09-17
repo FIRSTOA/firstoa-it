@@ -16,6 +16,7 @@ import {
 } from '@/lib/receiving';
 import { expandParsedGroup, type ParsedReceivingGroup } from '@/lib/receivingParser';
 import PasteImportModal from './PasteImportModal';
+import PurchaseEntryModal from './PurchaseEntryModal';
 import ReceivingFilters from './ReceivingFilters';
 import ReceivingModal from './ReceivingModal';
 import ReceivingStats from './ReceivingStats';
@@ -26,6 +27,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
   const [searchTerm, setSearchTerm] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [editing, setEditing] = useState<ReceivingEntry | null>(null);
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
@@ -79,6 +81,18 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
     });
   }
 
+  function handlePurchaseEntrySave(entries: ReceivingInput[]) {
+    startTransition(async () => {
+      const result = await createReceivingBatch(entries);
+      if (!result.ok) {
+        showToast(result.error);
+        return;
+      }
+      setPurchaseModalOpen(false);
+      showToast(`${entries.length}건 등록했어요. (구매입고예정으로 자동 생성)`);
+    });
+  }
+
   function handleComplete(entry: ReceivingEntry) {
     if (!confirm(`자산번호 "${entry.assetId}"를 IT재고에 등록하고 입고완료 처리할까요?`)) return;
     startTransition(async () => {
@@ -123,6 +137,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         onSearchChange={setSearchTerm}
         onKindChange={(value) => setFilters((prev) => ({ ...prev, kind: value }))}
         onCategoryChange={(value) => setFilters((prev) => ({ ...prev, category: value }))}
+        onOpenPurchaseEntry={() => setPurchaseModalOpen(true)}
       />
 
       <ReceivingTable
@@ -152,6 +167,13 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         pending={pending}
         onClose={() => setPasteModalOpen(false)}
         onImport={handlePasteImport}
+      />
+
+      <PurchaseEntryModal
+        open={purchaseModalOpen}
+        pending={pending}
+        onClose={() => setPurchaseModalOpen(false)}
+        onSave={handlePurchaseEntrySave}
       />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>{toast.msg}</div>
