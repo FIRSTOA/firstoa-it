@@ -79,6 +79,7 @@ export async function compareRentalSheet(): Promise<CompareResult> {
       unchangedCount,
     };
   } catch (err) {
+    console.error('[rentals] compareRentalSheet 실패:', err);
     return { ok: false, error: err instanceof Error ? err.message : '구글시트 대조에 실패했어요.' };
   }
 }
@@ -119,6 +120,7 @@ export async function applyRentalSheetSync(): Promise<ApplyResult> {
     revalidatePath('/rentals');
     return { ok: true, upserted, deleted };
   } catch (err) {
+    console.error('[rentals] applyRentalSheetSync 실패:', err);
     return { ok: false, error: err instanceof Error ? err.message : '구글시트 반영에 실패했어요.' };
   }
 }
@@ -225,6 +227,7 @@ export async function searchRentals(params: RentalSearchParams): Promise<SearchR
 
     return { ok: true, rows, totalCount: count ?? 0 };
   } catch (err) {
+    console.error('[rentals] searchRentals 실패:', err);
     return { ok: false, error: err instanceof Error ? err.message : '조회에 실패했어요.' };
   }
 }
@@ -272,6 +275,7 @@ export async function getRentalFilterOptions(): Promise<FilterOptionsResult> {
 
     return { ok: true, regions, provinces, items, manufacturers, contractTypes, grades };
   } catch (err) {
+    console.error('[rentals] getRentalFilterOptions 실패:', err);
     return { ok: false, error: err instanceof Error ? err.message : '필터 옵션 조회에 실패했어요.' };
   }
 }
