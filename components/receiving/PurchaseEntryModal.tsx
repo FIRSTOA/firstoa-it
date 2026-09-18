@@ -1,17 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES } from '@/lib/types';
+import KakaoShareModal from './KakaoShareModal';
 
-type LineItem = {
+export type PurchaseLineItem = {
   category: string;
   model: string;
   quantity: number;
   unitPrice: number;
+  currentStock: string;
+  safetyStock: string;
 };
 
-const BLANK_LINE: LineItem = { category: CATEGORIES[0], model: '', quantity: 1, unitPrice: 0 };
+const BLANK_LINE: PurchaseLineItem = {
+  category: CATEGORIES[0],
+  model: '',
+  quantity: 1,
+  unitPrice: 0,
+  currentStock: '',
+  safetyStock: '',
+};
+
+const PRICE_COMPARED_OPTIONS = ['해당사항없음', '2곳이상 체크'] as const;
 
 type Props = {
   open: boolean;
@@ -25,21 +37,34 @@ type Props = {
  * 간이 매입 전표 입력 폼입니다. 부가세 자동계산·결제주기/상태·거래명세서 첨부 같은 회계
  * 기능은 1차 구현 범위 밖이라 뺐습니다 — 저장하면 전표 자체를 따로 저장하지 않고, 줄마다
  * 수량만큼 펼쳐서 구매입고예정 건을 바로 만듭니다(createReceivingBatch 재사용).
+ *
+ * 주문요청부서/입고예정일/단가비교/납품처/현재고/안전재고는 재고 데이터로는 안 쓰고
+ * "카톡으로 보내기"(KakaoShareModal) 양식을 채우는 데만 씁니다 — 입고예정일만 예외로
+ * ReceivingInput.expectedDate에도 실제로 반영됩니다.
  */
 export default function PurchaseEntryModal({ open, pending, onClose, onSave }: Props) {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [vendor, setVendor] = useState('');
   const [manager, setManager] = useState('');
-  const [lines, setLines] = useState<LineItem[]>([{ ...BLANK_LINE }]);
+  const [department, setDepartment] = useState('');
+  const [expectedDate, setExpectedDate] = useState('');
+  const [priceCompared, setPriceCompared] = useState<string>(PRICE_COMPARED_OPTIONS[0]);
+  const [deliveryPlace, setDeliveryPlace] = useState('');
+  const [lines, setLines] = useState<PurchaseLineItem[]>([{ ...BLANK_LINE }]);
+  const [kakaoOpen, setKakaoOpen] = useState(false);
 
   function reset() {
     setDate(new Date().toISOString().slice(0, 10));
     setVendor('');
     setManager('');
+    setDepartment('');
+    setExpectedDate('');
+    setPriceCompared(PRICE_COMPARED_OPTIONS[0]);
+    setDeliveryPlace('');
     setLines([{ ...BLANK_LINE }]);
   }
 
-  function updateLine(index: number, patch: Partial<LineItem>) {
+  function updateLine(index: number, patch: Partial<PurchaseLineItem>) {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
   }
 
@@ -74,7 +99,7 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
         screen: '',
         vendor: vendor.trim(),
         purchasePrice: `${line.unitPrice.toLocaleString()}원 x ${quantity} = ${lineTotal.toLocaleString()}원`,
-        expectedDate: '',
+        expectedDate,
         manager: manager.trim(),
         notes: `구매입력 전표 (일자: ${date})`,
         serialNumber: '',
@@ -89,6 +114,7 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
   if (!open) return null;
 
   return (
+    <Fragment>
     <div
       className="modal-overlay open"
       onClick={(e) => {
@@ -118,6 +144,32 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
             <label>담당자</label>
             <input value={manager} onChange={(e) => setManager(e.target.value)} />
           </div>
+          <div className="form-field">
+            <label>주문요청부서</label>
+            <input value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="예: IT팀" />
+          </div>
+          <div className="form-field">
+            <label>입고예정일</label>
+            <input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
+          </div>
+          <div className="form-field">
+            <label>단가비교</label>
+            <select value={priceCompared} onChange={(e) => setPriceCompared(e.target.value)}>
+              {PRICE_COMPARED_OPTIONS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-field">
+            <label>납품처</label>
+            <input
+              value={deliveryPlace}
+              onChange={(e) => setDeliveryPlace(e.target.value)}
+              placeholder="예: 본사 창고 (매입처용 발주서에 씀)"
+            />
+          </div>
         </div>
 
         <div style={{ marginTop: '14px', overflowX: 'auto' }}>
@@ -125,11 +177,13 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
             <thead>
               <tr>
                 <th style={{ width: '40px' }}>No</th>
-                <th style={{ width: '140px' }}>품목</th>
+                <th style={{ width: '120px' }}>품목</th>
                 <th>품목명</th>
-                <th style={{ width: '90px' }}>수량</th>
-                <th style={{ width: '120px' }}>단가</th>
-                <th style={{ width: '130px' }}>합계</th>
+                <th style={{ width: '80px' }}>수량</th>
+                <th style={{ width: '110px' }}>단가</th>
+                <th style={{ width: '120px' }}>합계</th>
+                <th style={{ width: '90px' }}>현재고</th>
+                <th style={{ width: '90px' }}>안전재고</th>
                 <th style={{ width: '40px' }} />
               </tr>
             </thead>
@@ -176,6 +230,20 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
                     {(Math.max(line.quantity, 0) * Math.max(line.unitPrice, 0)).toLocaleString()}원
                   </td>
                   <td>
+                    <input
+                      value={line.currentStock}
+                      onChange={(e) => updateLine(i, { currentStock: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={line.safetyStock}
+                      onChange={(e) => updateLine(i, { safetyStock: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </td>
+                  <td>
                     <button
                       type="button"
                       className="icon-btn danger"
@@ -211,11 +279,27 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
           >
             취소
           </button>
+          <button type="button" className="btn btn-ghost" onClick={() => setKakaoOpen(true)} disabled={pending}>
+            📤 카톡으로 보내기
+          </button>
           <button type="button" className="btn btn-primary" onClick={handleSave} disabled={pending}>
             {pending ? '저장 중…' : '전표 저장'}
           </button>
         </div>
       </div>
     </div>
+
+      <KakaoShareModal
+        open={kakaoOpen}
+        onClose={() => setKakaoOpen(false)}
+        vendor={vendor}
+        department={department}
+        manager={manager}
+        expectedDate={expectedDate}
+        priceCompared={priceCompared}
+        deliveryPlace={deliveryPlace}
+        lines={lines}
+      />
+    </Fragment>
   );
 }
