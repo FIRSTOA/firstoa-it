@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { countExcluding, type Filters, type MultiFilterKey } from '@/lib/filters';
 import type { Asset } from '@/lib/types';
 
@@ -46,34 +47,44 @@ type Props = {
  */
 export default function SpecBreakdownPanels({ items, filters, searchTerm, onToggle }: Props) {
   const singleCategory = filters.category.length === 1 ? filters.category[0] : null;
-  if (singleCategory !== '노트북' && singleCategory !== '데스크탑') return null;
+  const relevant = singleCategory === '노트북' || singleCategory === '데스크탑';
 
-  const categoryItems = items.filter((i) => i.category === singleCategory);
+  // items/filters/searchTerm이 실제로 안 바뀌었으면 다시 안 훑도록 메모이즈합니다. 이미
+  // relevant일 때만 계산하도록 걸려 있긴 하지만(전체 자산 화면에선 안 돔), 노트북/데스크탑으로
+  // 좁힌 상태에서 검색·다른 필터를 만질 때는 여전히 매 렌더마다 다시 도는 걸 막아줍니다.
+  const chips = useMemo(() => {
+    if (!relevant) return null;
+    const categoryItems = items.filter((i) => i.category === singleCategory);
 
-  const buildChips = (dimension: MultiFilterKey, values: string[]): Chip[] =>
-    values
-      .map((value) => ({
-        label: value,
-        count: countExcluding(items, filters, searchTerm, dimension, value),
-        active: filters[dimension].includes(value),
-        onClick: () => onToggle(dimension, value),
-      }))
-      .filter((c) => c.count > 0);
+    const buildChips = (dimension: MultiFilterKey, values: string[]): Chip[] =>
+      values
+        .map((value) => ({
+          label: value,
+          count: countExcluding(items, filters, searchTerm, dimension, value),
+          active: filters[dimension].includes(value),
+          onClick: () => onToggle(dimension, value),
+        }))
+        .filter((c) => c.count > 0);
 
-  const specValues = SPEC_GROUP_ORDER.filter((v) => categoryItems.some((i) => i.spec === v));
-  const specChips = buildChips('spec', specValues);
+    const specValues = SPEC_GROUP_ORDER.filter((v) => categoryItems.some((i) => i.spec === v));
+    const cpuTypeValues = CPU_TYPE_ORDER.filter((v) => categoryItems.some((i) => i.cpuType === v));
+    const gubunCodeValues = [...new Set(categoryItems.map((i) => i.gubunCode).filter(Boolean))];
 
-  const cpuTypeValues = CPU_TYPE_ORDER.filter((v) => categoryItems.some((i) => i.cpuType === v));
-  const cpuTypeChips = buildChips('cpuType', cpuTypeValues);
+    return {
+      specChips: buildChips('spec', specValues),
+      cpuTypeChips: buildChips('cpuType', cpuTypeValues),
+      gubunCodeChips: buildChips('gubunCode', gubunCodeValues).sort((a, b) => b.count - a.count),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relevant, singleCategory, items, filters, searchTerm]);
 
-  const gubunCodeValues = [...new Set(categoryItems.map((i) => i.gubunCode).filter(Boolean))];
-  const gubunCodeChips = buildChips('gubunCode', gubunCodeValues).sort((a, b) => b.count - a.count);
+  if (!chips) return null;
 
   return (
     <>
-      <BreakdownPanel title="사양그룹별 대수" chips={specChips} />
-      <BreakdownPanel title="CPU종류별 대수" chips={cpuTypeChips} />
-      <BreakdownPanel title="세부 구분코드" chips={gubunCodeChips} />
+      <BreakdownPanel title="사양그룹별 대수" chips={chips.specChips} />
+      <BreakdownPanel title="CPU종류별 대수" chips={chips.cpuTypeChips} />
+      <BreakdownPanel title="세부 구분코드" chips={chips.gubunCodeChips} />
     </>
   );
 }

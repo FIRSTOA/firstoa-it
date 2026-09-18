@@ -56,6 +56,10 @@ function buildSearch(filters: Filters, searchTerm: string): string {
 export function useFilterState() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [searchTerm, setSearchTerm] = useState('');
+  // 검색창은 즉시 반영(입력 반응성)하되, 실제 필터링/집계 계산에 쓰는 값은 250ms 디바운스합니다 —
+  // 안 그러면 2,400여 건 전체를 글자 하나마다 다시 훑어서(StatsRow/CategoryCards/FilterPanel
+  // 캐스케이딩 옵션 등) 타이핑이 버벅거립니다.
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   // 최초 마운트에서 URL을 읽어 복원하기 전까지는, 그 복원 자체가 URL에 다시 쓰이지 않게 막습니다.
   const hydrated = useRef(false);
 
@@ -63,14 +67,20 @@ export function useFilterState() {
     const { filters: restored, searchTerm: restoredTerm } = parseFromSearch(window.location.search);
     setFilters(restored);
     setSearchTerm(restoredTerm);
+    setDebouncedSearchTerm(restoredTerm);
     hydrated.current = true;
   }, []);
 
   useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearchTerm(searchTerm), 250);
+    return () => clearTimeout(id);
+  }, [searchTerm]);
+
+  useEffect(() => {
     if (!hydrated.current) return;
-    const next = `${window.location.pathname}${buildSearch(filters, searchTerm)}${window.location.hash}`;
+    const next = `${window.location.pathname}${buildSearch(filters, debouncedSearchTerm)}${window.location.hash}`;
     window.history.replaceState(null, '', next);
-  }, [filters, searchTerm]);
+  }, [filters, debouncedSearchTerm]);
 
   const setFilter = useCallback(<K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -86,7 +96,8 @@ export function useFilterState() {
   const resetAll = useCallback(() => {
     setFilters(EMPTY_FILTERS);
     setSearchTerm('');
+    setDebouncedSearchTerm('');
   }, []);
 
-  return { filters, searchTerm, setSearchTerm, setFilter, setCategory, resetAll };
+  return { filters, searchTerm, debouncedSearchTerm, setSearchTerm, setFilter, setCategory, resetAll };
 }

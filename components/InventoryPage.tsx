@@ -34,7 +34,8 @@ type Props = { items: Asset[]; dataSource: DataSource; spreadsheetUrl: string | 
  * 목록을 별도 state 로 복제하지 않습니다.
  */
 export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Props) {
-  const { filters, searchTerm, setSearchTerm, setFilter, setCategory, resetAll } = useFilterState();
+  const { filters, searchTerm, debouncedSearchTerm, setSearchTerm, setFilter, setCategory, resetAll } =
+    useFilterState();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [toast, setToast] = useState({ msg: '', show: false });
@@ -70,8 +71,8 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
   }, []);
 
   const visibleItems = useMemo(
-    () => filterAssets(items, filters, searchTerm),
-    [items, filters, searchTerm],
+    () => filterAssets(items, filters, debouncedSearchTerm),
+    [items, filters, debouncedSearchTerm],
   );
 
   const dashboardTitle = useMemo(() => {
@@ -186,7 +187,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
       <StatsRow
         items={items}
         filters={filters}
-        searchTerm={searchTerm}
+        searchTerm={debouncedSearchTerm}
         onToggleStatus={(status) => setFilter('status', toggleMultiValue(filters.status, status))}
         onClearStatus={() => setFilter('status', [])}
         onToggleInternalStock={() => setFilter('status', toggleInternalStock(filters.status))}
@@ -197,7 +198,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
       <CategoryCards
         items={items}
         filters={filters}
-        searchTerm={searchTerm}
+        searchTerm={debouncedSearchTerm}
         onToggle={(category) => setCategory(toggleMultiValue(filters.category, category))}
       />
 
@@ -205,6 +206,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         items={items}
         filters={filters}
         searchTerm={searchTerm}
+        filterSearchTerm={debouncedSearchTerm}
         onSearchChange={setSearchTerm}
         onSetFilter={setFilter}
         onCategoryChange={setCategory}
@@ -232,7 +234,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
       <SpecBreakdownPanels
         items={items}
         filters={filters}
-        searchTerm={searchTerm}
+        searchTerm={debouncedSearchTerm}
         onToggle={(dimension, value) => setFilter(dimension, toggleMultiValue(filters[dimension], value))}
       />
 

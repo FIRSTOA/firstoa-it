@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { countExcluding, type Filters } from '@/lib/filters';
 import { CATEGORIES, type Asset } from '@/lib/types';
 
@@ -17,10 +18,17 @@ type Props = {
  * 나오는 행 수와 항상 일치합니다.
  */
 export default function CategoryCards({ items, filters, searchTerm, onToggle }: Props) {
+  // 품목 5개 × 전체 배열 스캔이라, items/filters/searchTerm이 실제로 안 바뀌면 다시 안 돌게 함.
+  const counts = useMemo(
+    () => Object.fromEntries(CATEGORIES.map((c) => [c, countExcluding(items, filters, searchTerm, 'category', c)])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, filters, searchTerm],
+  );
+
   return (
     <div className="category-cards">
       {CATEGORIES.map((category) => {
-        const count = countExcluding(items, filters, searchTerm, 'category', category);
+        const count = counts[category];
         const isActive = filters.category.includes(category);
         return (
           <button

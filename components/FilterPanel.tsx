@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import {
   cascadingBrandOptions,
   cascadingOptions,
@@ -75,7 +76,10 @@ function ChipGroup({ label, options, selected, onToggle, onClearAll, extraChip }
 type Props = {
   items: Asset[];
   filters: Filters;
+  /** 검색창에 즉시 반영되는 입력값(반응성용) — 계산에는 filterSearchTerm을 씁니다. */
   searchTerm: string;
+  /** 디바운스된 검색어 — 캐스케이딩 옵션 계산(전체 목록을 여러 번 훑음)은 이 값으로만 합니다. */
+  filterSearchTerm: string;
   onSearchChange: (value: string) => void;
   onSetFilter: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
   onCategoryChange: (newCategory: string[]) => void;
@@ -85,6 +89,7 @@ export default function FilterPanel({
   items,
   filters,
   searchTerm,
+  filterSearchTerm,
   onSearchChange,
   onSetFilter,
   onCategoryChange,
@@ -92,11 +97,18 @@ export default function FilterPanel({
   const uniq = (values: string[]) => [...new Set(values)];
   const visibility = categoryVisibility(filters.category);
 
-  const specPresent = new Set(cascadingOptions(items, filters, searchTerm, 'spec'));
-  const specOptions = SPECS.filter((s) => specPresent.has(s));
-  const cpuTypeOptions = cascadingOptions(items, filters, searchTerm, 'cpuType');
-  const subItemOptions = cascadingOptions(items, filters, searchTerm, 'subItem');
-  const brandOptions = cascadingBrandOptions(items, filters, searchTerm);
+  // items/filters/filterSearchTerm이 실제로 안 바뀌었으면(예: 다른 상태로 인한 재렌더) 다시
+  // 안 훑도록 메모이즈 — 4번의 전체 배열 스캔이라 글자 입력마다 그냥 돌리면 버벅거립니다.
+  const { specOptions, cpuTypeOptions, subItemOptions, brandOptions } = useMemo(() => {
+    const specPresent = new Set(cascadingOptions(items, filters, filterSearchTerm, 'spec'));
+    return {
+      specOptions: SPECS.filter((s) => specPresent.has(s)),
+      cpuTypeOptions: cascadingOptions(items, filters, filterSearchTerm, 'cpuType'),
+      subItemOptions: cascadingOptions(items, filters, filterSearchTerm, 'subItem'),
+      brandOptions: cascadingBrandOptions(items, filters, filterSearchTerm),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, filters, filterSearchTerm]);
 
   return (
     <div className="panel">

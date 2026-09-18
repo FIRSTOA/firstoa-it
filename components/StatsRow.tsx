@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { countExcluding, filterAssets, INTERNAL_STOCK_STATUSES, isInternalStockActive, type Filters } from '@/lib/filters';
 import { STATUSES, type Asset } from '@/lib/types';
 
@@ -27,34 +28,55 @@ export default function StatsRow({
   onToggleMalicious,
   onSelectConsumable,
 }: Props) {
-  // "전체" 카드/악성 카드는 자기 자신 조건을 뺀 나머지 필터+검색어만 적용했을 때의 건수입니다.
-  const allCount = filterAssets(items, { ...filters, status: [] }, searchTerm).length;
-  const internalStockCount = filterAssets(items, { ...filters, status: [] }, searchTerm).filter((it) =>
-    INTERNAL_STOCK_STATUSES.includes(it.status),
-  ).length;
-  const maliciousCount = filterAssets(items, { ...filters, malicious: false }, searchTerm).filter(
-    (it) => it.malicious,
-  ).length;
+  // 8번의 전체 배열 스캔(전체/내부재고/악성/상태 6개)이라 items/filters/searchTerm이 실제로
+  // 안 바뀌었으면 다시 안 돌게 메모이즈합니다 — 안 그러면 30초마다 도는 시계 갱신 같은 무관한
+  // 재렌더에도 매번 다시 계산됩니다.
+  const counts = useMemo(() => {
+    // "전체"/"내부재고" 카드는 같은 relaxed 필터(상태만 뺀 것)를 공유하므로 한 번만 계산합니다.
+    const withoutStatus = filterAssets(items, { ...filters, status: [] }, searchTerm);
+    const allCount = withoutStatus.length;
+    const internalStockCount = withoutStatus.filter((it) => INTERNAL_STOCK_STATUSES.includes(it.status)).length;
+    const maliciousCount = filterAssets(items, { ...filters, malicious: false }, searchTerm).filter(
+      (it) => it.malicious,
+    ).length;
+    const byStatus = Object.fromEntries(
+      STATUSES.map((status) => [status, countExcluding(items, filters, searchTerm, 'status', status)]),
+    );
+    return { allCount, internalStockCount, maliciousCount, byStatus };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, filters, searchTerm]);
 
   const statusCards = STATUSES.map((status) => ({
     key: status,
     label: status,
-    num: countExcluding(items, filters, searchTerm, 'status', status),
+    num: counts.byStatus[status],
     active: filters.status.includes(status),
     onClick: () => onToggleStatus(status),
   }));
 
   const cards = [
-    { key: 'all', label: '전체', num: allCount, active: filters.status.length === 0, onClick: onClearStatus },
+    {
+      key: 'all',
+      label: '전체',
+      num: counts.allCount,
+      active: filters.status.length === 0,
+      onClick: onClearStatus,
+    },
     {
       key: 'internal-stock',
       label: '내부재고',
-      num: internalStockCount,
+      num: counts.internalStockCount,
       active: isInternalStockActive(filters.status),
       onClick: onToggleInternalStock,
     },
     ...statusCards,
-    { key: 'malicious', label: '악성', num: maliciousCount, active: filters.malicious, onClick: onToggleMalicious },
+    {
+      key: 'malicious',
+      label: '악성',
+      num: counts.maliciousCount,
+      active: filters.malicious,
+      onClick: onToggleMalicious,
+    },
     { key: 'consumable', label: '소모품가격표', num: CONSUMABLE_COUNT, active: false, onClick: onSelectConsumable },
   ];
 
