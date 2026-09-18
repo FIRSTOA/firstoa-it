@@ -15,6 +15,7 @@ import {
   type ReceivingInput,
 } from '@/lib/receiving';
 import { expandParsedGroup, type ParsedReceivingGroup } from '@/lib/receivingParser';
+import BulkEditModal from './BulkEditModal';
 import PasteImportModal from './PasteImportModal';
 import PurchaseEntryModal from './PurchaseEntryModal';
 import ReceivingFilters from './ReceivingFilters';
@@ -29,6 +30,8 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [editing, setEditing] = useState<ReceivingEntry | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,6 +104,69 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
     });
   }
 
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const allSelected = visible.length > 0 && visible.every((e) => prev.has(e.id));
+      if (allSelected) return new Set();
+      return new Set(visible.map((e) => e.id));
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  const selectedEntries = entries.filter((e) => selectedIds.has(e.id));
+
+  function handleBulkComplete() {
+    const targets = selectedEntries.filter((e) => e.status === '입고대기');
+    if (targets.length === 0) {
+      showToast('선택한 건 중에 입고대기 상태가 없어요.');
+      return;
+    }
+    if (!confirm(`선택한 ${targets.length}건을 IT재고에 등록하고 입고완료 처리할까요?`)) return;
+    startTransition(async () => {
+      let success = 0;
+      let fail = 0;
+      for (const entry of targets) {
+        const result = await completeReceiving(entry.id);
+        if (result.ok) success++;
+        else fail++;
+      }
+      clearSelection();
+      showToast(fail === 0 ? `${success}건 입고완료 처리했어요.` : `${success}건 처리, ${fail}건 실패했어요.`);
+    });
+  }
+
+  function handleBulkEditSave(patch: Partial<ReceivingInput>) {
+    if (selectedEntries.length === 0) return;
+    startTransition(async () => {
+      let success = 0;
+      let fail = 0;
+      for (const entry of selectedEntries) {
+        const { id, seq, completedAt, ...base } = entry;
+        void id;
+        void seq;
+        void completedAt;
+        const result = await updateReceiving(entry.id, { ...base, ...patch });
+        if (result.ok) success++;
+        else fail++;
+      }
+      setBulkEditOpen(false);
+      clearSelection();
+      showToast(fail === 0 ? `${success}건 일괄 수정했어요.` : `${success}건 수정, ${fail}건 실패했어요.`);
+    });
+  }
+
   return (
     <div className="app">
       <div className="topbar" style={{ marginBottom: '14px' }}>
@@ -140,15 +206,41 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         onOpenPurchaseEntry={() => setPurchaseModalOpen(true)}
       />
 
+      {selectedIds.size > 0 && (
+        <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700 }}>{selectedIds.size}건 선택됨</span>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={handleBulkComplete}>
+            입고완료 처리
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setBulkEditOpen(true)}>
+            일괄 수정
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={clearSelection}>
+            선택 해제
+          </button>
+        </div>
+      )}
+
       <ReceivingTable
         entries={visible}
         disabled={pending}
+        selectedIds={selectedIds}
+        onToggleSelect={toggleSelect}
+        onToggleSelectAll={toggleSelectAll}
         onEdit={(entry) => {
           setEditing(entry);
           setModalOpen(true);
         }}
         onDelete={handleDelete}
         onComplete={handleComplete}
+      />
+
+      <BulkEditModal
+        open={bulkEditOpen}
+        pending={pending}
+        count={selectedIds.size}
+        onClose={() => setBulkEditOpen(false)}
+        onSave={handleBulkEditSave}
       />
 
       <ReceivingModal

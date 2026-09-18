@@ -20,18 +20,39 @@ function todayStr(): string {
 type Props = {
   entries: ReceivingEntry[];
   disabled: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onToggleSelectAll: () => void;
   onEdit: (entry: ReceivingEntry) => void;
   onDelete: (id: string) => void;
   onComplete: (entry: ReceivingEntry) => void;
 };
 
-export default function ReceivingTable({ entries, disabled, onEdit, onDelete, onComplete }: Props) {
+export default function ReceivingTable({
+  entries,
+  disabled,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  onEdit,
+  onDelete,
+  onComplete,
+}: Props) {
   const today = todayStr();
+  const allSelected = entries.length > 0 && entries.every((e) => selectedIds.has(e.id));
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
       <table>
         <thead>
           <tr>
+            <th style={{ width: '32px' }}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+                aria-label="전체 선택"
+              />
+            </th>
             <th style={{ width: '50px' }}>순번</th>
             <th>유형</th>
             <th>상태</th>
@@ -48,6 +69,14 @@ export default function ReceivingTable({ entries, disabled, onEdit, onDelete, on
             const overdue = entry.status === '입고대기' && !!entry.expectedDate && entry.expectedDate < today;
             return (
             <tr key={entry.id}>
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(entry.id)}
+                  onChange={() => onToggleSelect(entry.id)}
+                  aria-label={`${entry.assetId || entry.seq} 선택`}
+                />
+              </td>
               <td>{entry.seq}</td>
               <td>{entry.kind}</td>
               <td>
