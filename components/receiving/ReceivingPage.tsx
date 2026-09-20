@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import {
   completeReceiving,
   createReceiving,
@@ -34,12 +34,13 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function showToast(msg: string, duration = 2400) {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
+  function showToast(msg: string) {
     setToast({ msg, show: true });
-    toastTimer.current = setTimeout(() => setToast((t) => ({ ...t, show: false })), duration);
+  }
+
+  function closeToast() {
+    setToast((t) => ({ ...t, show: false }));
   }
 
   const visible = useMemo(
@@ -276,7 +277,12 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         onSave={handlePurchaseEntrySave}
       />
 
-      <div className={`toast${toast.show ? ' show' : ''}`}>{toast.msg}</div>
+      <div className={`toast${toast.show ? ' show' : ''}`}>
+        <span>{toast.msg}</span>
+        <button type="button" className="toast-close" onClick={closeToast} aria-label="닫기">
+          ×
+        </button>
+      </div>
     </div>
   );
 }

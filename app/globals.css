@@ -286,9 +286,14 @@ tbody tr:hover{background:var(--indigo-50);}
 .required{color:var(--red-600);}
 .toast{
   position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--ink-900); color:#fff;
-  padding:11px 20px; border-radius:10px; font-size:13px; font-weight:600; opacity:0; pointer-events:none; transition:.2s all; z-index:60;
+  padding:11px 14px 11px 20px; border-radius:10px; font-size:13px; font-weight:600; opacity:0; pointer-events:none; transition:.2s all; z-index:60;
+  display:flex; align-items:center; gap:10px; max-width:min(560px, calc(100vw - 32px));
 }
-.toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+.toast.show{opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto;}
+.toast-close{
+  background:none; border:none; color:#fff; opacity:.7; font-size:18px; line-height:1; cursor:pointer; padding:2px 4px; flex-shrink:0;
+}
+.toast-close:hover{opacity:1;}
 .loading-note{font-size:12px; color:var(--ink-400); margin-bottom:10px;}
 
 /* ===== Supabase 연결 안내 / 오류 화면 ===== */
