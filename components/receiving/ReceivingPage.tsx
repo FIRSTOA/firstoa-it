@@ -36,10 +36,10 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
   const [pending, startTransition] = useTransition();
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function showToast(msg: string) {
+  function showToast(msg: string, duration = 2400) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ msg, show: true });
-    toastTimer.current = setTimeout(() => setToast((t) => ({ ...t, show: false })), 2400);
+    toastTimer.current = setTimeout(() => setToast((t) => ({ ...t, show: false })), duration);
   }
 
   const visible = useMemo(
@@ -136,14 +136,18 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
     if (!confirm(`선택한 ${targets.length}건을 IT재고에 등록하고 입고완료 처리할까요?`)) return;
     startTransition(async () => {
       let success = 0;
-      let fail = 0;
+      const failures: string[] = [];
       for (const entry of targets) {
         const result = await completeReceiving(entry.id);
         if (result.ok) success++;
-        else fail++;
+        else failures.push(`${entry.assetId || entry.model || entry.seq}: ${result.error}`);
       }
       clearSelection();
-      showToast(fail === 0 ? `${success}건 입고완료 처리했어요.` : `${success}건 처리, ${fail}건 실패했어요.`);
+      if (failures.length === 0) {
+        showToast(`${success}건 입고완료 처리했어요.`);
+      } else {
+        showToast(`${success}건 처리, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
+      }
     });
   }
 
@@ -151,7 +155,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
     if (selectedEntries.length === 0) return;
     startTransition(async () => {
       let success = 0;
-      let fail = 0;
+      const failures: string[] = [];
       for (const entry of selectedEntries) {
         const { id, seq, completedAt, ...base } = entry;
         void id;
@@ -159,11 +163,15 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         void completedAt;
         const result = await updateReceiving(entry.id, { ...base, ...patch });
         if (result.ok) success++;
-        else fail++;
+        else failures.push(`${entry.assetId || entry.model || entry.seq}: ${result.error}`);
       }
       setBulkEditOpen(false);
       clearSelection();
-      showToast(fail === 0 ? `${success}건 일괄 수정했어요.` : `${success}건 수정, ${fail}건 실패했어요.`);
+      if (failures.length === 0) {
+        showToast(`${success}건 일괄 수정했어요.`);
+      } else {
+        showToast(`${success}건 수정, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
+      }
     });
   }
 

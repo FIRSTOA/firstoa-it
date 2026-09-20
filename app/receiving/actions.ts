@@ -40,7 +40,10 @@ export async function createReceiving(entry: ReceivingInput, quantity: number): 
   const supabase = createAdminClient();
   const rows = Array.from({ length: count }, () => receivingInputToRow(entry));
   const { error } = await supabase.from(RECEIVING_TABLE).insert(rows);
-  if (error) return { ok: false, error: toMessage(error) };
+  if (error) {
+    console.error('[receiving] createReceiving 실패:', error);
+    return { ok: false, error: toMessage(error) };
+  }
 
   revalidatePath('/receiving');
   return { ok: true };
@@ -56,7 +59,10 @@ export async function createReceivingBatch(entries: ReceivingInput[]): Promise<A
   const supabase = createAdminClient();
   const rows = entries.map(receivingInputToRow);
   const { error } = await supabase.from(RECEIVING_TABLE).insert(rows);
-  if (error) return { ok: false, error: toMessage(error) };
+  if (error) {
+    console.error('[receiving] createReceivingBatch 실패:', error);
+    return { ok: false, error: toMessage(error) };
+  }
 
   revalidatePath('/receiving');
   return { ok: true };
@@ -68,7 +74,10 @@ export async function updateReceiving(id: string, entry: ReceivingInput): Promis
 
   const supabase = createAdminClient();
   const { error } = await supabase.from(RECEIVING_TABLE).update(receivingInputToRow(entry)).eq('id', id);
-  if (error) return { ok: false, error: toMessage(error) };
+  if (error) {
+    console.error('[receiving] updateReceiving 실패:', error);
+    return { ok: false, error: toMessage(error) };
+  }
 
   revalidatePath('/receiving');
   return { ok: true };
@@ -77,7 +86,10 @@ export async function updateReceiving(id: string, entry: ReceivingInput): Promis
 export async function deleteReceiving(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
   const { error } = await supabase.from(RECEIVING_TABLE).delete().eq('id', id);
-  if (error) return { ok: false, error: `삭제에 실패했어요: ${error.message}` };
+  if (error) {
+    console.error('[receiving] deleteReceiving 실패:', error);
+    return { ok: false, error: `삭제에 실패했어요: ${error.message}` };
+  }
 
   revalidatePath('/receiving');
   return { ok: true };
@@ -105,13 +117,17 @@ async function findExistingAsset(assetId: string): Promise<Asset | null> {
 export async function completeReceiving(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
   const { data, error } = await supabase.from(RECEIVING_TABLE).select('*').eq('id', id).single();
-  if (error || !data) return { ok: false, error: '입고 건을 찾지 못했어요.' };
+  if (error || !data) {
+    console.error('[receiving] completeReceiving 조회 실패:', error);
+    return { ok: false, error: '입고 건을 찾지 못했어요.' };
+  }
 
   const entry = rowToReceiving(data as ReceivingRow);
   if (entry.status === '입고완료') return { ok: false, error: '이미 입고완료 처리된 건이에요.' };
 
   const missing = missingRequiredFields(entry);
   if (missing.length > 0) {
+    console.error('[receiving] completeReceiving 필수값 누락:', entry.assetId || entry.seq, missing);
     return { ok: false, error: `다음 항목을 먼저 입력해주세요: ${missing.join(', ')}` };
   }
 
@@ -141,13 +157,19 @@ export async function completeReceiving(id: string): Promise<ActionResult> {
         malicious: false,
         serialNo: entry.serialNumber,
       });
-  if (!result.ok) return result;
+  if (!result.ok) {
+    console.error('[receiving] completeReceiving 자산 반영 실패:', trimmedAssetId, result.error);
+    return result;
+  }
 
   const { error: updateError } = await supabase
     .from(RECEIVING_TABLE)
     .update({ status: '입고완료', completed_at: new Date().toISOString() })
     .eq('id', id);
-  if (updateError) return { ok: false, error: toMessage(updateError) };
+  if (updateError) {
+    console.error('[receiving] completeReceiving 상태 업데이트 실패:', updateError);
+    return { ok: false, error: toMessage(updateError) };
+  }
 
   revalidatePath('/receiving');
   return { ok: true };
