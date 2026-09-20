@@ -294,6 +294,14 @@ tbody tr:hover{background:var(--indigo-50);}
   background:none; border:none; color:#fff; opacity:.7; font-size:18px; line-height:1; cursor:pointer; padding:2px 4px; flex-shrink:0;
 }
 .toast-close:hover{opacity:1;}
+
+.inline-cell-input{
+  width:100%; border:1px solid transparent; background:transparent; font:inherit; color:inherit; padding:4px 6px;
+  border-radius:6px; transition:.12s border-color, .12s background;
+}
+.inline-cell-input:hover{background:var(--ink-100);}
+.inline-cell-input:focus{outline:none; border-color:var(--indigo-600); background:#fff; box-shadow:0 0 0 3px var(--indigo-100);}
+.inline-cell-input:disabled{color:var(--ink-500); cursor:not-allowed;}
 .loading-note{font-size:12px; color:var(--ink-400); margin-bottom:10px;}
 
 /* ===== Supabase 연결 안내 / 오류 화면 ===== */

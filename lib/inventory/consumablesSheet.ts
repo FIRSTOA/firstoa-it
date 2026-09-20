@@ -109,15 +109,35 @@ export async function listConsumablesFromSheet(): Promise<ConsumableItem[]> {
     .filter((c) => Object.values(c).some((v, idx) => idx > 0 && String(v).trim() !== ''));
 }
 
+/**
+ * 시트에서 실제로 데이터가 있는 마지막 행 다음 번호를 계산합니다. A2:Z 전체를 읽어서
+ * (listConsumablesFromSheet과 동일한 범위) 반환된 배열 길이로 판단 — 중간에 완전히 빈 행이
+ * 있어도 배열엔 빈 행이 그대로 포함되므로(Sheets API가 폭 전체 기준으로 끝을 판단) 정확합니다.
+ */
+async function getNextRowNumber(): Promise<number> {
+  const sheets = getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: requireSheetId(),
+    range: `${TAB}!A2:Z`,
+  });
+  return (res.data.values?.length ?? 0) + 2;
+}
+
+/**
+ * 새 행을 씁니다. values.append(INSERT_ROWS)는 중간에 완전히 빈 행이 있으면 "표의 끝"을
+ * 잘못 판단해서 엉뚱한 위치에 행을 끼워넣고 아래 데이터를 밀어버리는 문제가 있어서(실제로
+ * 겪었던 사고), 대신 실제 마지막 행 번호를 직접 계산해서 그 다음 행에 values.update로
+ * 명시적으로 씁니다 — 이 방식은 행을 밀지 않고 정확히 지정한 칸에만 씁니다.
+ */
 export async function createConsumableInSheet(input: ConsumableInput): Promise<void> {
   const header = await readHeader();
   const row = buildRowArray(header, input);
+  const nextRow = await getNextRowNumber();
   const sheets = getSheetsClient();
-  await sheets.spreadsheets.values.append({
+  await sheets.spreadsheets.values.update({
     spreadsheetId: requireSheetId(),
-    range: `${TAB}!A:A`,
+    range: `${TAB}!A${nextRow}:${columnLetter(row.length - 1)}${nextRow}`,
     valueInputOption: 'USER_ENTERED',
-    insertDataOption: 'INSERT_ROWS',
     requestBody: { values: [row] },
   });
 }
@@ -148,18 +168,50 @@ async function getSheetGid(): Promise<number> {
 }
 
 export async function deleteConsumableInSheet(rowNumber: number): Promise<void> {
+  await deleteConsumablesInSheet([rowNumber]);
+}
+
+/**
+ * 여러 행을 한 번에 삭제합니다. 행 번호가 큰 것부터 지워야 합니다 — 낮은 행을 먼저 지우면
+ * 그 아래(=큰 번호) 행들이 전부 위로 밀려서 나머지 삭제 대상 번호가 어긋나 버립니다. 배치
+ * 안의 요청은 순서대로 적용되므로, 내림차순으로 정렬해서 하나의 batchUpdate로 보냅니다.
+ */
+export async function deleteConsumablesInSheet(rowNumbers: number[]): Promise<void> {
+  if (rowNumbers.length === 0) return;
   const gid = await getSheetGid();
   const sheets = getSheetsClient();
+  const sorted = [...rowNumbers].sort((a, b) => b - a);
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: requireSheetId(),
     requestBody: {
-      requests: [
-        {
-          deleteDimension: {
-            range: { sheetId: gid, dimension: 'ROWS', startIndex: rowNumber - 1, endIndex: rowNumber },
-          },
+      requests: sorted.map((rowNumber) => ({
+        deleteDimension: {
+          range: { sheetId: gid, dimension: 'ROWS', startIndex: rowNumber - 1, endIndex: rowNumber },
         },
-      ],
+      })),
     },
+  });
+}
+
+/**
+ * 여러 행을 한 번에 수정합니다. update는 append와 달리 행을 밀지 않고 지정한 칸만 덮어쓰므로,
+ * 순서에 상관없이 하나의 batchUpdate(values.batchUpdate, 값 갱신 전용)로 안전하게 보냅니다.
+ */
+export async function updateConsumablesInSheet(
+  updates: { rowNumber: number; input: ConsumableInput }[],
+): Promise<void> {
+  if (updates.length === 0) return;
+  const header = await readHeader();
+  const sheets = getSheetsClient();
+  const data = updates.map(({ rowNumber, input }) => {
+    const row = buildRowArray(header, input);
+    return {
+      range: `${TAB}!A${rowNumber}:${columnLetter(row.length - 1)}${rowNumber}`,
+      values: [row],
+    };
+  });
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId: requireSheetId(),
+    requestBody: { valueInputOption: 'USER_ENTERED', data },
   });
 }
