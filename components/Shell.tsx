@@ -112,7 +112,15 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
             </nav>
           </div>
           <div className="topnav-right">
-            <div className="hr-pill">👥 인사관리시스템 ↗</div>
+            <a
+              className="hr-pill"
+              href="https://firstoa-hr.fly.dev/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: 'none' }}
+            >
+              👥 인사관리시스템 ↗
+            </a>
             <div className="logout-btn" title="로그아웃">
               ⏻
             </div>
