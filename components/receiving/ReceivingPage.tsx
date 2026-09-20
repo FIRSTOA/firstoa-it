@@ -97,6 +97,13 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
     });
   }
 
+  function handleInlineSave(id: string, entry: ReceivingInput) {
+    startTransition(async () => {
+      const result = await updateReceiving(id, entry);
+      showToast(result.ok ? '수정했어요.' : result.error);
+    });
+  }
+
   function handleComplete(entry: ReceivingEntry) {
     if (!confirm(`자산번호 "${entry.assetId}"를 IT재고에 등록하고 입고완료 처리할까요?`)) return;
     startTransition(async () => {
@@ -236,6 +243,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         selectedIds={selectedIds}
         onToggleSelect={toggleSelect}
         onToggleSelectAll={toggleSelectAll}
+        onInlineSave={handleInlineSave}
         onEdit={(entry) => {
           setEditing(entry);
           setModalOpen(true);

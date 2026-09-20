@@ -132,13 +132,18 @@ export function filterReceivingEntries(
   });
 }
 
-/** 입고완료 처리에 필요한 필수값이 다 채워졌는지 확인합니다 (품목/브랜드/모델명/자산번호/위치). */
+/**
+ * 입고완료 처리에 필요한 필수값이 다 채워졌는지 확인합니다 (품목/브랜드/모델명/자산번호/위치).
+ * 기타주변기기는 케이블/마우스처럼 개별 자산번호를 안 붙이는 품목도 섞여 있어서(때로는 거래처로
+ * 바로 직송돼 우리 창고에 아예 안 들어오기도 함) 자산번호를 필수에서 뺐습니다 — 비워두면
+ * 입고완료 처리 시 자동으로 번호를 만들어서 등록합니다(app/receiving/actions.ts).
+ */
 export function missingRequiredFields(entry: ReceivingEntry): string[] {
   const missing: string[] = [];
   if (!entry.category.trim()) missing.push('품목');
   if (!entry.brand.trim()) missing.push('브랜드');
   if (!entry.model.trim()) missing.push('모델명');
-  if (!entry.assetId.trim()) missing.push('자산번호');
+  if (entry.category !== '기타주변기기' && !entry.assetId.trim()) missing.push('자산번호');
   if (!entry.location.trim()) missing.push('위치');
   return missing;
 }
