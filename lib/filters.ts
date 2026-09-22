@@ -158,7 +158,7 @@ export function filterAssets(items: Asset[], filters: Filters, searchTerm: strin
     if (filters.newDevice === 'new' && !it.isNew) return false;
     if (filters.screenGroup && screenGroupOf(it.screen) !== filters.screenGroup) return false;
     if (term) {
-      const hay = normalizeForCompare(`${it.assetId} ${it.model} ${it.brand}`);
+      const hay = normalizeForCompare(`${it.assetId} ${it.model} ${it.brand} ${it.screen}`);
       if (!hay.includes(term)) return false;
     }
     return true;

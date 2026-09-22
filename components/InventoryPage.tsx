@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { cancelReservation, createAsset, deleteAsset, reserveAsset, resetToSeed, updateAsset } from '@/app/actions';
 import type { DataSource } from '@/lib/dataSource';
 import { filterAssets, toggleInternalStock, toggleMultiValue } from '@/lib/filters';
+import type { InquiryResult } from '@/lib/inventoryInquiry';
 import { useFilterState } from '@/lib/useFilterState';
 import type { Asset } from '@/lib/types';
 import ActiveFilters from './ActiveFilters';
@@ -15,6 +16,7 @@ import InventoryTable from './InventoryTable';
 import SpecBreakdownPanels from './SpecBreakdownPanels';
 import SpreadsheetLinkButton from './SpreadsheetLinkButton';
 import StatsRow from './StatsRow';
+import StockInquiryModal from './StockInquiryModal';
 
 const CPU_COUNT_ORDER = ['I7', 'I5', 'U7', 'U5', '미상'];
 
@@ -38,6 +40,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
     useFilterState();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
+  const [inquiryOpen, setInquiryOpen] = useState(false);
   const [toast, setToast] = useState({ msg: '', show: false });
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -135,6 +138,14 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
     });
   }
 
+  function handleApplyInquiryFilter(result: InquiryResult) {
+    setCategory(result.category ? [result.category] : []);
+    setFilter('cpuType', result.cpuType ? [result.cpuType] : []);
+    setFilter('spec', result.spec ? [result.spec] : []);
+    setSearchTerm(result.screenInch !== null ? String(result.screenInch) : '');
+    setInquiryOpen(false);
+  }
+
   function handleReset() {
     if (!confirm('샘플 데이터로 초기화할까요? 현재 입력한 내용은 사라져요.')) return;
     startTransition(async () => {
@@ -165,6 +176,9 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         <div className="actions">
           <SpreadsheetLinkButton url={spreadsheetUrl} />
           <ExcelActions items={items} disabled={pending} onToast={showToast} />
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setInquiryOpen(true)}>
+            📋 재고 문의
+          </button>
           {dataSource === 'supabase' && (
             <button type="button" className="btn btn-ghost" onClick={handleReset} disabled={pending}>
               샘플 데이터로 초기화
@@ -248,6 +262,13 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         onDelete={handleDelete}
         onReserve={handleReserve}
         onCancelReservation={handleCancelReservation}
+      />
+
+      <StockInquiryModal
+        open={inquiryOpen}
+        items={items}
+        onClose={() => setInquiryOpen(false)}
+        onApplyFilter={handleApplyInquiryFilter}
       />
 
       <AssetModal
