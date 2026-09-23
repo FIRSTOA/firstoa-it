@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { normalizeWonInput } from '@/lib/currency';
 import type { SaleEntry, SaleInput } from '@/lib/sales';
 
 const BLANK: SaleInput = {
@@ -10,6 +11,7 @@ const BLANK: SaleInput = {
   model: '',
   spec: '',
   assetId: '',
+  serialNumber: '',
   destination: '',
   saleDate: '',
   notes: '',
@@ -33,6 +35,10 @@ export default function SalesModal({ open, editing, pending, onClose, onSave }: 
   const set = <K extends keyof SaleInput>(key: K, value: SaleInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  function normalizePriceOnBlur(key: 'purchasePrice' | 'salePrice') {
+    setForm((prev) => ({ ...prev, [key]: normalizeWonInput(prev[key]) }));
+  }
+
   function handleSave() {
     onSave({
       purchaseVendor: form.purchaseVendor.trim(),
@@ -41,6 +47,7 @@ export default function SalesModal({ open, editing, pending, onClose, onSave }: 
       model: form.model.trim(),
       spec: form.spec.trim(),
       assetId: form.assetId.trim(),
+      serialNumber: form.serialNumber.trim(),
       destination: form.destination.trim(),
       saleDate: form.saleDate,
       notes: form.notes.trim(),
@@ -77,16 +84,29 @@ export default function SalesModal({ open, editing, pending, onClose, onSave }: 
             <input value={form.assetId} onChange={(e) => set('assetId', e.target.value)} placeholder="예: P2400" />
           </div>
           <div className="form-field">
+            <label>시리얼번호</label>
+            <input value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} />
+          </div>
+          <div className="form-field">
             <label>구매처</label>
             <input value={form.purchaseVendor} onChange={(e) => set('purchaseVendor', e.target.value)} />
           </div>
           <div className="form-field">
             <label>매입금액</label>
-            <input value={form.purchasePrice} onChange={(e) => set('purchasePrice', e.target.value)} placeholder="예: 대당 220만원" />
+            <input
+              value={form.purchasePrice}
+              onChange={(e) => set('purchasePrice', e.target.value)}
+              onBlur={() => normalizePriceOnBlur('purchasePrice')}
+              placeholder="예: 154만원 (자동으로 1,540,000원으로 정리돼요)"
+            />
           </div>
           <div className="form-field">
             <label>판매금액</label>
-            <input value={form.salePrice} onChange={(e) => set('salePrice', e.target.value)} />
+            <input
+              value={form.salePrice}
+              onChange={(e) => set('salePrice', e.target.value)}
+              onBlur={() => normalizePriceOnBlur('salePrice')}
+            />
           </div>
           <div className="form-field">
             <label>위치(판매한 곳)</label>

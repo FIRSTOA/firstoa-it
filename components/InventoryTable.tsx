@@ -61,25 +61,39 @@ function HistoryCell({ history }: { history: string }) {
 type Props = {
   items: Asset[];
   disabled: boolean;
+  selectedKeys: Set<string>;
+  onToggleSelect: (item: Asset) => void;
+  onToggleSelectAll: () => void;
   onEdit: (item: Asset) => void;
   onDelete: (assetId: string, category: string) => void;
   onReserve: (item: Asset) => void;
   onCancelReservation: (item: Asset) => void;
 };
 
+function selectionKey(item: Asset): string {
+  return `${item.category}-${item.assetId}`;
+}
+
 export default function InventoryTable({
   items,
   disabled,
+  selectedKeys,
+  onToggleSelect,
+  onToggleSelectAll,
   onEdit,
   onDelete,
   onReserve,
   onCancelReservation,
 }: Props) {
+  const allSelected = items.length > 0 && items.every((it) => selectedKeys.has(selectionKey(it)));
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
       <table>
         <thead>
           <tr>
+            <th style={{ width: '32px' }}>
+              <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="전체 선택" />
+            </th>
             <th style={{ width: '30%' }}>사양</th>
             <th>자산번호</th>
             <th>브랜드</th>
@@ -96,6 +110,14 @@ export default function InventoryTable({
             // 자산번호가 시트에 중복 입력돼 있거나("P1024"가 두 카테고리에 걸쳐 있는 등) 비어있는
             // 경우("없음" 같은 오입력 포함)가 실제로 있어서, index까지 합쳐 항상 고유한 key로 만듭니다.
             <tr key={`${item.category}-${item.assetId}-${index}`}>
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selectedKeys.has(selectionKey(item))}
+                  onChange={() => onToggleSelect(item)}
+                  aria-label={`${item.assetId} 선택`}
+                />
+              </td>
               <td>
                 <SpecCell item={item} />
               </td>

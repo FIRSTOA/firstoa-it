@@ -18,6 +18,7 @@ create table if not exists public.it_sales_log (
   model           text not null default '', -- 모델명
   spec            text not null default '', -- 스펙
   asset_id        text not null default '', -- 자산번호
+  serial_number   text not null default '', -- 시리얼번호
 
   destination     text not null default '', -- 위치(=판매한 곳, 거래처명)
   sale_date       date,
@@ -26,6 +27,9 @@ create table if not exists public.it_sales_log (
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
+
+-- 기존에 이미 테이블이 있는 경우(create table if not exists가 no-op)에도 새 컬럼이 생기도록.
+alter table public.it_sales_log add column if not exists serial_number text not null default '';
 
 create index if not exists it_sales_log_created_at_idx on public.it_sales_log (created_at desc, seq desc);
 create index if not exists it_sales_log_asset_id_idx   on public.it_sales_log (asset_id);

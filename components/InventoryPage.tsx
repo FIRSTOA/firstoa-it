@@ -41,6 +41,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [inquiryOpen, setInquiryOpen] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ msg: '', show: false });
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -135,6 +136,60 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
     startTransition(async () => {
       const result = await cancelReservation(item.assetId, item.category);
       showToast(result.ok ? '예약을 취소했어요.' : result.error);
+    });
+  }
+
+  function selectionKey(item: Asset): string {
+    return `${item.category}-${item.assetId}`;
+  }
+
+  function toggleSelect(item: Asset) {
+    const key = selectionKey(item);
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedKeys((prev) => {
+      const allSelected = visibleItems.length > 0 && visibleItems.every((it) => prev.has(selectionKey(it)));
+      if (allSelected) return new Set();
+      return new Set(visibleItems.map(selectionKey));
+    });
+  }
+
+  function clearSelection() {
+    setSelectedKeys(new Set());
+  }
+
+  const selectedItems = visibleItems.filter((it) => selectedKeys.has(selectionKey(it)));
+  const selectedUnreserved = selectedItems.filter((it) => !it.reservedBy);
+
+  function handleBulkReserve() {
+    if (selectedUnreserved.length === 0) {
+      showToast('선택한 건 중에 예약 가능한(미예약) 자산이 없어요.');
+      return;
+    }
+    const name = prompt(`선택한 ${selectedUnreserved.length}건을 예약할 이름을 입력해주세요.`);
+    if (name === null) return;
+    if (!name.trim()) {
+      showToast('예약자 이름을 입력해주세요.');
+      return;
+    }
+    startTransition(async () => {
+      let success = 0;
+      const failures: string[] = [];
+      for (const item of selectedUnreserved) {
+        const result = await reserveAsset(item.assetId, item.category, name.trim());
+        if (result.ok) success++;
+        else failures.push(`${item.assetId}: ${result.error}`);
+      }
+      clearSelection();
+      if (failures.length === 0) showToast(`${success}건 예약했어요.`);
+      else showToast(`${success}건 예약, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
     });
   }
 
@@ -253,9 +308,24 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         onToggle={(dimension, value) => setFilter(dimension, toggleMultiValue(filters[dimension], value))}
       />
 
+      {selectedKeys.size > 0 && (
+        <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700 }}>{selectedKeys.size}건 선택됨</span>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={handleBulkReserve}>
+            일괄 예약
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={clearSelection}>
+            선택 해제
+          </button>
+        </div>
+      )}
+
       <InventoryTable
         items={visibleItems}
         disabled={pending}
+        selectedKeys={selectedKeys}
+        onToggleSelect={toggleSelect}
+        onToggleSelectAll={toggleSelectAll}
         onEdit={(item) => {
           setEditing(item);
           setModalOpen(true);

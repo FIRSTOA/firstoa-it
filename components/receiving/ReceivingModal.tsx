@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { lookupKnownAsset } from '@/app/actions';
+import { normalizeWonInput } from '@/lib/currency';
 import { RECEIVING_KINDS, type ReceivingEntry, type ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES, SPECS } from '@/lib/types';
 
@@ -224,7 +225,8 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
             <input
               value={form.purchasePrice}
               onChange={(e) => set('purchasePrice', e.target.value)}
-              placeholder="예: 116,000원(vat별도)"
+              onBlur={() => setForm((prev) => ({ ...prev, purchasePrice: normalizeWonInput(prev.purchasePrice) }))}
+              placeholder="예: 154만원 (자동으로 1,540,000원으로 정리돼요)"
             />
           </div>
           <div className="form-field">

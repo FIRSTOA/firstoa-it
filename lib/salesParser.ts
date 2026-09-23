@@ -138,7 +138,7 @@ export function parseSalesPaste(text: string): ParsedSaleGroup[] {
 
 /** 파싱된 그룹 하나를 실제 등록 행(SaleInput[])으로 펼칩니다 — 1행 = 1대 기준. */
 export function expandParsedSaleGroup(group: ParsedSaleGroup): SaleInput[] {
-  const base: Omit<SaleInput, 'assetId'> = {
+  const base: Omit<SaleInput, 'assetId' | 'serialNumber'> = {
     purchaseVendor: group.purchaseVendor,
     purchasePrice: group.purchasePrice,
     salePrice: group.salePrice,
@@ -149,5 +149,5 @@ export function expandParsedSaleGroup(group: ParsedSaleGroup): SaleInput[] {
     notes: group.notes,
   };
   const count = Math.max(Math.trunc(group.quantity) || 1, 1);
-  return Array.from({ length: count }, () => ({ ...base, assetId: '' }));
+  return Array.from({ length: count }, () => ({ ...base, assetId: '', serialNumber: '' }));
 }

@@ -12,6 +12,7 @@ export default function SalesPage({ entries }: { entries: SaleEntry[] }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [editing, setEditing] = useState<SaleEntry | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
 
@@ -59,6 +60,44 @@ export default function SalesPage({ entries }: { entries: SaleEntry[] }) {
     });
   }
 
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((prev) => {
+      const allSelected = visible.length > 0 && visible.every((e) => prev.has(e.id));
+      if (allSelected) return new Set();
+      return new Set(visible.map((e) => e.id));
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`선택한 ${selectedIds.size}건을 삭제할까요?`)) return;
+    startTransition(async () => {
+      let success = 0;
+      const failures: string[] = [];
+      for (const id of selectedIds) {
+        const result = await deleteSale(id);
+        if (result.ok) success++;
+        else failures.push(result.error);
+      }
+      clearSelection();
+      if (failures.length === 0) showToast(`${success}건 삭제했어요.`);
+      else showToast(`${success}건 삭제, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
+    });
+  }
+
   return (
     <div className="app">
       <div className="topbar" style={{ marginBottom: '14px' }}>
@@ -94,9 +133,24 @@ export default function SalesPage({ entries }: { entries: SaleEntry[] }) {
         </div>
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700 }}>{selectedIds.size}건 선택됨</span>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={handleBulkDelete}>
+            선택 삭제
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={clearSelection}>
+            선택 해제
+          </button>
+        </div>
+      )}
+
       <SalesTable
         entries={visible}
         disabled={pending}
+        selectedIds={selectedIds}
+        onToggleSelect={toggleSelect}
+        onToggleSelectAll={toggleSelectAll}
         onEdit={(entry) => {
           setEditing(entry);
           setModalOpen(true);

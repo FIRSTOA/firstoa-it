@@ -12,7 +12,7 @@ import type { SaleEntry } from '@/lib/sales';
 const SHEET_ID = process.env.GOOGLE_INVENTORY_SHEET_ID || process.env.GOOGLE_RENTAL_SHEET_ID;
 const TAB = process.env.GOOGLE_SALES_SHEET_TAB || '판매리스트';
 
-const HEADER_ROW = ['순번', '모델명', '스펙', '자산번호', '구매처', '매입금액', '판매금액', '위치(판매한 곳)', '판매일', '비고'];
+const HEADER_ROW = ['순번', '모델명', '스펙', '자산번호', '시리얼번호', '구매처', '매입금액', '판매금액', '위치(판매한 곳)', '판매일', '비고'];
 
 export function isSalesSheetConfigured(): boolean {
   return Boolean(SHEET_ID) && isGoogleServiceAccountConfigured();
@@ -28,6 +28,7 @@ type HeaderMap = {
   modelCol: number;
   specCol: number;
   assetIdCol: number;
+  serialNumberCol: number;
   vendorCol: number;
   purchasePriceCol: number;
   salePriceCol: number;
@@ -41,23 +42,34 @@ function findExact(header: string[], text: string): number {
   return header.findIndex((h) => h.trim() === text);
 }
 
-/** 탭이 없으면 새로 만들고 헤더 행을 씁니다. 이미 있으면 아무것도 안 합니다. */
+/**
+ * 탭이 없으면 새로 만듭니다. 이미 있는데 헤더에 없는 컬럼(예: 나중에 추가된 "시리얼번호")이
+ * 있으면 헤더 행을 최신 HEADER_ROW로 다시 씁니다 — 이 탭은 앱이 전적으로 관리하는 것이라
+ * 사람이 임의로 다른 컬럼을 넣어뒀을 걱정이 없어서, 헤더만 갱신하고 기존 데이터 행은 그대로
+ * 둡니다(새 컬럼 칸만 비어있게 됨).
+ */
 async function ensureTabExists(): Promise<void> {
   const sheets = getSheetsClient();
   const meta = await sheets.spreadsheets.get({ spreadsheetId: requireSheetId(), fields: 'sheets.properties' });
   const exists = meta.data.sheets?.some((s) => s.properties?.title === TAB);
-  if (exists) return;
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: requireSheetId(),
+      requestBody: { requests: [{ addSheet: { properties: { title: TAB } } }] },
+    });
+  }
 
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: requireSheetId(),
-    requestBody: { requests: [{ addSheet: { properties: { title: TAB } } }] },
-  });
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: requireSheetId(),
-    range: `${TAB}!A1:${columnLetter(HEADER_ROW.length - 1)}1`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [HEADER_ROW] },
-  });
+  const headerRes = await sheets.spreadsheets.values.get({ spreadsheetId: requireSheetId(), range: `${TAB}!1:1` });
+  const currentHeader = (headerRes.data.values?.[0] ?? []).map((v) => String(v ?? '').trim());
+  const missing = HEADER_ROW.some((label) => !currentHeader.includes(label));
+  if (missing) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: requireSheetId(),
+      range: `${TAB}!A1:${columnLetter(HEADER_ROW.length - 1)}1`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [HEADER_ROW] },
+    });
+  }
 }
 
 async function readHeader(): Promise<HeaderMap> {
@@ -69,6 +81,7 @@ async function readHeader(): Promise<HeaderMap> {
     modelCol: findExact(header, '모델명'),
     specCol: findExact(header, '스펙'),
     assetIdCol: findExact(header, '자산번호'),
+    serialNumberCol: findExact(header, '시리얼번호'),
     vendorCol: findExact(header, '구매처'),
     purchasePriceCol: findExact(header, '매입금액'),
     salePriceCol: findExact(header, '판매금액'),
@@ -85,6 +98,7 @@ function buildRowArray(header: HeaderMap, entry: SaleEntry): string[] {
   if (header.modelCol >= 0) row[header.modelCol] = entry.model;
   if (header.specCol >= 0) row[header.specCol] = entry.spec;
   if (header.assetIdCol >= 0) row[header.assetIdCol] = entry.assetId;
+  if (header.serialNumberCol >= 0) row[header.serialNumberCol] = entry.serialNumber;
   if (header.vendorCol >= 0) row[header.vendorCol] = entry.purchaseVendor;
   if (header.purchasePriceCol >= 0) row[header.purchasePriceCol] = entry.purchasePrice;
   if (header.salePriceCol >= 0) row[header.salePriceCol] = entry.salePrice;

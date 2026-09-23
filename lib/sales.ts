@@ -12,6 +12,7 @@ export type SaleEntry = {
   model: string;
   spec: string;
   assetId: string;
+  serialNumber: string;
   destination: string;
   saleDate: string;
   notes: string;
@@ -26,6 +27,7 @@ export type SaleRow = {
   model: string;
   spec: string;
   asset_id: string;
+  serial_number: string;
   destination: string;
   sale_date: string | null;
   notes: string;
@@ -41,6 +43,7 @@ export function rowToSale(row: SaleRow): SaleEntry {
     model: row.model,
     spec: row.spec,
     assetId: row.asset_id,
+    serialNumber: row.serial_number,
     destination: row.destination,
     saleDate: row.sale_date ?? '',
     notes: row.notes,
@@ -57,6 +60,7 @@ export function saleInputToRow(entry: SaleInput) {
     model: entry.model,
     spec: entry.spec,
     asset_id: entry.assetId,
+    serial_number: entry.serialNumber,
     destination: entry.destination,
     sale_date: entry.saleDate || null,
     notes: entry.notes,
@@ -67,7 +71,7 @@ export function filterSaleEntries(entries: SaleEntry[], searchTerm: string): Sal
   const term = searchTerm.trim().toLowerCase();
   if (!term) return entries;
   return entries.filter((e) => {
-    const hay = `${e.model} ${e.assetId} ${e.destination} ${e.purchaseVendor} ${e.spec}`.toLowerCase();
+    const hay = `${e.model} ${e.assetId} ${e.serialNumber} ${e.destination} ${e.purchaseVendor} ${e.spec}`.toLowerCase();
     return hay.includes(term);
   });
 }
