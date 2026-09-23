@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useRef, useState, type ReactNode } from 'react';
 
 const SIDEBAR_SECTIONS = [
@@ -28,18 +29,27 @@ const SIDEBAR_SECTIONS = [
 
 type SidebarItem = (typeof SIDEBAR_SECTIONS)[number]['items'][number];
 
-const TOP_TABS = ['통합 캘린더', '영업관리', '출고·현황', '고객서비스', '임대·청구', '재고관리', '관리'];
-const ACTIVE_TAB = '재고관리';
+const TOP_TABS: { label: string; href: string | null }[] = [
+  { label: '통합 캘린더', href: '/calendar' },
+  { label: '영업관리', href: null },
+  { label: '출고·현황', href: null },
+  { label: '고객서비스', href: null },
+  { label: '임대·청구', href: null },
+  { label: '재고관리', href: null },
+  { label: '관리', href: null },
+];
 
 type Props = {
   children: ReactNode;
-  activeMenu: SidebarItem['label'];
+  activeMenu: SidebarItem['label'] | '통합 캘린더';
   title: string;
   note?: string;
 };
 
 /** ERP 공통 껍데기 — 왼쪽 사이드바 + 상단 네비 + 브레드크럼. 여러 페이지가 공유합니다. */
 export default function Shell({ children, activeMenu, title, note }: Props) {
+  const pathname = usePathname();
+  const activeTab = pathname?.startsWith('/calendar') ? '통합 캘린더' : '재고관리';
   const [toast, setToast] = useState({ msg: '', show: false });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -105,11 +115,22 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
               </div>
             </div>
             <nav className="topnav-tabs">
-              {TOP_TABS.map((label) => (
-                <div key={label} className={`topnav-tab${label === ACTIVE_TAB ? ' active' : ''}`}>
-                  {label}
-                </div>
-              ))}
+              {TOP_TABS.map(({ label, href }) =>
+                href ? (
+                  <Link
+                    key={label}
+                    href={href}
+                    className={`topnav-tab${label === activeTab ? ' active' : ''}`}
+                    style={{ textDecoration: 'none' }}
+                  >
+                    {label}
+                  </Link>
+                ) : (
+                  <div key={label} className={`topnav-tab${label === activeTab ? ' active' : ''}`}>
+                    {label}
+                  </div>
+                ),
+              )}
             </nav>
           </div>
           <div className="topnav-right">

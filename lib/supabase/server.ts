@@ -32,6 +32,7 @@ export const ASSETS_TABLE = 'it_assets';
 export const DISPATCH_TABLE = 'it_dispatch_log';
 export const RECEIVING_TABLE = 'it_receiving_log';
 export const SALES_TABLE = 'it_sales_log';
+export const CALENDAR_TABLE = 'it_calendar_events';
 export const RENTAL_TABLE = 'it_rental_list';
 export const ASSET_HISTORY_TABLE = 'asset_history';
 export const ASSET_MOVEMENTS_TABLE = 'asset_movements';
