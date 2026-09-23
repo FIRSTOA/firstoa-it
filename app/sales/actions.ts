@@ -1,7 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { saleInputToRow, type SaleInput } from '@/lib/sales';
+import { appendSalesToSheet, deleteSaleFromSheet, isSalesSheetConfigured, upsertSaleInSheet } from '@/lib/inventory/salesSheet';
+import { rowToSale, saleInputToRow, type SaleInput, type SaleRow } from '@/lib/sales';
 import { createAdminClient, SALES_TABLE } from '@/lib/supabase/server';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -16,16 +17,32 @@ function toMessage(error: { code?: string; message: string }): string {
   return `저장에 실패했어요: ${error.message}`;
 }
 
+/**
+ * 구글시트 반영은 최선노력입니다 — Supabase 쓰기가 이 앱의 기준값이고, 시트는 다른 직원이
+ * 바로 볼 수 있게 미러링하는 부가 동작이라 실패해도 사용자에게 보이는 결과(Supabase 저장
+ * 성공)는 바뀌지 않습니다. lib/inventory/movements.ts의 logAssetMovement와 동일한 원칙.
+ */
+async function syncToSheetBestEffort(fn: () => Promise<void>, label: string): Promise<void> {
+  if (!isSalesSheetConfigured()) return;
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`[sales] ${label} 실패(구글시트):`, err);
+  }
+}
+
 export async function createSale(entry: SaleInput): Promise<ActionResult> {
   const invalid = validate(entry);
   if (invalid) return { ok: false, error: invalid };
 
   const supabase = createAdminClient();
-  const { error } = await supabase.from(SALES_TABLE).insert(saleInputToRow(entry));
+  const { data, error } = await supabase.from(SALES_TABLE).insert(saleInputToRow(entry)).select().single();
   if (error) {
     console.error('[sales] createSale 실패:', error);
     return { ok: false, error: toMessage(error) };
   }
+
+  await syncToSheetBestEffort(() => upsertSaleInSheet(rowToSale(data as SaleRow)), 'createSale');
 
   revalidatePath('/sales');
   return { ok: true };
@@ -37,11 +54,16 @@ export async function createSalesBatch(entries: SaleInput[]): Promise<ActionResu
 
   const supabase = createAdminClient();
   const rows = entries.map(saleInputToRow);
-  const { error } = await supabase.from(SALES_TABLE).insert(rows);
+  const { data, error } = await supabase.from(SALES_TABLE).insert(rows).select();
   if (error) {
     console.error('[sales] createSalesBatch 실패:', error);
     return { ok: false, error: toMessage(error) };
   }
+
+  await syncToSheetBestEffort(
+    () => appendSalesToSheet(((data ?? []) as SaleRow[]).map(rowToSale)),
+    'createSalesBatch',
+  );
 
   revalidatePath('/sales');
   return { ok: true };
@@ -52,11 +74,13 @@ export async function updateSale(id: string, entry: SaleInput): Promise<ActionRe
   if (invalid) return { ok: false, error: invalid };
 
   const supabase = createAdminClient();
-  const { error } = await supabase.from(SALES_TABLE).update(saleInputToRow(entry)).eq('id', id);
+  const { data, error } = await supabase.from(SALES_TABLE).update(saleInputToRow(entry)).eq('id', id).select().single();
   if (error) {
     console.error('[sales] updateSale 실패:', error);
     return { ok: false, error: toMessage(error) };
   }
+
+  await syncToSheetBestEffort(() => upsertSaleInSheet(rowToSale(data as SaleRow)), 'updateSale');
 
   revalidatePath('/sales');
   return { ok: true };
@@ -64,10 +88,14 @@ export async function updateSale(id: string, entry: SaleInput): Promise<ActionRe
 
 export async function deleteSale(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
-  const { error } = await supabase.from(SALES_TABLE).delete().eq('id', id);
+  const { data, error } = await supabase.from(SALES_TABLE).delete().eq('id', id).select().single();
   if (error) {
     console.error('[sales] deleteSale 실패:', error);
     return { ok: false, error: `삭제에 실패했어요: ${error.message}` };
+  }
+
+  if (data) {
+    await syncToSheetBestEffort(() => deleteSaleFromSheet((data as SaleRow).seq), 'deleteSale');
   }
 
   revalidatePath('/sales');
