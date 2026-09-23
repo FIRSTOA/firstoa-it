@@ -1,24 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CALENDAR_STATUSES, type CalendarEvent, type CalendarEventInput } from '@/lib/calendar';
+import { CALENDAR_STATUSES, type CalendarEvent, type CalendarEventInput, type NaverCalendarConnection } from '@/lib/calendar';
 
-function blankInput(date: string): CalendarEventInput {
-  return { title: '', date, time: '', location: '', description: '', status: '진행중', author: '' };
+function blankInput(date: string, calendarId: string | null): CalendarEventInput {
+  return { title: '', date, time: '', location: '', description: '', status: '진행중', author: '', calendarId };
 }
 
 type Props = {
   open: boolean;
   editing: CalendarEvent | null;
   defaultDate: string;
+  connectedCalendars: NaverCalendarConnection[];
   pending: boolean;
   onClose: () => void;
   onSave: (input: CalendarEventInput) => void;
   onDelete?: () => void;
 };
 
-export default function EventModal({ open, editing, defaultDate, pending, onClose, onSave, onDelete }: Props) {
-  const [form, setForm] = useState<CalendarEventInput>(() => blankInput(defaultDate));
+export default function EventModal({ open, editing, defaultDate, connectedCalendars, pending, onClose, onSave, onDelete }: Props) {
+  const [form, setForm] = useState<CalendarEventInput>(() => blankInput(defaultDate, null));
   const [allDay, setAllDay] = useState(true);
 
   useEffect(() => {
@@ -32,13 +33,14 @@ export default function EventModal({ open, editing, defaultDate, pending, onClos
         description: editing.description,
         status: editing.status,
         author: editing.author,
+        calendarId: editing.calendarId,
       });
       setAllDay(!editing.time);
     } else {
-      setForm(blankInput(defaultDate));
+      setForm(blankInput(defaultDate, connectedCalendars[0]?.id ?? null));
       setAllDay(true);
     }
-  }, [open, editing, defaultDate]);
+  }, [open, editing, defaultDate, connectedCalendars]);
 
   if (!open) return null;
 
@@ -96,6 +98,20 @@ export default function EventModal({ open, editing, defaultDate, pending, onClos
           <div className="form-field">
             <label>등록자</label>
             <input value={form.author} onChange={(e) => set('author', e.target.value)} />
+          </div>
+          <div className="form-field full">
+            <label>네이버 캘린더</label>
+            <select
+              value={form.calendarId ?? ''}
+              onChange={(e) => set('calendarId', e.target.value || null)}
+            >
+              <option value="">연결 안 함(앱에만 저장)</option>
+              {connectedCalendars.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name || c.id}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-field full">
             <label>장소</label>

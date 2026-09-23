@@ -16,6 +16,7 @@ export type CalendarEvent = {
   author: string;
   naverUid: string | null;
   source: string;
+  calendarId: string | null; // 연결된 네이버 캘린더 ID (Phase 2, 없으면 동기화 안 됨)
 };
 
 export type CalendarEventRow = {
@@ -29,6 +30,7 @@ export type CalendarEventRow = {
   author: string;
   naver_uid: string | null;
   source: string;
+  calendar_id: string | null;
 };
 
 export function rowToCalendarEvent(row: CalendarEventRow): CalendarEvent {
@@ -43,6 +45,7 @@ export function rowToCalendarEvent(row: CalendarEventRow): CalendarEvent {
     author: row.author,
     naverUid: row.naver_uid,
     source: row.source,
+    calendarId: row.calendar_id,
   };
 }
 
@@ -57,7 +60,24 @@ export function calendarEventInputToRow(input: CalendarEventInput) {
     description: input.description,
     status: input.status,
     author: input.author,
+    calendar_id: input.calendarId,
   };
+}
+
+export type NaverCalendarConnection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type NaverCalendarConnectionRow = {
+  id: string;
+  name: string;
+  enabled: boolean;
+};
+
+export function rowToNaverCalendarConnection(row: NaverCalendarConnectionRow): NaverCalendarConnection {
+  return { id: row.id, name: row.name, enabled: row.enabled };
 }
 
 /** 달력 그리드(일요일 시작, 6주 고정)를 채울 날짜 범위 — 월 앞뒤로 삐져나온 날짜도 포함합니다. */

@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState, useTransition } from 'react';
-import { createEvent, deleteEvent, listEventsInRange, updateEvent } from '@/app/calendar/actions';
-import { groupEventsByDate, monthGridRange, toYmd, type CalendarEvent, type CalendarEventInput } from '@/lib/calendar';
+import { createEvent, deleteEvent, listConnectedCalendars, listEventsInRange, updateEvent } from '@/app/calendar/actions';
+import { groupEventsByDate, monthGridRange, toYmd, type CalendarEvent, type CalendarEventInput, type NaverCalendarConnection } from '@/lib/calendar';
+import CalendarConnectionsModal from './CalendarConnectionsModal';
 import EventModal from './EventModal';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -11,21 +12,30 @@ type Props = {
   initialYear: number;
   initialMonth: number;
   initialEvents: CalendarEvent[];
+  initialConnectedCalendars: NaverCalendarConnection[];
 };
 
 function todayYmd(): string {
   return toYmd(new Date());
 }
 
-export default function CalendarPage({ initialYear, initialMonth, initialEvents }: Props) {
+export default function CalendarPage({ initialYear, initialMonth, initialEvents, initialConnectedCalendars }: Props) {
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
   const [events, setEvents] = useState(initialEvents);
+  const [connectedCalendars, setConnectedCalendars] = useState(initialConnectedCalendars);
   const [modalOpen, setModalOpen] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
   const [defaultDate, setDefaultDate] = useState<string>(todayYmd());
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
+
+  function refetchConnectedCalendars() {
+    startTransition(async () => {
+      setConnectedCalendars(await listConnectedCalendars());
+    });
+  }
 
   function showToast(msg: string) {
     setToast({ msg, show: true });
@@ -143,6 +153,9 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents 
           </div>
         </div>
         <div className="actions">
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setConnectionsOpen(true)}>
+            🔗 캘린더 연결
+          </button>
           <button type="button" className="btn btn-primary" disabled={pending} onClick={() => openCreate(today)}>
             ＋ 일정 추가
           </button>
@@ -198,6 +211,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents 
         open={modalOpen}
         editing={editing}
         defaultDate={defaultDate}
+        connectedCalendars={connectedCalendars}
         pending={pending}
         onClose={() => {
           setModalOpen(false);
@@ -205,6 +219,14 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents 
         }}
         onSave={handleSave}
         onDelete={editing ? () => handleDelete(editing.id) : undefined}
+      />
+
+      <CalendarConnectionsModal
+        open={connectionsOpen}
+        connected={connectedCalendars}
+        pending={pending}
+        onClose={() => setConnectionsOpen(false)}
+        onChanged={refetchConnectedCalendars}
       />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
