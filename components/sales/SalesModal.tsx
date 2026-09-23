@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { ocrExtractSaleInfo } from '@/app/sales/actions';
 import { normalizeWonInput } from '@/lib/currency';
 import type { SaleEntry, SaleInput } from '@/lib/sales';
 
@@ -25,11 +26,30 @@ type Props = {
   onSave: (entry: SaleInput) => void;
 };
 
+function readFileAsBase64(file: File): Promise<{ base64: string; mediaType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string; // "data:image/jpeg;base64,AAAA..."
+      const comma = result.indexOf(',');
+      resolve({ base64: result.slice(comma + 1), mediaType: file.type || 'image/jpeg' });
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function SalesModal({ open, editing, pending, onClose, onSave }: Props) {
   const [form, setForm] = useState<SaleInput>(BLANK);
+  const [ocrPending, setOcrPending] = useState(false);
+  const [ocrError, setOcrError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) setForm(editing ?? BLANK);
+    if (open) {
+      setForm(editing ?? BLANK);
+      setOcrError('');
+    }
   }, [open, editing]);
 
   const set = <K extends keyof SaleInput>(key: K, value: SaleInput[K]) =>
@@ -37,6 +57,34 @@ export default function SalesModal({ open, editing, pending, onClose, onSave }: 
 
   function normalizePriceOnBlur(key: 'purchasePrice' | 'salePrice') {
     setForm((prev) => ({ ...prev, [key]: normalizeWonInput(prev[key]) }));
+  }
+
+  async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setOcrPending(true);
+    setOcrError('');
+    try {
+      const { base64, mediaType } = await readFileAsBase64(file);
+      const result = await ocrExtractSaleInfo(base64, mediaType);
+      if (!result.ok) {
+        setOcrError(result.error);
+        return;
+      }
+      // 이미 입력된 값은 안 건드리고 빈 칸만 채웁니다.
+      setForm((prev) => ({
+        ...prev,
+        model: prev.model || result.fields.model,
+        spec: prev.spec || result.fields.spec,
+        assetId: prev.assetId || result.fields.assetId,
+        serialNumber: prev.serialNumber || result.fields.serialNumber,
+      }));
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : '사진을 읽는 중 오류가 났어요.');
+    } finally {
+      setOcrPending(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   }
 
   function handleSave() {
@@ -64,6 +112,27 @@ export default function SalesModal({ open, editing, pending, onClose, onSave }: 
       <div className="modal" style={{ width: '560px' }}>
         <h2>{editing ? '판매 건 수정' : '판매 등록'}</h2>
         <div className="sub">IT재고와 별도로 관리되는 판매 기록이에요.</div>
+
+        <div style={{ margin: '10px 0' }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+            onChange={handlePhotoSelected}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={pending || ocrPending}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {ocrPending ? '사진 인식 중…' : '📷 사진으로 자동 입력(OCR)'}
+          </button>
+          {ocrError && <div style={{ fontSize: '12px', color: 'var(--red-600)', marginTop: '6px' }}>{ocrError}</div>}
+        </div>
+
         <div className="form-grid">
           <div className="form-field full">
             <label>

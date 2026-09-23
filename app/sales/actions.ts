@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { appendSalesToSheet, deleteSaleFromSheet, isSalesSheetConfigured, upsertSaleInSheet } from '@/lib/inventory/salesSheet';
+import { extractSaleInfoFromImage, isOcrConfigured, type OcrExtractedFields } from '@/lib/ocr';
 import { rowToSale, saleInputToRow, type SaleInput, type SaleRow } from '@/lib/sales';
 import { createAdminClient, SALES_TABLE } from '@/lib/supabase/server';
 
@@ -84,6 +85,22 @@ export async function updateSale(id: string, entry: SaleInput): Promise<ActionRe
 
   revalidatePath('/sales');
   return { ok: true };
+}
+
+export type OcrResult = { ok: true; fields: OcrExtractedFields } | { ok: false; error: string };
+
+/** 사진(base64, 데이터 URL 접두어 제외)에서 모델명/스펙/자산번호/시리얼번호를 읽어냅니다. */
+export async function ocrExtractSaleInfo(base64Image: string, mediaType: string): Promise<OcrResult> {
+  if (!isOcrConfigured()) {
+    return { ok: false, error: 'OCR 기능을 쓰려면 관리자가 ANTHROPIC_API_KEY를 설정해야 해요.' };
+  }
+  try {
+    const fields = await extractSaleInfoFromImage(base64Image, mediaType);
+    return { ok: true, fields };
+  } catch (err) {
+    console.error('[sales] ocrExtractSaleInfo 실패:', err);
+    return { ok: false, error: err instanceof Error ? err.message : 'OCR 인식에 실패했어요.' };
+  }
 }
 
 export async function deleteSale(id: string): Promise<ActionResult> {
