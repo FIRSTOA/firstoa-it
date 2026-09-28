@@ -51,6 +51,7 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
   const pathname = usePathname();
   const activeTab = pathname?.startsWith('/calendar') ? '통합 캘린더' : '재고관리';
   const [toast, setToast] = useState({ msg: '', show: false });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function showComingSoon(label: string) {
@@ -61,8 +62,9 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="sidebar-collapse" title="접기">
+      {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+      <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
+        <div className="sidebar-collapse" title="닫기" onClick={() => setSidebarOpen(false)}>
           ⟨⟨
         </div>
         <div className="profile-card">
@@ -107,6 +109,14 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
       <div className="shell-main">
         <header className="topnav">
           <div className="topnav-left">
+            <button
+              type="button"
+              className="hamburger-btn"
+              aria-label="메뉴 열기"
+              onClick={() => setSidebarOpen(true)}
+            >
+              ☰
+            </button>
             <div className="company-block">
               <div className="company-mark">🐰</div>
               <div className="company-text">
@@ -141,7 +151,7 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
               rel="noopener noreferrer"
               style={{ textDecoration: 'none' }}
             >
-              👥 인사관리시스템 ↗
+              👥 <span>인사관리시스템 ↗</span>
             </a>
             <div className="logout-btn" title="로그아웃">
               ⏻
