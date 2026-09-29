@@ -1,6 +1,9 @@
 /**
- * 입고 대장 (구매입고예정 / 렌탈입고예정). 1행 = 1대 기준입니다 — 여러 대를 구매할 땐
- * 등록 화면에서 수량만큼 행을 여러 개 만듭니다(수량 자체는 저장하지 않음).
+ * 입고 대장 (구매입고예정 / 렌탈입고예정). 기본은 1행 = 1대 기준이라, 여러 대를 구매할 땐
+ * 등록 화면에서 수량만큼 행을 여러 개 만듭니다. **기타주변기기만 예외** — 케이블/어댑터처럼
+ * 소모성 재고라 개별 자산번호로 관리할 이유가 없어서, 수량만큼 행을 늘리지 않고 1행에
+ * quantity(수량) 필드로 그대로 담습니다(예: 랜선 10M 50개 → 1행, quantity=50). 입고완료
+ * 처리도 이 경우엔 IT재고 시트에 개별 자산을 만들지 않고 입고 기록만 완료 처리합니다.
  * lib/dispatch.ts(출고/접수 대장)와 동일한 구조입니다.
  */
 
@@ -28,6 +31,7 @@ export type ReceivingEntry = {
   assetId: string;
   serialNumber: string;
   location: string;
+  quantity: number;
   completedAt: string | null;
 };
 
@@ -52,6 +56,7 @@ export type ReceivingRow = {
   asset_id: string;
   serial_number: string;
   location: string;
+  quantity: number;
   completed_at: string | null;
 };
 
@@ -77,6 +82,7 @@ export function rowToReceiving(row: ReceivingRow): ReceivingEntry {
     assetId: row.asset_id,
     serialNumber: row.serial_number,
     location: row.location,
+    quantity: row.quantity ?? 1,
     completedAt: row.completed_at,
   };
 }
@@ -103,6 +109,7 @@ export function receivingInputToRow(entry: ReceivingInput) {
     asset_id: entry.assetId,
     serial_number: entry.serialNumber,
     location: entry.location,
+    quantity: entry.quantity,
   };
 }
 

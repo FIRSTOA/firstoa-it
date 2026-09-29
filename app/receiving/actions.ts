@@ -31,13 +31,29 @@ function toMessage(error: { code?: string; message: string }): string {
   return `저장에 실패했어요: ${error.message}`;
 }
 
-/** 수량만큼 동일한 내용의 행을 한 번에 여러 개 만듭니다 (1행 = 1대 기준). */
+/**
+ * 수량만큼 행을 만듭니다. **기타주변기기는 예외**(소모성 재고 — 랜선/어댑터 등은 개별
+ * 자산번호로 관리하지 않음) — 행을 늘리지 않고 1행에 quantity로 수량을 담습니다.
+ * 나머지 품목은 기존대로 1행 = 1대 기준으로 수량만큼 행을 복제합니다.
+ */
 export async function createReceiving(entry: ReceivingInput, quantity: number): Promise<ActionResult> {
   const invalid = validate(entry);
   if (invalid) return { ok: false, error: invalid };
 
-  const count = Math.min(Math.max(Math.trunc(quantity) || 1, 1), 50);
   const supabase = createAdminClient();
+
+  if (entry.category === '기타주변기기') {
+    const qty = Math.min(Math.max(Math.trunc(quantity) || 1, 1), 999999);
+    const { error } = await supabase.from(RECEIVING_TABLE).insert({ ...receivingInputToRow(entry), quantity: qty });
+    if (error) {
+      console.error('[receiving] createReceiving(소모성) 실패:', error);
+      return { ok: false, error: toMessage(error) };
+    }
+    revalidatePath('/receiving');
+    return { ok: true };
+  }
+
+  const count = Math.min(Math.max(Math.trunc(quantity) || 1, 1), 50);
   const rows = Array.from({ length: count }, () => receivingInputToRow(entry));
   const { error } = await supabase.from(RECEIVING_TABLE).insert(rows);
   if (error) {
@@ -120,15 +136,14 @@ async function findExistingAsset(assetId: string): Promise<Asset | null> {
 
 /**
  * 입고완료 처리: 입고 대장 행을 실제 IT재고에 반영합니다.
- * - 자산번호가 재고에 이미 있으면(렌탈 등으로 나갔다가 돌아오는 귀환자산) 새로 만들지 않고
- *   기존 자산의 위치만 입고 대장의 위치로 업데이트합니다(브랜드/모델/사양 등 나머지는 재고 쪽
- *   기존 값을 그대로 유지 — 입고 대장 값으로 덮어쓰지 않음).
- * - 없으면 신규 자산으로 등록합니다.
- * - 자산번호가 비어있으면(기타주변기기 중 개별 번호를 안 붙이는 품목, 또는 거래처 직송 건)
- *   AUTO- 접두어로 번호를 자동 생성해서 신규 등록하고, 입고 대장 행의 자산번호도 그 값으로
- *   채워둡니다.
- * 두 경우 다 기존 createAsset/updateAsset(app/actions.ts)을 그대로 호출합니다 — DATA_SOURCE에
- * 따른 시트/Supabase 분기, 검증, 재고 화면 revalidate가 이미 다 처리돼 있습니다. 재고 쪽이
+ * - **기타주변기기(소모성)는 IT재고에 개별 자산을 만들지 않습니다** — 랜선 50개처럼 수량만
+ *   의미 있는 재고라 낱개 자산번호로 관리할 이유가 없어서, 그냥 입고 기록만 완료 처리합니다.
+ * - 그 외 품목: 자산번호가 재고에 이미 있으면(렌탈 등으로 나갔다가 돌아오는 귀환자산) 새로
+ *   만들지 않고 기존 자산의 위치만 입고 대장의 위치로 업데이트합니다(브랜드/모델/사양 등
+ *   나머지는 재고 쪽 기존 값을 그대로 유지 — 입고 대장 값으로 덮어쓰지 않음). 없으면 신규
+ *   등록하고, 자산번호가 비어있으면 AUTO- 접두어로 번호를 자동 생성합니다.
+ * 기존 createAsset/updateAsset(app/actions.ts)을 그대로 호출합니다 — DATA_SOURCE에 따른
+ * 시트/Supabase 분기, 검증, 재고 화면 revalidate가 이미 다 처리돼 있습니다. 재고 쪽이
  * 실패하면(예: 검증 오류) 입고 행은 '입고대기' 그대로 남겨서 입고 기록이 깨지지 않게 합니다.
  */
 export async function completeReceiving(id: string): Promise<ActionResult> {
@@ -146,6 +161,19 @@ export async function completeReceiving(id: string): Promise<ActionResult> {
   if (missing.length > 0) {
     console.error('[receiving] completeReceiving 필수값 누락:', entry.assetId || entry.seq, missing);
     return { ok: false, error: `다음 항목을 먼저 입력해주세요: ${missing.join(', ')}` };
+  }
+
+  if (entry.category === '기타주변기기') {
+    const { error: updateError } = await supabase
+      .from(RECEIVING_TABLE)
+      .update({ status: '입고완료', completed_at: new Date().toISOString() })
+      .eq('id', id);
+    if (updateError) {
+      console.error('[receiving] completeReceiving(소모성) 상태 업데이트 실패:', updateError);
+      return { ok: false, error: toMessage(updateError) };
+    }
+    revalidatePath('/receiving');
+    return { ok: true };
   }
 
   const enteredAssetId = entry.assetId.trim();

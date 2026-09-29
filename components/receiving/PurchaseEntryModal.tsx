@@ -86,7 +86,7 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
     const entries: ReceivingInput[] = validLines.flatMap((line) => {
       const quantity = Math.max(Math.trunc(line.quantity) || 1, 1);
       const lineTotal = quantity * Math.max(line.unitPrice, 0);
-      const base: Omit<ReceivingInput, 'assetId'> = {
+      const base: Omit<ReceivingInput, 'assetId' | 'quantity'> = {
         kind: '구매입고예정',
         status: '입고대기',
         category: line.category,
@@ -105,7 +105,11 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
         serialNumber: '',
         location: '',
       };
-      return Array.from({ length: quantity }, () => ({ ...base, assetId: '' }));
+      // 기타주변기기(소모성)는 행을 늘리지 않고 수량만 담습니다.
+      if (line.category === '기타주변기기') {
+        return [{ ...base, assetId: '', quantity }];
+      }
+      return Array.from({ length: quantity }, () => ({ ...base, assetId: '', quantity: 1 }));
     });
 
     onSave(entries);

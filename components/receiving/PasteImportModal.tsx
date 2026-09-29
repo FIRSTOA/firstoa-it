@@ -81,7 +81,14 @@ export default function PasteImportModal({ open, pending, onClose, onImport }: P
 
   if (!open) return null;
 
-  const totalRows = groups?.reduce((sum, g) => sum + (g.assetIds.length > 0 ? g.assetIds.length : Math.max(g.quantity, 1)), 0) ?? 0;
+  // 기타주변기기(소모성)는 assetIds가 없으면 수량과 무관하게 행 1개로 등록됩니다
+  // (lib/receivingParser.ts의 expandParsedGroup과 동일한 규칙 — 랜선 50개도 1행에 수량만 담김).
+  const totalRows =
+    groups?.reduce((sum, g) => {
+      if (g.assetIds.length > 0) return sum + g.assetIds.length;
+      if (g.category === '기타주변기기') return sum + 1;
+      return sum + Math.max(g.quantity, 1);
+    }, 0) ?? 0;
 
   return (
     <div
@@ -245,6 +252,11 @@ export default function PasteImportModal({ open, pending, onClose, onImport }: P
                       disabled={g.assetIds.length > 0}
                       onChange={(e) => updateGroup(i, { quantity: Number(e.target.value) || 1 })}
                     />
+                    {g.category === '기타주변기기' && g.assetIds.length === 0 && (
+                      <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
+                        소모성 재고라 행 1개에 수량만 담겨 등록돼요.
+                      </div>
+                    )}
                   </div>
                   <div className="form-field full">
                     <label>자산번호 목록 (알고 있으면, 콤마로 구분 — 채우면 수량 대신 이 개수만큼 등록돼요)</label>

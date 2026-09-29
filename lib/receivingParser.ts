@@ -270,9 +270,12 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
   return groups;
 }
 
-/** 파싱된 그룹 하나를 실제 등록 행(ReceivingInput[])으로 펼칩니다. */
+/**
+ * 파싱된 그룹 하나를 실제 등록 행(ReceivingInput[])으로 펼칩니다. **기타주변기기는 예외** —
+ * 소모성 재고라 수량만큼 행을 늘리지 않고, 1행에 quantity로 수량을 담아 그대로 돌려줍니다.
+ */
 export function expandParsedGroup(group: ParsedReceivingGroup): ReceivingInput[] {
-  const base: Omit<ReceivingInput, 'assetId'> = {
+  const base: Omit<ReceivingInput, 'assetId' | 'quantity'> = {
     kind: group.kind,
     status: '입고대기',
     category: group.category,
@@ -292,10 +295,15 @@ export function expandParsedGroup(group: ParsedReceivingGroup): ReceivingInput[]
     location: '',
   };
 
-  if (group.assetIds.length > 0) {
-    return group.assetIds.map((assetId) => ({ ...base, assetId }));
+  const count = Math.max(Math.trunc(group.quantity) || 1, 1);
+
+  if (group.category === '기타주변기기' && group.assetIds.length === 0) {
+    return [{ ...base, assetId: '', quantity: count }];
   }
 
-  const count = Math.max(Math.trunc(group.quantity) || 1, 1);
-  return Array.from({ length: count }, () => ({ ...base, assetId: '' }));
+  if (group.assetIds.length > 0) {
+    return group.assetIds.map((assetId) => ({ ...base, assetId, quantity: 1 }));
+  }
+
+  return Array.from({ length: count }, () => ({ ...base, assetId: '', quantity: 1 }));
 }

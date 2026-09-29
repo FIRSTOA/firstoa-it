@@ -25,6 +25,7 @@ const BLANK: ReceivingInput = {
   assetId: '',
   serialNumber: '',
   location: '',
+  quantity: 1,
 };
 
 type KnownAssetLookupState =
@@ -49,7 +50,7 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
   useEffect(() => {
     if (open) {
       setForm(editing ?? BLANK);
-      setQuantity(1);
+      setQuantity(editing?.quantity ?? 1);
       setKnownLookup({ status: 'idle' });
     }
   }, [open, editing]);
@@ -89,6 +90,12 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
     setKnownLookup({ status: 'found', source: result.source });
   }
 
+  const isRental = form.kind === '렌탈입고예정';
+  // 기타주변기기는 소모성 재고라 랜선/어댑터 같은 걸 낱개 자산으로 안 쪼갬 — 수량 필드가
+  // "행을 몇 개 만들지"가 아니라 "이 한 행의 재고 수량"을 뜻하게 됨(app/receiving/actions.ts).
+  const isConsumable = form.category === '기타주변기기';
+  const showQuantityField = isConsumable || (!editing && !isRental);
+
   function handleSave() {
     onSave(
       {
@@ -106,12 +113,11 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
         assetId: form.assetId.trim(),
         serialNumber: form.serialNumber.trim(),
         location: form.location.trim(),
+        quantity: isConsumable ? quantity : 1,
       },
       quantity,
     );
   }
-
-  const isRental = form.kind === '렌탈입고예정';
 
   return (
     <div
@@ -245,18 +251,20 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
               placeholder="예: J1 (입고완료 처리 시 필요)"
             />
           </div>
-          {!editing && !isRental && (
+          {showQuantityField && (
             <div className="form-field">
               <label>수량</label>
               <input
                 type="number"
                 min={1}
-                max={50}
+                max={isConsumable ? 999999 : 50}
                 value={quantity}
                 onChange={(e) => setQuantity(Number(e.target.value) || 1)}
               />
               <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
-                같은 내용으로 {quantity}건을 한 번에 등록해요.
+                {isConsumable
+                  ? '소모성 재고라 행을 늘리지 않고 이 한 행의 재고 수량으로 관리돼요.'
+                  : `같은 내용으로 ${quantity}건을 한 번에 등록해요.`}
               </div>
             </div>
           )}

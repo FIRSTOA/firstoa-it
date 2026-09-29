@@ -4,8 +4,11 @@ import { useEffect, useState } from 'react';
 import { RECEIVING_KINDS, RECEIVING_STATUSES, type ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES, SPECS } from '@/lib/types';
 
-/** 일괄 수정 대상 필드 — 자산번호/시리얼번호는 건마다 달라야 해서 뺐습니다. */
-type BulkField = Exclude<keyof ReceivingInput, 'assetId' | 'serialNumber'>;
+/**
+ * 일괄 수정 대상 필드 — 자산번호/시리얼번호는 건마다 달라야 해서 뺐고, 수량은 숫자 필드라
+ * (기타주변기기만 의미 있음) 이 일괄 텍스트 편집 폼과 안 맞아서 뺐습니다.
+ */
+type BulkField = Exclude<keyof ReceivingInput, 'assetId' | 'serialNumber' | 'quantity'>;
 
 const FIELD_LABELS: Record<BulkField, string> = {
   kind: '유형',

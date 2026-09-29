@@ -32,6 +32,7 @@ create table if not exists public.it_receiving_log (
   asset_id       text not null default '',
   serial_number  text not null default '',
   location       text not null default '', -- 입고완료 처리 시 상태 계산에 씀
+  quantity       integer not null default 1, -- 기타주변기기(소모성)만 실제 의미 있음 — 나머지는 항상 1
 
   completed_at   timestamptz,
 
@@ -41,6 +42,7 @@ create table if not exists public.it_receiving_log (
 
 -- 기존에 이미 테이블이 있는 경우(create table if not exists가 no-op)에도 새 컬럼이 생기도록.
 alter table public.it_receiving_log add column if not exists purchase_price text not null default '';
+alter table public.it_receiving_log add column if not exists quantity integer not null default 1;
 
 create index if not exists it_receiving_log_created_at_idx on public.it_receiving_log (created_at desc, seq desc);
 create index if not exists it_receiving_log_status_idx     on public.it_receiving_log (status);

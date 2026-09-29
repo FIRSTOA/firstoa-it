@@ -153,6 +153,21 @@ function ReceivingRow({
           placeholder="자산번호"
         />
       </td>
+      <td style={{ width: '70px' }}>
+        {entry.category === '기타주변기기' ? (
+          <input
+            className="inline-cell-input"
+            type="number"
+            min={1}
+            value={form.quantity}
+            onChange={(e) => set('quantity', Number(e.target.value) || 1)}
+            onBlur={handleBlur}
+            disabled={disabled}
+          />
+        ) : (
+          <span style={{ color: 'var(--ink-400)' }}>{entry.quantity}</span>
+        )}
+      </td>
       <td style={{ fontSize: '12px', color: 'var(--ink-500)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <input
@@ -254,6 +269,7 @@ export default function ReceivingTable({
             <th>브랜드</th>
             <th>모델명</th>
             <th>자산번호</th>
+            <th>수량</th>
             <th>예상입고일</th>
             <th>담당자</th>
             <th>비고</th>
