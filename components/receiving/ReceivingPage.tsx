@@ -60,7 +60,16 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
       }
       setModalOpen(false);
       setEditing(null);
-      showToast(target ? '수정했어요.' : quantity > 1 ? `${quantity}건 등록했어요.` : '등록했어요.');
+      const isConsumable = entry.category === '기타주변기기';
+      showToast(
+        target
+          ? '수정했어요.'
+          : isConsumable
+            ? '등록했어요.'
+            : quantity > 1
+              ? `${quantity}건 등록했어요.`
+              : '등록했어요.',
+      );
     });
   }
 
