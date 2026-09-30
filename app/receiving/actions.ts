@@ -136,8 +136,11 @@ async function findExistingAsset(assetId: string): Promise<Asset | null> {
 
 /**
  * 입고완료 처리: 입고 대장 행을 실제 IT재고에 반영합니다.
- * - **기타주변기기(소모성)는 IT재고에 개별 자산을 만들지 않습니다** — 랜선 50개처럼 수량만
- *   의미 있는 재고라 낱개 자산번호로 관리할 이유가 없어서, 그냥 입고 기록만 완료 처리합니다.
+ * - **기타주변기기(소모성)도 개별 자산 행으로 IT재고 시트(기타주변기기 탭)에 반영합니다** —
+ *   수량만 의미 있는 재고라도, 사용자가 시트에 기록이 남기를 원해서 다른 품목과 동일하게
+ *   자산번호(대개 비어있어 AUTO- 자동생성)로 한 행을 씁니다. 다만 quantity는 재고 자산에는
+ *   없는 개념이라 시트에는 반영되지 않고(자산 1건으로만 기록), 수량 자체는 입고 대장 쪽에
+ *   그대로 남습니다.
  * - 그 외 품목: 자산번호가 재고에 이미 있으면(렌탈 등으로 나갔다가 돌아오는 귀환자산) 새로
  *   만들지 않고 기존 자산의 위치만 입고 대장의 위치로 업데이트합니다(브랜드/모델/사양 등
  *   나머지는 재고 쪽 기존 값을 그대로 유지 — 입고 대장 값으로 덮어쓰지 않음). 없으면 신규
@@ -161,19 +164,6 @@ export async function completeReceiving(id: string): Promise<ActionResult> {
   if (missing.length > 0) {
     console.error('[receiving] completeReceiving 필수값 누락:', entry.assetId || entry.seq, missing);
     return { ok: false, error: `다음 항목을 먼저 입력해주세요: ${missing.join(', ')}` };
-  }
-
-  if (entry.category === '기타주변기기') {
-    const { error: updateError } = await supabase
-      .from(RECEIVING_TABLE)
-      .update({ status: '입고완료', completed_at: new Date().toISOString() })
-      .eq('id', id);
-    if (updateError) {
-      console.error('[receiving] completeReceiving(소모성) 상태 업데이트 실패:', updateError);
-      return { ok: false, error: toMessage(updateError) };
-    }
-    revalidatePath('/receiving');
-    return { ok: true };
   }
 
   const enteredAssetId = entry.assetId.trim();
