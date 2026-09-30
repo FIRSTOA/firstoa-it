@@ -168,6 +168,26 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
     });
   }
 
+  function handleBulkDelete() {
+    if (selectedEntries.length === 0) return;
+    if (!confirm(`선택한 ${selectedEntries.length}건을 삭제할까요?`)) return;
+    startTransition(async () => {
+      let success = 0;
+      const failures: string[] = [];
+      for (const entry of selectedEntries) {
+        const result = await deleteReceiving(entry.id);
+        if (result.ok) success++;
+        else failures.push(`${entry.assetId || entry.model || entry.seq}: ${result.error}`);
+      }
+      clearSelection();
+      if (failures.length === 0) {
+        showToast(`${success}건 삭제했어요.`);
+      } else {
+        showToast(`${success}건 삭제, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
+      }
+    });
+  }
+
   function handleBulkEditSave(patch: Partial<ReceivingInput>) {
     if (selectedEntries.length === 0) return;
     startTransition(async () => {
@@ -239,6 +259,9 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
           </button>
           <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setBulkEditOpen(true)}>
             일괄 수정
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={handleBulkDelete}>
+            선택 삭제
           </button>
           <button type="button" className="btn btn-ghost" disabled={pending} onClick={clearSelection}>
             선택 해제
