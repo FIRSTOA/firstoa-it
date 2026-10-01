@@ -8,6 +8,7 @@ import {
   missingRequiredFields,
   receivingInputToRow,
   rowToReceiving,
+  type ReceivingEntry,
   type ReceivingInput,
   type ReceivingRow,
 } from '@/lib/receiving';
@@ -29,6 +30,19 @@ function validate(entry: ReceivingInput): string | null {
 function toMessage(error: { code?: string; message: string }): string {
   if (error.code === '42P01') return '테이블이 없어요. supabase/receiving_schema.sql 을 먼저 실행하세요.';
   return `저장에 실패했어요: ${error.message}`;
+}
+
+/**
+ * 신규 자산 등록 시 자산 이력(/asset-history)에 "언제 어디서 얼마에 매입했는지"가 남도록,
+ * 입고 대장에 이미 있는 발주처/매입가를 등록 메모에 넣습니다. 나중에 자산번호로 이력을
+ * 검색하면 이 메모가 맨 처음(가장 오래된) 행으로 나와요.
+ */
+function buildPurchaseMemo(entry: ReceivingEntry): string {
+  const kind = entry.kind === '렌탈입고예정' ? '렌탈입고' : '구매입고';
+  const parts = [kind];
+  if (entry.vendor.trim()) parts.push(`발주처: ${entry.vendor.trim()}`);
+  if (entry.purchasePrice.trim()) parts.push(`매입가: ${entry.purchasePrice.trim()}`);
+  return parts.join(' / ');
 }
 
 /**
@@ -174,27 +188,30 @@ export async function completeReceiving(id: string): Promise<ActionResult> {
 
   const result = existing
     ? await updateAsset(trimmedAssetId, { ...existing, location: entry.location })
-    : await createAsset({
-        assetId: trimmedAssetId,
-        category: entry.category,
-        brand: entry.brand,
-        model: entry.model,
-        cpu: entry.cpu,
-        spec: entry.spec || '확인필요',
-        specLabel: '',
-        cpuType: '',
-        gubunCode: '',
-        subItem: '',
-        ram: entry.ram,
-        storage: entry.storage,
-        screen: entry.screen || '-',
-        location: entry.location,
-        status: '상품화준비중',
-        history: entry.kind === '렌탈입고예정' ? '렌탈입고' : '구매입고',
-        isNew: true,
-        malicious: false,
-        serialNo: entry.serialNumber,
-      });
+    : await createAsset(
+        {
+          assetId: trimmedAssetId,
+          category: entry.category,
+          brand: entry.brand,
+          model: entry.model,
+          cpu: entry.cpu,
+          spec: entry.spec || '확인필요',
+          specLabel: '',
+          cpuType: '',
+          gubunCode: '',
+          subItem: '',
+          ram: entry.ram,
+          storage: entry.storage,
+          screen: entry.screen || '-',
+          location: entry.location,
+          status: '상품화준비중',
+          history: entry.kind === '렌탈입고예정' ? '렌탈입고' : '구매입고',
+          isNew: true,
+          malicious: false,
+          serialNo: entry.serialNumber,
+        },
+        buildPurchaseMemo(entry),
+      );
   if (!result.ok) {
     console.error('[receiving] completeReceiving 자산 반영 실패:', trimmedAssetId, result.error);
     return result;

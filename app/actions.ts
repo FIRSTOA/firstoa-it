@@ -37,13 +37,13 @@ function toSheetMessage(err: unknown): string {
   return err instanceof Error ? err.message : '구글시트 작업에 실패했어요.';
 }
 
-export async function createAsset(asset: Asset): Promise<ActionResult> {
+export async function createAsset(asset: Asset, movementMemo?: string): Promise<ActionResult> {
   const invalid = validate(asset);
   if (invalid) return { ok: false, error: invalid };
 
   if (DATA_SOURCE === 'sheets') {
     try {
-      await createAssetInSheet(asset);
+      await createAssetInSheet(asset, movementMemo ? { fromLocation: null, fromStatus: null, memo: movementMemo } : undefined);
     } catch (err) {
       return { ok: false, error: toSheetMessage(err) };
     }

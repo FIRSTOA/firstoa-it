@@ -33,6 +33,9 @@ export function parseLocationStatus_(
     if (/^K/i.test(v) || /IT/i.test(v)) {
       return { status: '기타', statusRaw: v };
     }
+    if (/폐기/i.test(v)) {
+      return { status: '폐기' };
+    }
     if (/^[A-FIL]\d+$/i.test(v)) {
       return { status: '상품화완료', locationCode: v.toUpperCase() };
     }
@@ -45,6 +48,9 @@ export function parseLocationStatus_(
     return { status: '기타', statusRaw: v };
   }
 
+  if (/폐기/i.test(v)) {
+    return { status: '폐기' };
+  }
   if (/^[A-Za-z]\d+$/.test(v)) {
     return { status: '상품화완료', locationCode: v.toUpperCase() };
   }

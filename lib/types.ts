@@ -1,4 +1,4 @@
-export const STATUSES = ['상품화준비중', '상품화완료', '임대중', '수리중', '미정', '기타'] as const;
+export const STATUSES = ['상품화준비중', '상품화완료', '임대중', '수리중', '폐기', '미정', '기타'] as const;
 export const CATEGORIES = ['노트북', '데스크탑', '모니터', '빔프로젝트', '기타주변기기'] as const;
 export const BRANDS = ['삼성', '레노버', 'APPLE', 'HP', 'LG', 'MSI'] as const;
 export const CPUS = ['I5', 'I7', 'U5', 'U7', 'M2', 'M3', '미상'] as const;

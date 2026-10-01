@@ -327,10 +327,13 @@ function parseRowNumberFromRange(range?: string | null): number | null {
  * 대상 카테고리 시트 맨 아래에 새 행을 추가합니다. 이미 있는 자산번호면 에러.
  * movementContext는 카테고리를 바꿔서 수정하는 경우(updateAssetInSheet가 내부적으로 호출) 이전
  * 위치/상태를 넘겨주기 위한 것 — 일반적인 신규 등록에서는 안 넘기면 "신규 등록"으로 기록됩니다.
+ * memo를 넘기면 그 문구를 그대로 씁니다(예: 입고완료 시 매입가/구입처를 자산 이력에 남기기 위해
+ * app/receiving/actions.ts가 넘김) — 자산 이력(/asset-history)에서 "언제 어디서 얼마에
+ * 매입했는지"를 한눈에 보려면 신규 등록 시점에 이 정보가 메모에 남아있어야 합니다.
  */
 export async function createAssetInSheet(
   asset: Asset,
-  movementContext?: { fromLocation: string | null; fromStatus: string | null },
+  movementContext?: { fromLocation: string | null; fromStatus: string | null; memo?: string },
 ): Promise<void> {
   const tab = requireTab(asset.category);
   const cache = await getCache(asset.category);
@@ -359,7 +362,7 @@ export async function createAssetInSheet(
     toLocation: asset.location || null,
     fromStatus: movementContext?.fromStatus ?? null,
     toStatus,
-    memo: movementContext ? '품목 변경(다른 시트로 이동)' : '신규 등록',
+    memo: movementContext?.memo ?? (movementContext ? '품목 변경(다른 시트로 이동)' : '신규 등록'),
   });
 }
 
