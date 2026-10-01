@@ -153,6 +153,16 @@ function ReceivingRow({
           placeholder="자산번호"
         />
       </td>
+      <td>
+        <input
+          className="inline-cell-input"
+          value={form.serialNumber}
+          onChange={(e) => set('serialNumber', e.target.value)}
+          onBlur={handleBlur}
+          disabled={disabled}
+          placeholder="시리얼번호"
+        />
+      </td>
       <td style={{ width: '70px' }}>
         {entry.category === '기타주변기기' ? (
           <input
@@ -269,6 +279,7 @@ export default function ReceivingTable({
             <th>브랜드</th>
             <th>모델명</th>
             <th>자산번호</th>
+            <th>시리얼번호</th>
             <th>수량</th>
             <th>예상입고일</th>
             <th>담당자</th>

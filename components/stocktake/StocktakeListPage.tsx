@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { formatKstDateTime, stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
-import { startStocktake } from '@/app/stocktake/actions';
+import { deleteStocktakeSession, startStocktake } from '@/app/stocktake/actions';
 
 export default function StocktakeListPage({
   sessions,
@@ -32,6 +32,13 @@ export default function StocktakeListPage({
         return;
       }
       router.push(`/stocktake/${result.id}`);
+    });
+  }
+
+  function handleDelete(id: string, location: string) {
+    if (!confirm(`"${location}" 조사 기록을 삭제할까요?`)) return;
+    startTransition(async () => {
+      await deleteStocktakeSession(id);
     });
   }
 
@@ -80,9 +87,20 @@ export default function StocktakeListPage({
                     {sum.unexpected > 0 && <span style={{ color: 'var(--red-600)' }}> · 목록외 {sum.unexpected}</span>}
                   </td>
                   <td>
-                    <button type="button" className="btn btn-ghost" onClick={() => router.push(`/stocktake/${s.id}`)}>
-                      열기
-                    </button>
+                    <div className="row-actions">
+                      <button type="button" className="btn btn-ghost" onClick={() => router.push(`/stocktake/${s.id}`)}>
+                        열기
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn danger"
+                        title="삭제"
+                        disabled={pending}
+                        onClick={() => handleDelete(s.id, s.location)}
+                      >
+                        🗑
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

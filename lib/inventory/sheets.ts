@@ -280,6 +280,13 @@ export async function listAllAssets(): Promise<Asset[]> {
   return results.flat();
 }
 
+// O열(0-based 14, 즉 A~O 15개 컬럼)까지만 앱이 씁니다. 그 뒤(담당자/OS/CPU/메인보드/메모리/
+// 그래픽카드/SSD/HDD/POWER/케이스/용도구분/예약자/예약일 등)는 사람이 직접 관리하는 영역이라
+// 앱 쓰기가 절대 건드리면 안 됩니다 — 특히 그 칸들에 수식이 들어있는 경우 values.update()로
+// 같은 값을 그대로 되돌려 써도 수식이 고정값으로 깨져버리므로, 아예 쓰기 "범위" 자체를
+// O열에서 잘라서 그 뒤 칸은 API 호출에 포함되지도 않게 합니다.
+const WRITABLE_COLUMN_LIMIT = 15; // A(0)~O(14), size로는 15
+
 function buildRowArray(header: HeaderMap, asset: Asset, base?: string[]): string[] {
   const knownCols = [
     header.assetIdCol,
@@ -288,17 +295,17 @@ function buildRowArray(header: HeaderMap, asset: Asset, base?: string[]): string
     header.locationCol,
     header.serialCol,
     header.remarkCol,
-    header.cpuCol,
-    header.memoryCol,
-    header.ssdCol,
     header.screenCol,
-  ];
-  const size = Math.max(header.columnCount, ...knownCols.map((c) => c + 1));
+  ].filter((c) => c < WRITABLE_COLUMN_LIMIT);
+  const size = Math.min(
+    Math.max(header.columnCount, ...knownCols.map((c) => c + 1)),
+    WRITABLE_COLUMN_LIMIT,
+  );
   const row = new Array(size).fill('');
   if (base) base.forEach((v, i) => { if (i < size) row[i] = v; });
 
   const set = (col: number, value: string) => {
-    if (col >= 0) row[col] = value;
+    if (col >= 0 && col < size) row[col] = value;
   };
   set(header.assetIdCol, asset.assetId);
   set(header.modelCol, asset.model);
@@ -306,9 +313,6 @@ function buildRowArray(header: HeaderMap, asset: Asset, base?: string[]): string
   set(header.locationCol, asset.location);
   set(header.serialCol, asset.serialNo);
   set(header.remarkCol, asset.history);
-  set(header.cpuCol, asset.cpu);
-  set(header.memoryCol, asset.ram);
-  set(header.ssdCol, asset.storage);
   set(header.screenCol, asset.screen === '-' ? '' : asset.screen);
   return row;
 }

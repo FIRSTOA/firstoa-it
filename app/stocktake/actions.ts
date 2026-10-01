@@ -157,6 +157,18 @@ export async function ocrScanAssetLabel(base64Image: string, mediaType: string):
   }
 }
 
+export async function deleteStocktakeSession(id: string): Promise<ActionResult> {
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(STOCKTAKE_TABLE).delete().eq('id', id);
+  if (error) {
+    console.error('[stocktake] deleteStocktakeSession 실패:', error);
+    return { ok: false, error: `삭제에 실패했어요: ${error.message}` };
+  }
+
+  revalidatePath('/stocktake');
+  return { ok: true };
+}
+
 export async function completeStocktake(sessionId: string): Promise<ActionResult> {
   const supabase = createAdminClient();
   const { error } = await supabase
