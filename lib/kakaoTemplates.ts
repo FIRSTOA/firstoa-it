@@ -60,3 +60,88 @@ export function buildOrderRequestText(d: PurchaseMessageData): string {
     '확인 후 회신 부탁드립니다.',
   ].join('\n');
 }
+
+export type PurchaseMessageHeader = {
+  vendor: string;
+  department: string;
+  manager: string;
+  expectedDate: string;
+  priceCompared: string;
+  deliveryPlace: string;
+};
+
+export type PurchaseMessageLine = {
+  category: string;
+  model: string;
+  quantity: number;
+  unitPrice: number;
+  currentStock: string;
+  safetyStock: string;
+};
+
+/**
+ * 같은 매입처의 여러 품목을 한 번에 보낼 때 씁니다(건건히 복사하기 번거롭다는 요청으로 추가).
+ * 공통 항목(매입처/부서/입고예정일 등)은 한 번만, 품목별 항목은 번호를 매겨 나열하고
+ * 끝에 전체 합계를 붙입니다.
+ */
+export function buildApprovalRequestTextMulti(h: PurchaseMessageHeader, lines: PurchaseMessageLine[]): string {
+  if (lines.length === 1) return buildApprovalRequestText({ ...h, ...lines[0] });
+
+  const grandTotal = lines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
+  const itemBlocks = lines.map((l, i) => {
+    const total = l.quantity * l.unitPrice;
+    return [
+      `${i + 1}. 품목: ${l.model}`,
+      `   수량: ${l.quantity}`,
+      `   단가: ${fmtWon(l.unitPrice)}`,
+      `   금액: ${fmtWon(total)}`,
+      `   현재고수량: ${l.currentStock}`,
+      `   안전재고수량: ${l.safetyStock}`,
+    ].join('\n');
+  });
+
+  return [
+    '매입승인요청합니다',
+    '',
+    `매입처: ${h.vendor}`,
+    `주문요청부서 : ${h.department}`,
+    '',
+    ...itemBlocks,
+    '',
+    `총합금액: ${fmtWon(grandTotal)}`,
+    `단기비교:  ${h.priceCompared}`,
+    `입고예정일  ${h.expectedDate}`,
+    '승인후 입고방 전달완료',
+  ].join('\n');
+}
+
+/** buildOrderRequestText의 여러 품목 버전 — buildApprovalRequestTextMulti와 동일한 구성. */
+export function buildOrderRequestTextMulti(h: PurchaseMessageHeader, lines: PurchaseMessageLine[]): string {
+  if (lines.length === 1) return buildOrderRequestText({ ...h, ...lines[0] });
+
+  const grandTotal = lines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
+  const itemBlocks = lines.map((l, i) => {
+    const total = l.quantity * l.unitPrice;
+    return [
+      `${i + 1}. 품목: ${l.model}`,
+      `   수량: ${l.quantity}`,
+      `   단가: ${fmtWon(l.unitPrice)}`,
+      `   금액: ${fmtWon(total)}`,
+    ].join('\n');
+  });
+
+  return [
+    '발주요청드립니다',
+    '',
+    '발주처: (주)퍼스트전산',
+    `주문담당자: ${h.manager}`,
+    '',
+    ...itemBlocks,
+    '',
+    `총합금액: ${fmtWon(grandTotal)}`,
+    `입고요청일: ${h.expectedDate}`,
+    `납품처: ${h.deliveryPlace}`,
+    '',
+    '확인 후 회신 부탁드립니다.',
+  ].join('\n');
+}

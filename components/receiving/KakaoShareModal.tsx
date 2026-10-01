@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { buildApprovalRequestText, buildOrderRequestText, type PurchaseMessageData } from '@/lib/kakaoTemplates';
+import {
+  buildApprovalRequestTextMulti,
+  buildOrderRequestTextMulti,
+  type PurchaseMessageLine,
+} from '@/lib/kakaoTemplates';
 import type { PurchaseLineItem } from './PurchaseEntryModal';
 
 type Template = 'approval' | 'order';
@@ -36,42 +40,53 @@ export default function KakaoShareModal({
   deliveryPlace,
   lines,
 }: Props) {
-  const [lineIndex, setLineIndex] = useState(0);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [template, setTemplate] = useState<Template>('approval');
   const [text, setText] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [notice, setNotice] = useState('');
 
-  const line = lines[lineIndex] ?? lines[0];
-
   useEffect(() => {
     if (open) {
-      setLineIndex(0);
+      setSelected(new Set(lines.map((_, i) => i))); // 기본은 전체 선택 — 한 번에 다 보내는 게 보통이라
       setTemplate('approval');
       setImageFile(null);
       setNotice('');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const selectedLines = lines.filter((_, i) => selected.has(i));
+
   useEffect(() => {
-    if (!open || !line) return;
-    const data: PurchaseMessageData = {
-      vendor,
-      department,
-      manager,
-      expectedDate,
-      priceCompared,
-      deliveryPlace,
-      category: line.category,
-      model: line.model,
-      quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      currentStock: line.currentStock,
-      safetyStock: line.safetyStock,
-    };
-    setText(template === 'approval' ? buildApprovalRequestText(data) : buildOrderRequestText(data));
+    if (!open) return;
+    if (selectedLines.length === 0) {
+      setText('');
+      return;
+    }
+    const header = { vendor, department, manager, expectedDate, priceCompared, deliveryPlace };
+    const items: PurchaseMessageLine[] = selectedLines.map((l) => ({
+      category: l.category,
+      model: l.model,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      currentStock: l.currentStock,
+      safetyStock: l.safetyStock,
+    }));
+    setText(
+      template === 'approval' ? buildApprovalRequestTextMulti(header, items) : buildOrderRequestTextMulti(header, items),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, template, lineIndex, vendor, department, manager, expectedDate, priceCompared, deliveryPlace]);
+  }, [open, template, selected, vendor, department, manager, expectedDate, priceCompared, deliveryPlace]);
+
+  function toggleLine(i: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
 
   if (!open) return null;
 
@@ -140,14 +155,37 @@ export default function KakaoShareModal({
 
         {lines.length > 1 && (
           <div className="form-field" style={{ marginBottom: '10px' }}>
-            <label>품목 선택</label>
-            <select value={lineIndex} onChange={(e) => setLineIndex(Number(e.target.value))}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label>보낼 품목 선택 ({selected.size}/{lines.length})</label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button type="button" className="chip" onClick={() => setSelected(new Set(lines.map((_, i) => i)))}>
+                  전체선택
+                </button>
+                <button type="button" className="chip" onClick={() => setSelected(new Set())}>
+                  전체해제
+                </button>
+              </div>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                border: '1px solid var(--ink-200)',
+                borderRadius: '8px',
+                padding: '8px',
+                marginTop: '6px',
+                maxHeight: '140px',
+                overflowY: 'auto',
+              }}
+            >
               {lines.map((l, i) => (
-                <option key={i} value={i}>
-                  {i + 1}. {l.model || '(품목명 없음)'}
-                </option>
+                <label key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
+                  <input type="checkbox" checked={selected.has(i)} onChange={() => toggleLine(i)} />
+                  {i + 1}. {l.model || '(품목명 없음)'} — {l.quantity}개
+                </label>
               ))}
-            </select>
+            </div>
           </div>
         )}
 
@@ -182,10 +220,10 @@ export default function KakaoShareModal({
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             닫기
           </button>
-          <button type="button" className="btn btn-ghost" onClick={handleCopy}>
+          <button type="button" className="btn btn-ghost" onClick={handleCopy} disabled={!text}>
             복사하기
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleShare}>
+          <button type="button" className="btn btn-primary" onClick={handleShare} disabled={!text}>
             공유하기
           </button>
         </div>
