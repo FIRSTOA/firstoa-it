@@ -98,6 +98,49 @@ export async function createReceivingBatch(entries: ReceivingInput[]): Promise<A
   return { ok: true };
 }
 
+export type BatchCompleteResult = {
+  ok: true;
+  successCount: number;
+  failures: string[];
+} | { ok: false; error: string };
+
+/**
+ * 사진 일괄 OCR 등록(PhotoBatchImportModal) 전용 — 품목(예: 모니터 10대)을 한 번에 등록하면서
+ * 바로 입고완료까지 처리합니다(위치를 이미 입력받았으므로). 각 건을 insert 후 그 id로
+ * completeReceiving을 그대로 재사용해서, 자산번호 자동생성/귀환자산 처리 등 기존 로직을
+ * 중복 구현하지 않습니다. 건별로 실패해도 나머지는 계속 진행하고, 실패 목록을 모아 반환합니다.
+ */
+export async function createAndCompleteReceivingBatch(entries: ReceivingInput[]): Promise<BatchCompleteResult> {
+  if (entries.length === 0) return { ok: false, error: '등록할 내용이 없어요.' };
+
+  const supabase = createAdminClient();
+  let successCount = 0;
+  const failures: string[] = [];
+
+  for (const entry of entries) {
+    const invalid = validate(entry);
+    if (invalid) {
+      failures.push(`${entry.assetId || entry.model}: ${invalid}`);
+      continue;
+    }
+    const { data, error } = await supabase
+      .from(RECEIVING_TABLE)
+      .insert(receivingInputToRow(entry))
+      .select('id')
+      .single();
+    if (error || !data) {
+      failures.push(`${entry.assetId || entry.model}: ${toMessage(error ?? { message: '알 수 없는 오류' })}`);
+      continue;
+    }
+    const result = await completeReceiving((data as { id: string }).id);
+    if (result.ok) successCount++;
+    else failures.push(`${entry.assetId || entry.model}: ${result.error}`);
+  }
+
+  revalidatePath('/receiving');
+  return { ok: true, successCount, failures };
+}
+
 export async function updateReceiving(id: string, entry: ReceivingInput): Promise<ActionResult> {
   const invalid = validate(entry);
   if (invalid) return { ok: false, error: invalid };

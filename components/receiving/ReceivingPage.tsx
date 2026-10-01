@@ -17,6 +17,7 @@ import {
 import { expandParsedGroup, type ParsedReceivingGroup } from '@/lib/receivingParser';
 import BulkEditModal from './BulkEditModal';
 import PasteImportModal from './PasteImportModal';
+import PhotoBatchImportModal from './PhotoBatchImportModal';
 import PurchaseEntryModal from './PurchaseEntryModal';
 import ReceivingFilters from './ReceivingFilters';
 import ReceivingModal from './ReceivingModal';
@@ -29,6 +30,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
   const [modalOpen, setModalOpen] = useState(false);
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [photoModalOpen, setPhotoModalOpen] = useState(false);
   const [editing, setEditing] = useState<ReceivingEntry | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
@@ -222,6 +224,9 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
           <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setPasteModalOpen(true)}>
             📋 붙여넣기로 등록
           </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setPhotoModalOpen(true)}>
+            📷 사진으로 일괄 등록
+          </button>
           <button
             type="button"
             className="btn btn-primary"
@@ -315,6 +320,12 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         pending={pending}
         onClose={() => setPurchaseModalOpen(false)}
         onSave={handlePurchaseEntrySave}
+      />
+
+      <PhotoBatchImportModal
+        open={photoModalOpen}
+        onClose={() => setPhotoModalOpen(false)}
+        onDone={showToast}
       />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
