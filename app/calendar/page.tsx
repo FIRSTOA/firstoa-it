@@ -1,3 +1,4 @@
+import { after } from 'next/server';
 import CalendarPage from '@/components/calendar/CalendarPage';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
@@ -18,9 +19,10 @@ export default async function Page() {
   }
 
   // 네이버 → 앱 동기화는 Vercel Cron(하루 1번, Hobby 요금제 제한)만으로는 너무 뜸해서,
-  // 캘린더 페이지를 열 때마다 best-effort로 같이 돌립니다. 실패해도(네이버 지연/오류)
-  // 페이지 자체는 로컬 데이터로 정상 표시됩니다.
-  await syncNaverCalendars().catch((err) => console.error('[calendar] 방문 시 네이버 동기화 실패:', err));
+  // 캘린더 페이지를 열 때마다 같이 돌립니다. 다만 첫 동기화처럼 변경분이 많으면 느려질 수
+  // 있어서 페이지 렌더링을 막지 않게 after()로 응답을 먼저 보낸 뒤 백그라운드로 돌립니다
+  // (이번 방문엔 로컬 데이터만 보이고, 네이버 쪽 변경분은 다음 방문/새로고침에 반영됨).
+  after(() => syncNaverCalendars().catch((err) => console.error('[calendar] 방문 시 네이버 동기화 실패:', err)));
 
   const today = new Date();
   const year = today.getFullYear();
