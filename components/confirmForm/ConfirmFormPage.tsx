@@ -3,8 +3,11 @@
 import { useRef, useState } from 'react';
 import { ocrScanConfirmFormImage, ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
 import { CONFIRM_FORM_TABS, type ConfirmFormTab } from '@/lib/confirmForm';
+import type { DispatchEntry } from '@/lib/dispatch';
 import type { WithdrawalFormFields, WithdrawalFormItem } from '@/lib/ocr';
 import { CATEGORIES } from '@/lib/types';
+
+const PC_ITEMS = ['모니터', '데스크탑', '노트북'];
 
 const BLANK_FIELDS: WithdrawalFormFields = { companyName: '', date: '', requester: '', reason: '', items: [] };
 const BLANK_ITEM: WithdrawalFormItem = { category: CATEGORIES[0], model: '', serialNumber: '', assetId: '' };
@@ -22,8 +25,9 @@ function readFileAsBase64(file: File): Promise<{ base64: string; mediaType: stri
   });
 }
 
-export default function ConfirmFormPage() {
+export default function ConfirmFormPage({ initialEntries: entries }: { initialEntries: DispatchEntry[] }) {
   const [tab, setTab] = useState<ConfirmFormTab>('철수');
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'pc' | string>('all');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [pastedText, setPastedText] = useState('');
   const [fields, setFields] = useState<WithdrawalFormFields>(BLANK_FIELDS);
@@ -317,6 +321,65 @@ export default function ConfirmFormPage() {
           </div>
         </div>
       )}
+
+      <div className="panel" style={{ marginTop: '14px' }}>
+        <h2 style={{ fontSize: '15px', margin: '0 0 10px' }}>이 도구로 등록한 내역 (최근 100건)</h2>
+        <div className="chip-group" style={{ marginBottom: '10px' }}>
+          <button type="button" className={`chip${historyFilter === 'all' ? ' active' : ''}`} onClick={() => setHistoryFilter('all')}>
+            전체
+          </button>
+          <button type="button" className={`chip${historyFilter === 'pc' ? ' active' : ''}`} onClick={() => setHistoryFilter('pc')}>
+            🖥️ PC관련(모니터·데스크탑·노트북)
+          </button>
+          {CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`chip${historyFilter === c ? ' active' : ''}`}
+              onClick={() => setHistoryFilter(c)}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>구분</th>
+              <th>품목</th>
+              <th>모델명</th>
+              <th>자산번호</th>
+              <th>거래처</th>
+              <th>날짜</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries
+              .filter((e) => {
+                if (historyFilter === 'all') return true;
+                if (historyFilter === 'pc') return PC_ITEMS.includes(e.item);
+                return e.item === historyFilter;
+              })
+              .map((e) => (
+                <tr key={e.id}>
+                  <td>{e.type}</td>
+                  <td>{e.item}</td>
+                  <td>{e.directSpec || '-'}</td>
+                  <td>{e.assetId || '-'}</td>
+                  <td>{e.company}</td>
+                  <td style={{ fontSize: '12px' }}>{e.deliveryDate || '-'}</td>
+                </tr>
+              ))}
+            {entries.length === 0 && (
+              <tr>
+                <td colSpan={6} className="empty-state">
+                  <div>📋</div>아직 등록한 내역이 없어요.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
         <span>{toast.msg}</span>

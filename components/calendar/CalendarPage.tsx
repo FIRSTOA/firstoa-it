@@ -30,6 +30,10 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
   const [defaultDate, setDefaultDate] = useState<string>(todayYmd());
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
+  const [viewMode, setViewMode] = useState<'month' | 'list'>('month');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [calendarFilter, setCalendarFilter] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string>(todayYmd());
 
   function refetchConnectedCalendars() {
     startTransition(async () => {
@@ -77,7 +81,27 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
     return list;
   }, [start, end]);
 
-  const eventsByDate = useMemo(() => groupEventsByDate(events), [events]);
+  const visibleEvents = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return events.filter((e) => {
+      if (calendarFilter && e.calendarId !== calendarFilter) return false;
+      if (!term) return true;
+      const hay = `${e.title} ${e.location} ${e.description} ${e.author}`.toLowerCase();
+      return hay.includes(term);
+    });
+  }, [events, searchTerm, calendarFilter]);
+
+  const eventsByDate = useMemo(() => groupEventsByDate(visibleEvents), [visibleEvents]);
+  const calendarNameById = useMemo(
+    () => new Map(connectedCalendars.map((c) => [c.id, c.name])),
+    [connectedCalendars],
+  );
+  const selectedDayEvents = useMemo(() => eventsByDate.get(selectedDate) ?? [], [eventsByDate, selectedDate]);
+  const selectedDateLabel = useMemo(() => {
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const weekday = WEEKDAYS[new Date(y, m - 1, d).getDay()];
+    return `${m}월 ${d}일 (${weekday})`;
+  }, [selectedDate]);
 
   function goToday() {
     const t = new Date();
@@ -162,6 +186,82 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
         </div>
       </div>
 
+      <div className="panel" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="chip-group">
+          <button type="button" className={`chip${viewMode === 'month' ? ' active' : ''}`} onClick={() => setViewMode('month')}>
+            월간
+          </button>
+          <button type="button" className={`chip${viewMode === 'list' ? ' active' : ''}`} onClick={() => setViewMode('list')}>
+            목록
+          </button>
+        </div>
+        <div className="chip-group">
+          <button type="button" className={`chip${!calendarFilter ? ' active' : ''}`} onClick={() => setCalendarFilter(null)}>
+            전체
+          </button>
+          {connectedCalendars.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={`chip${calendarFilter === c.id ? ' active' : ''}`}
+              onClick={() => setCalendarFilter(calendarFilter === c.id ? null : c.id)}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="제목/장소/설명 검색"
+          style={{ minWidth: '200px' }}
+        />
+      </div>
+
+      {viewMode === 'list' ? (
+        <div className="panel" style={{ paddingTop: '6px' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>날짜</th>
+                <th>시간</th>
+                <th>제목</th>
+                <th>장소</th>
+                <th>상태</th>
+                <th>캘린더</th>
+                <th>등록자</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...visibleEvents]
+                .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+                .map((ev) => (
+                  <tr key={ev.id} className="asset-id" onClick={() => openEdit(ev)} style={{ cursor: 'pointer' }}>
+                    <td>{ev.date}</td>
+                    <td>{ev.time || '종일'}</td>
+                    <td>{ev.title}</td>
+                    <td>{ev.location || '-'}</td>
+                    <td>
+                      <span className={`badge ${ev.status === '완료' ? 'badge-상품화완료' : 'badge-상품화준비중'}`}>
+                        {ev.status}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: '12px' }}>{ev.calendarId ? calendarNameById.get(ev.calendarId) ?? '-' : '-'}</td>
+                    <td>{ev.author || '-'}</td>
+                  </tr>
+                ))}
+              {visibleEvents.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="empty-state">
+                    <div>📅</div>이 달에 조건에 맞는 일정이 없어요.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
       <div className="panel calendar-panel">
         <div className="calendar-weekday-row">
           {WEEKDAYS.map((w, i) => (
@@ -180,8 +280,9 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
             return (
               <div
                 key={ymd}
-                className={`calendar-day${inMonth ? '' : ' outside'}${ymd === today ? ' today' : ''}`}
-                onClick={() => openCreate(ymd)}
+                className={`calendar-day${inMonth ? '' : ' outside'}${ymd === today ? ' today' : ''}${ymd === selectedDate ? ' selected' : ''}`}
+                onClick={() => setSelectedDate(ymd)}
+                onDoubleClick={() => openCreate(ymd)}
               >
                 <div className="calendar-day-number">{d.getDate()}</div>
                 <div className="calendar-day-events">
@@ -199,13 +300,56 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                       {ev.time && <span className="calendar-event-time">{ev.time}</span>} {ev.title}
                     </button>
                   ))}
-                  {extra > 0 && <div className="calendar-event-more">+{extra}개 더</div>}
+                  {extra > 0 && (
+                    <button
+                      type="button"
+                      className="calendar-event-more"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedDate(ymd);
+                      }}
+                    >
+                      +{extra}개 더
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+      )}
+
+      {viewMode === 'month' && (
+        <div className="panel" style={{ marginTop: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <div style={{ fontWeight: 700, fontSize: '14px' }}>
+              {selectedDateLabel} · {selectedDayEvents.length}건
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={() => openCreate(selectedDate)}>
+              ＋ 이 날에 추가
+            </button>
+          </div>
+          {selectedDayEvents.length === 0 ? (
+            <div className="detail-empty">이 날 일정이 없어요 — 날짜 칸을 두 번 누르거나 [이 날에 추가]를 눌러주세요.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {selectedDayEvents.map((ev) => (
+                <button
+                  key={ev.id}
+                  type="button"
+                  className={`calendar-event-chip${ev.status === '완료' ? ' done' : ''}`}
+                  style={{ width: '100%', textAlign: 'left' }}
+                  onClick={() => openEdit(ev)}
+                >
+                  {ev.time && <span className="calendar-event-time">{ev.time}</span>} {ev.title}
+                  {ev.location && <span style={{ color: 'var(--ink-400)' }}> · {ev.location}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <EventModal
         open={modalOpen}

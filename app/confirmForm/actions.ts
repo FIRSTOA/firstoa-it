@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import type { ConfirmFormTab } from '@/lib/confirmForm';
-import { dispatchInputToRow } from '@/lib/dispatch';
+import { dispatchInputToRow, rowToDispatch, type DispatchEntry, type DispatchEntryRow } from '@/lib/dispatch';
 import { receivingInputToRow } from '@/lib/receiving';
 import {
   extractWithdrawalFormFromImage,
@@ -15,6 +15,8 @@ import { createAdminClient, DISPATCH_TABLE, RECEIVING_TABLE } from '@/lib/supaba
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 export type OcrFormResult = { ok: true; fields: WithdrawalFormFields } | { ok: false; error: string };
+
+const CONFIRM_FORM_REMARK = '확인서 붙여넣기로 등록';
 
 /** 품목 OCR 값이 CATEGORIES와 정확히 안 맞을 수 있어서(예: "노트북PC") 느슨하게 매칭합니다. */
 function matchCategory(raw: string): string {
@@ -79,7 +81,7 @@ export async function registerConfirmForm(tab: ConfirmFormTab, fields: Withdrawa
       item: item.category,
       directSpec: item.model,
       assetId: item.assetId,
-      remarks: '확인서 붙여넣기로 등록',
+      remarks: CONFIRM_FORM_REMARK,
       serialNumber: item.serialNumber,
     }),
   );
@@ -126,5 +128,22 @@ export async function registerConfirmForm(tab: ConfirmFormTab, fields: Withdrawa
   }
 
   revalidatePath('/dispatch');
+  revalidatePath('/confirm-form');
   return { ok: true };
+}
+
+/** 이 도구로 등록된 최근 건들만 — remarks 마커로 구분합니다(registerConfirmForm이 남김). */
+export async function listRecentConfirmFormEntries(): Promise<DispatchEntry[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from(DISPATCH_TABLE)
+    .select('*')
+    .eq('remarks', CONFIRM_FORM_REMARK)
+    .order('seq', { ascending: false })
+    .limit(100);
+  if (error) {
+    console.error('[confirmForm] listRecentConfirmFormEntries 실패:', error);
+    return [];
+  }
+  return ((data ?? []) as DispatchEntryRow[]).map(rowToDispatch);
 }
