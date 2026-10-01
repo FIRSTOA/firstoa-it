@@ -7,7 +7,7 @@
  * lib/dispatch.ts(출고/접수 대장)와 동일한 구조입니다.
  */
 
-export const RECEIVING_KINDS = ['구매입고예정', '렌탈입고예정'] as const;
+export const RECEIVING_KINDS = ['구매입고예정', '렌탈입고예정', '수리입고예정'] as const;
 export const RECEIVING_STATUSES = ['입고대기', '입고완료', '취소'] as const;
 
 export type ReceivingEntry = {

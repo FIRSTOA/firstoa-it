@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { normalizeWonInput } from '@/lib/currency';
 import { RECEIVING_KINDS, type ReceivingEntry, type ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES } from '@/lib/types';
 
@@ -163,6 +164,30 @@ function ReceivingRow({
           placeholder="시리얼번호"
         />
       </td>
+      <td>
+        <input
+          className="inline-cell-input"
+          value={form.vendor}
+          onChange={(e) => set('vendor', e.target.value)}
+          onBlur={handleBlur}
+          disabled={disabled}
+          placeholder="발주처"
+        />
+      </td>
+      <td>
+        <input
+          className="inline-cell-input"
+          value={form.purchasePrice}
+          onChange={(e) => set('purchasePrice', e.target.value)}
+          onBlur={() => {
+            const normalized = normalizeWonInput(form.purchasePrice);
+            setForm((prev) => ({ ...prev, purchasePrice: normalized }));
+            commit({ ...form, purchasePrice: normalized });
+          }}
+          disabled={disabled}
+          placeholder="매입가"
+        />
+      </td>
       <td style={{ width: '70px' }}>
         {entry.category === '기타주변기기' ? (
           <input
@@ -280,6 +305,8 @@ export default function ReceivingTable({
             <th>모델명</th>
             <th>자산번호</th>
             <th>시리얼번호</th>
+            <th>발주처</th>
+            <th>매입가</th>
             <th>수량</th>
             <th>예상입고일</th>
             <th>담당자</th>

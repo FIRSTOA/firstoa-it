@@ -11,7 +11,7 @@ import {
   updateAssetInSheet,
 } from '@/lib/inventory/sheets';
 import { lookupRentalByAssetId } from '@/lib/rentals/server';
-import { ASSETS_TABLE, createAdminClient } from '@/lib/supabase/server';
+import { ASSETS_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
 import { seedData } from '@/lib/seed';
 import { assetToRow, type Asset } from '@/lib/types';
 
@@ -152,6 +152,52 @@ export async function cancelReservation(assetId: string, category: string): Prom
     return { ok: false, error: toSheetMessage(err) };
   }
   revalidatePath('/');
+  return { ok: true };
+}
+
+/**
+ * IT재고 리스트의 "수리요청" 버튼 — 외주 수리를 보낼 때 씁니다.
+ * 1) 재고 쪽 위치를 "수리발주(업체명)"로 바꿉니다(parseLocationStatus_가 "수리"를 인식해서
+ *    상태가 자동으로 수리중이 되고, 상품화완료/준비중 같은 "내부재고" 집계에서 자연히
+ *    빠집니다 — 자산 자체를 지우지 않아서 돌아왔을 때 같은 행에 이력이 이어집니다).
+ * 2) 입고 대장에 수리입고예정 건을 만들어서, 수리 끝나고 돌아오면 입고완료 처리로
+ *    (귀환자산 로직 그대로 재사용) 위치만 원래대로 돌려놓을 수 있게 합니다.
+ */
+export async function requestRepair(asset: Asset, repairVendor: string): Promise<ActionResult> {
+  const vendor = repairVendor.trim();
+  const newLocation = vendor ? `수리발주(${vendor})` : '수리발주';
+
+  const updateResult = await updateAsset(asset.assetId, { ...asset, location: newLocation });
+  if (!updateResult.ok) return updateResult;
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(RECEIVING_TABLE).insert({
+    kind: '수리입고예정',
+    status: '입고대기',
+    category: asset.category,
+    brand: asset.brand,
+    model: asset.model,
+    cpu: asset.cpu,
+    spec: asset.spec,
+    ram: asset.ram,
+    storage: asset.storage,
+    screen: asset.screen,
+    vendor,
+    purchase_price: '',
+    expected_date: null,
+    manager: '',
+    notes: `수리 발주 — 기존 위치: ${asset.location || '-'}`,
+    asset_id: asset.assetId,
+    serial_number: asset.serialNo,
+    location: '',
+    quantity: 1,
+  });
+  if (error) {
+    console.error('[actions] requestRepair 입고 대장 생성 실패:', error);
+    return { ok: false, error: `재고는 수리중으로 바뀌었지만 입고 대장 등록에 실패했어요: ${error.message}` };
+  }
+
+  revalidatePath('/receiving');
   return { ok: true };
 }
 

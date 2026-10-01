@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { cancelReservation, createAsset, deleteAsset, reserveAsset, resetToSeed, updateAsset } from '@/app/actions';
+import {
+  cancelReservation,
+  createAsset,
+  deleteAsset,
+  requestRepair,
+  reserveAsset,
+  resetToSeed,
+  updateAsset,
+} from '@/app/actions';
 import type { DataSource } from '@/lib/dataSource';
 import { filterAssets, INTERNAL_STOCK_STATUSES, toggleInternalStock, toggleMultiValue } from '@/lib/filters';
 import type { InquiryResult } from '@/lib/inventoryInquiry';
@@ -140,6 +148,18 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
     startTransition(async () => {
       const result = await cancelReservation(item.assetId, item.category);
       showToast(result.ok ? '예약을 취소했어요.' : result.error);
+    });
+  }
+
+  function handleRequestRepair(item: Asset) {
+    const vendor = prompt(`"${item.assetId}"를 수리 보낼 업체명을 입력해주세요(모르면 빈 칸으로 확인).`);
+    if (vendor === null) return; // 취소
+    if (!confirm(`"${item.assetId}"를 수리입고예정으로 등록하고 재고 상태를 수리중으로 바꿀까요?`)) return;
+    startTransition(async () => {
+      const result = await requestRepair(item, vendor);
+      showToast(
+        result.ok ? '수리 요청으로 등록했어요 — 입고 대장(수리입고예정)에서 확인할 수 있어요.' : result.error,
+      );
     });
   }
 
@@ -354,6 +374,7 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         onReserve={handleReserve}
         onCancelReservation={handleCancelReservation}
         onViewDetail={setDetailAsset}
+        onRequestRepair={handleRequestRepair}
       />
 
       <AssetDetailModal

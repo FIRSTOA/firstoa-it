@@ -91,10 +91,14 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
   }
 
   const isRental = form.kind === '렌탈입고예정';
+  const isRepair = form.kind === '수리입고예정';
+  // 렌탈/수리는 둘 다 "이미 있는 자산번호" 기준이라 자산번호가 필수고, 수량 필드도 의미가
+  // 없습니다(항상 1건).
+  const requiresAssetId = isRental || isRepair;
   // 기타주변기기는 소모성 재고라 랜선/어댑터 같은 걸 낱개 자산으로 안 쪼갬 — 수량 필드가
   // "행을 몇 개 만들지"가 아니라 "이 한 행의 재고 수량"을 뜻하게 됨(app/receiving/actions.ts).
   const isConsumable = form.category === '기타주변기기';
-  const showQuantityField = isConsumable || (!editing && !isRental);
+  const showQuantityField = isConsumable || (!editing && !requiresAssetId);
 
   function handleSave() {
     onSave(
@@ -157,7 +161,7 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
 
           <div className="form-field">
             <label>
-              자산번호{isRental && <span className="required"> *</span>}
+              자산번호{requiresAssetId && <span className="required"> *</span>}
             </label>
             <input
               value={form.assetId}

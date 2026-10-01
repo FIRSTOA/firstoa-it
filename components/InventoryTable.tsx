@@ -67,6 +67,7 @@ type Props = {
   onReserve: (item: Asset) => void;
   onCancelReservation: (item: Asset) => void;
   onViewDetail: (item: Asset) => void;
+  onRequestRepair: (item: Asset) => void;
 };
 
 function selectionKey(item: Asset): string {
@@ -84,6 +85,7 @@ export default function InventoryTable({
   onReserve,
   onCancelReservation,
   onViewDetail,
+  onRequestRepair,
 }: Props) {
   const allSelected = items.length > 0 && items.every((it) => selectedKeys.has(selectionKey(it)));
   return (
@@ -167,6 +169,15 @@ export default function InventoryTable({
               </td>
               <td>
                 <div className="row-actions">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="수리요청"
+                    disabled={disabled}
+                    onClick={() => onRequestRepair(item)}
+                  >
+                    🔧
+                  </button>
                   <button
                     type="button"
                     className="icon-btn"

@@ -18,8 +18,8 @@ import { ASSETS_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 function validate(entry: ReceivingInput): string | null {
-  if (entry.kind === '렌탈입고예정' && !entry.assetId.trim()) {
-    return '렌탈입고예정은 자산번호가 필수예요.';
+  if ((entry.kind === '렌탈입고예정' || entry.kind === '수리입고예정') && !entry.assetId.trim()) {
+    return `${entry.kind}은 자산번호가 필수예요.`;
   }
   if (!entry.model.trim() && entry.kind === '구매입고예정') {
     return '모델명은 필수예요.';
