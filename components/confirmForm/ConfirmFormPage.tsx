@@ -1,13 +1,8 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import {
-  CONFIRM_FORM_TABS,
-  ocrScanConfirmFormImage,
-  ocrScanConfirmFormText,
-  registerConfirmForm,
-  type ConfirmFormTab,
-} from '@/app/confirmForm/actions';
+import { ocrScanConfirmFormImage, ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
+import { CONFIRM_FORM_TABS, type ConfirmFormTab } from '@/lib/confirmForm';
 import type { WithdrawalFormFields, WithdrawalFormItem } from '@/lib/ocr';
 import { CATEGORIES } from '@/lib/types';
 

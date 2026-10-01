@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import type { ConfirmFormTab } from '@/lib/confirmForm';
 import { dispatchInputToRow } from '@/lib/dispatch';
 import { receivingInputToRow } from '@/lib/receiving';
 import {
@@ -14,9 +15,6 @@ import { createAdminClient, DISPATCH_TABLE, RECEIVING_TABLE } from '@/lib/supaba
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 export type OcrFormResult = { ok: true; fields: WithdrawalFormFields } | { ok: false; error: string };
-
-export const CONFIRM_FORM_TABS = ['납품', '교체', '철수'] as const;
-export type ConfirmFormTab = (typeof CONFIRM_FORM_TABS)[number];
 
 /** 품목 OCR 값이 CATEGORIES와 정확히 안 맞을 수 있어서(예: "노트북PC") 느슨하게 매칭합니다. */
 function matchCategory(raw: string): string {

@@ -1,4 +1,4 @@
-import { CATEGORIES } from './types';
+import { BRANDS, CATEGORIES } from './types';
 import type { ReceivingInput } from './receiving';
 
 /**
@@ -77,8 +77,22 @@ function extractCategory(line: string): { category: string; rest: string } {
   return { category: '', rest: line };
 }
 
-/** "삼성 LS24D304GAKXKR_24인치 모니터 10대" 같은 품목 줄인지 확인하고 수량/품목/모델을 뽑습니다. */
-function parseItemLine(rawLine: string): { category: string; model: string; quantity: number } | null {
+/**
+ * "삼성 LS24D304GAKXKR_24인치 모니터" 같은 줄에서 알려진 브랜드(lib/types.ts BRANDS)를
+ * 찾아 뽑습니다. 품목(category)과 동일한 방식 — 목록에 있는 것만 확실히 인식하고, 없는
+ * 브랜드는 억지로 추측하지 않고 모델명에 그대로 남겨 미리보기에서 사람이 고치게 둡니다.
+ */
+function extractBrand(line: string): { brand: string; rest: string } {
+  for (const b of BRANDS) {
+    if (line.includes(b)) {
+      return { brand: b, rest: line.replace(b, ' ') };
+    }
+  }
+  return { brand: '', rest: line };
+}
+
+/** "삼성 LS24D304GAKXKR_24인치 모니터 10대" 같은 품목 줄인지 확인하고 수량/품목/브랜드/모델을 뽑습니다. */
+function parseItemLine(rawLine: string): { category: string; brand: string; model: string; quantity: number } | null {
   const line = stripLeadingBullet(rawLine).trim();
   const qtyMatch = line.match(QUANTITY_RE);
   if (!qtyMatch || qtyMatch.index === undefined) return null;
@@ -87,9 +101,10 @@ function parseItemLine(rawLine: string): { category: string; model: string; quan
     .slice(0, qtyMatch.index)
     .replace(/[-–—]\s*$/, '')
     .trim();
-  const { category, rest } = extractCategory(before);
-  const model = rest.replace(/\s+/g, ' ').trim();
-  return { category, model, quantity };
+  const { category, rest: afterCategory } = extractCategory(before);
+  const { brand, rest: afterBrand } = extractBrand(afterCategory);
+  const model = afterBrand.replace(/\s+/g, ' ').trim();
+  return { category, brand, model, quantity };
 }
 
 /**
@@ -98,17 +113,19 @@ function parseItemLine(rawLine: string): { category: string; model: string; quan
  */
 function parseTabularRow(
   rawLine: string,
-): { assetId: string; serialNumber: string; category: string; screen: string; model: string } | null {
+): { assetId: string; serialNumber: string; category: string; brand: string; screen: string; model: string } | null {
   const match = rawLine.trim().match(TABULAR_ROW_RE);
   if (!match) return null;
   const [, assetId, serialNumber, description] = match;
-  const { category, rest } = extractCategory(description.trim());
+  const { category, rest: afterCategory } = extractCategory(description.trim());
+  const { brand, rest } = extractBrand(afterCategory);
   const cleanRest = rest.replace(/\s+/g, ' ').trim();
   const screenMatch = cleanRest.match(/^(\d+(?:\.\d+)?인치)$/);
   return {
     assetId,
     serialNumber,
     category,
+    brand,
     screen: screenMatch ? screenMatch[1] : '',
     model: screenMatch ? '' : cleanRest,
   };
@@ -185,7 +202,7 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
       groups.push({
         kind,
         category: tabularRow.category,
-        brand: '',
+        brand: tabularRow.brand,
         model: tabularRow.model,
         cpu: '',
         spec: '',
@@ -210,7 +227,7 @@ export function parseReceivingPaste(text: string, defaultKind: string): ParsedRe
       current = {
         kind,
         category: item.category,
-        brand: '',
+        brand: item.brand,
         model: item.model,
         cpu: '',
         spec: '',
