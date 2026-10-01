@@ -1,35 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  fetchCtag,
-  getEventByHref,
-  isNaverCalDavConfigured,
-  parseEventBlock,
-  reportChangedEvents,
-} from '@/lib/naverCaldav';
-import { CALENDAR_TABLE, createAdminClient, isSupabaseConfigured } from '@/lib/supabase/server';
+import { syncNaverCalendars } from '@/lib/naverCalendarSync';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const NAVER_CALENDARS_TABLE = 'it_naver_calendars';
-const SYNC_STATE_TABLE = 'it_naver_sync_state';
-const MAX_CHANGED_PER_CALENDAR = 80;
-
-function todayPlus(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10).replace(/-/g, '');
-}
-
-type SyncStateRow = { href: string; etag: string; uid: string; calendar_id: string };
-
 /**
- * 네이버 → 앱 풀 동기화. Vercel Cron(vercel.json)이 5분마다 호출합니다.
- * 앱에서 만든 일정(uid가 'it-'로 시작)은 네이버 쪽 수정 내용을 로컬에 반영하고,
- * 네이버에서 직접 만든 일정(다른 uid)은 새 로컬 행으로 가져옵니다(source: 'naver').
- * 삭제 판정은 이번 폴링에 에러가 없었던 캘린더에 한해서만 합니다 — 일부만 읽혔는데
- * "목록에 없으니 삭제됐다"고 오판하면 실제 사고로 이어질 수 있어서(참고 저장소의 실제
- * 사고 이력), 안전장치로 꼭 필요합니다.
+ * Vercel Cron(vercel.json, 하루 1번 — Hobby 요금제 제한)이 부르는 안전망입니다.
+ * 실제 동기화는 lib/naverCalendarSync.ts의 syncNaverCalendars가 하고, 캘린더 페이지를
+ * 열 때마다(app/calendar/page.tsx)도 같은 함수가 best-effort로 불려서 사실상 더
+ * 자주 동기화됩니다 — 이 cron은 아무도 캘린더 페이지를 열지 않는 동안에도 최소
+ * 하루 한 번은 반영되게 하는 보조 장치입니다.
  */
 export async function GET(req: NextRequest) {
   const expected = process.env.CRON_SECRET;
@@ -40,126 +20,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (!isNaverCalDavConfigured() || !isSupabaseConfigured()) {
-    return NextResponse.json({ ok: true, skipped: true, reason: 'not configured' });
-  }
-
-  const supabase = createAdminClient();
-  const { data: calendars, error: calError } = await supabase
-    .from(NAVER_CALENDARS_TABLE)
-    .select('id,name,ctag')
-    .eq('enabled', true);
-
-  if (calError) {
-    console.error('[cron/naver-calendar-sync] 연결된 캘린더 조회 실패:', calError);
-    return NextResponse.json({ ok: false, error: calError.message }, { status: 500 });
-  }
-
-  const startYmd = todayPlus(-30);
-  const endYmd = todayPlus(120);
-  const results: Record<string, unknown> = {};
-
-  for (const cal of (calendars ?? []) as { id: string; name: string; ctag: string }[]) {
-    try {
-      const newCtag = await fetchCtag(cal.id);
-      if (newCtag && newCtag === cal.ctag) {
-        results[cal.id] = { skipped: true, reason: 'ctag unchanged' };
-        continue;
-      }
-
-      const current = await reportChangedEvents(cal.id, startYmd, endYmd);
-
-      const { data: stateRows } = await supabase
-        .from(SYNC_STATE_TABLE)
-        .select('href,etag,uid,calendar_id')
-        .eq('calendar_id', cal.id);
-      const prevByHref = new Map(((stateRows ?? []) as SyncStateRow[]).map((r) => [r.href, r]));
-
-      const changed = current.filter((c) => prevByHref.get(c.href)?.etag !== c.etag).slice(0, MAX_CHANGED_PER_CALENDAR);
-      const backlogged = current.length - changed.length > 0 && changed.length === MAX_CHANGED_PER_CALENDAR;
-
-      let updated = 0;
-      let created = 0;
-      let failed = 0;
-
-      for (const { href, etag } of changed) {
-        try {
-          const ics = await getEventByHref(href);
-          const parsed = parseEventBlock(ics);
-          if (!parsed) continue;
-
-          if (parsed.uid.startsWith('it-')) {
-            const localId = parsed.uid.slice(3);
-            const { error } = await supabase
-              .from(CALENDAR_TABLE)
-              .update({
-                title: parsed.title,
-                date: parsed.date,
-                time: parsed.time,
-                location: parsed.location,
-                description: parsed.description,
-                naver_synced_at: new Date().toISOString(),
-              })
-              .eq('id', localId);
-            if (!error) updated++;
-            else failed++;
-          } else {
-            const { error } = await supabase.from(CALENDAR_TABLE).upsert(
-              {
-                title: parsed.title,
-                date: parsed.date,
-                time: parsed.time,
-                location: parsed.location,
-                description: parsed.description,
-                status: '진행중',
-                author: '',
-                naver_uid: parsed.uid,
-                source: 'naver',
-                calendar_id: cal.id,
-                naver_synced_at: new Date().toISOString(),
-              },
-              { onConflict: 'naver_uid' },
-            );
-            if (!error) created++;
-            else failed++;
-          }
-
-          await supabase
-            .from(SYNC_STATE_TABLE)
-            .upsert({ href, etag, uid: parsed.uid, calendar_id: cal.id }, { onConflict: 'href' });
-        } catch (err) {
-          failed++;
-          console.error('[cron/naver-calendar-sync] 이벤트 처리 실패:', href, err);
-        }
-      }
-
-      // 삭제 판정: 이번 폴링에 실패가 없고 밀린 분량(backlog)도 없을 때만 — 이번 목록에 없는
-      // href는 네이버에서 지워진 것으로 보고 로컬 행도 지웁니다.
-      let deleted = 0;
-      if (failed === 0 && !backlogged) {
-        const currentHrefs = new Set(current.map((c) => c.href));
-        const staleStates = ((stateRows ?? []) as SyncStateRow[]).filter((r) => !currentHrefs.has(r.href));
-        for (const stale of staleStates) {
-          if (stale.uid.startsWith('it-')) {
-            await supabase.from(CALENDAR_TABLE).delete().eq('id', stale.uid.slice(3));
-          } else {
-            await supabase.from(CALENDAR_TABLE).delete().eq('naver_uid', stale.uid);
-          }
-          await supabase.from(SYNC_STATE_TABLE).delete().eq('href', stale.href);
-          deleted++;
-        }
-      }
-
-      if (newCtag) {
-        await supabase.from(NAVER_CALENDARS_TABLE).update({ ctag: newCtag }).eq('id', cal.id);
-      }
-
-      results[cal.id] = { name: cal.name, checked: current.length, updated, created, deleted, failed, backlogged };
-    } catch (err) {
-      console.error('[cron/naver-calendar-sync] 캘린더 동기화 실패:', cal.id, err);
-      results[cal.id] = { error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-
-  return NextResponse.json({ ok: true, results });
+  const result = await syncNaverCalendars();
+  return NextResponse.json(result);
 }
