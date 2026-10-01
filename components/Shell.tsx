@@ -12,6 +12,7 @@ const SIDEBAR_SECTIONS = [
       { label: 'IT 재고 리스트', href: '/' },
       { label: '입고', href: '/receiving' },
       { label: '출고', href: '/dispatch' },
+      { label: '반출 확인서', href: '/confirm-form' },
       { label: '판매리스트', href: '/sales' },
       { label: '재고입력', href: null },
       { label: '자산 이력', href: '/asset-history' },
