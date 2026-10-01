@@ -26,6 +26,18 @@ const BLANK: Asset = {
   isNew: false,
   malicious: false,
   serialNo: '',
+  vendor: '',
+  purchasePrice: '',
+  clientName: '',
+  endDate: '',
+  overhaulDate: '',
+  manager: '',
+  os: '',
+  motherboard: '',
+  gpu: '',
+  power: '',
+  caseName: '',
+  usageClass: '',
 };
 
 type RentalLookupState =

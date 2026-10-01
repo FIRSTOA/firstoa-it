@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { parseHistoryEntries } from '@/lib/inventory/history';
 import type { Asset } from '@/lib/types';
 
 const SPEC_TAG_CLASS: Record<string, string> = {
@@ -34,10 +35,7 @@ function SpecCell({ item }: { item: Asset }) {
  */
 function HistoryCell({ history }: { history: string }) {
   const [expanded, setExpanded] = useState(false);
-  const entries = history
-    .split('/')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const entries = parseHistoryEntries(history);
 
   if (entries.length === 0) return <span>-</span>;
 
@@ -68,6 +66,7 @@ type Props = {
   onDelete: (assetId: string, category: string) => void;
   onReserve: (item: Asset) => void;
   onCancelReservation: (item: Asset) => void;
+  onViewDetail: (item: Asset) => void;
 };
 
 function selectionKey(item: Asset): string {
@@ -84,6 +83,7 @@ export default function InventoryTable({
   onDelete,
   onReserve,
   onCancelReservation,
+  onViewDetail,
 }: Props) {
   const allSelected = items.length > 0 && items.every((it) => selectedKeys.has(selectionKey(it)));
   return (
@@ -122,7 +122,14 @@ export default function InventoryTable({
                 <SpecCell item={item} />
               </td>
               <td>
-                <span className="asset-id">{item.assetId}</span>
+                <button
+                  type="button"
+                  className="asset-id asset-id-link"
+                  onClick={() => onViewDetail(item)}
+                  title="상세 보기"
+                >
+                  {item.assetId}
+                </button>
               </td>
               <td>{item.brand}</td>
               <td>{item.model}</td>

@@ -15,6 +15,7 @@ const SIDEBAR_SECTIONS = [
       { label: '판매리스트', href: '/sales' },
       { label: '재고입력', href: null },
       { label: '자산 이력', href: '/asset-history' },
+      { label: '실재고 조사', href: '/stocktake' },
       { label: '소모품 가격표', href: '/consumables' },
     ],
   },

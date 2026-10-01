@@ -37,3 +37,4 @@ export const RENTAL_TABLE = 'it_rental_list';
 export const ASSET_HISTORY_TABLE = 'asset_history';
 export const ASSET_MOVEMENTS_TABLE = 'asset_movements';
 export const ASSET_OVERHAUL_TABLE = 'asset_overhaul_records';
+export const STOCKTAKE_TABLE = 'it_stocktake_sessions';

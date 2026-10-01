@@ -8,11 +8,13 @@ import type { InquiryResult } from '@/lib/inventoryInquiry';
 import { useFilterState } from '@/lib/useFilterState';
 import type { Asset } from '@/lib/types';
 import ActiveFilters from './ActiveFilters';
+import AssetDetailModal from './AssetDetailModal';
 import AssetModal from './AssetModal';
 import CategoryCards from './CategoryCards';
 import ExcelActions from './ExcelActions';
 import FilterPanel from './FilterPanel';
 import InventoryTable from './InventoryTable';
+import PrintLabelsArea from './PrintLabelsArea';
 import SpecBreakdownPanels from './SpecBreakdownPanels';
 import SpreadsheetLinkButton from './SpreadsheetLinkButton';
 import StatsRow from './StatsRow';
@@ -41,6 +43,8 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
   const [inquiryOpen, setInquiryOpen] = useState(false);
+  const [detailAsset, setDetailAsset] = useState<Asset | null>(null);
+  const [printAssets, setPrintAssets] = useState<Asset[] | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState({ msg: '', show: false });
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -141,6 +145,19 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
 
   function selectionKey(item: Asset): string {
     return `${item.category}-${item.assetId}`;
+  }
+
+  // 팝업이 열려 있는 동안 예약/수정 등으로 items가 바뀌면(서버 액션 → revalidatePath)
+  // 팝업에 들고 있던 스냅샷도 최신 값으로 맞춰줍니다. 삭제돼서 더 이상 없으면 닫습니다.
+  useEffect(() => {
+    if (!detailAsset) return;
+    const fresh = items.find((it) => selectionKey(it) === selectionKey(detailAsset));
+    setDetailAsset(fresh ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  function handlePrint(assets: Asset[]) {
+    setPrintAssets(assets);
   }
 
   function toggleSelect(item: Asset) {
@@ -314,6 +331,9 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
           <button type="button" className="btn btn-ghost" disabled={pending} onClick={handleBulkReserve}>
             일괄 예약
           </button>
+          <button type="button" className="btn btn-ghost" onClick={() => handlePrint(selectedItems)}>
+            🖨 선택 인쇄
+          </button>
           <button type="button" className="btn btn-ghost" disabled={pending} onClick={clearSelection}>
             선택 해제
           </button>
@@ -333,7 +353,20 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         onDelete={handleDelete}
         onReserve={handleReserve}
         onCancelReservation={handleCancelReservation}
+        onViewDetail={setDetailAsset}
       />
+
+      <AssetDetailModal
+        open={detailAsset !== null}
+        item={detailAsset}
+        pending={pending}
+        onClose={() => setDetailAsset(null)}
+        onReserve={handleReserve}
+        onCancelReservation={handleCancelReservation}
+        onPrint={handlePrint}
+      />
+
+      {printAssets && <PrintLabelsArea items={printAssets} onDone={() => setPrintAssets(null)} />}
 
       <StockInquiryModal
         open={inquiryOpen}

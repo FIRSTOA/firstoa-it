@@ -66,6 +66,20 @@ type HeaderMap = {
   // "품목" — 노트북/데스크탑/모니터는 카테고리명 고정값이라 의미 없고, 기타주변기기 시트에서만
   // "나스"/"마우스" 같은 세부 항목명이 들어있어서 그 카테고리에 한해 subItem으로 씁니다.
   itemCol: number;
+  // 아래는 전부 자산 상세 팝업 표시 전용(읽기만, 쓰기는 안 함) — 탭마다 없을 수 있어서
+  // 안 찾으면 -1(= 빈 문자열)이어도 정상입니다.
+  vendorCol: number; // 구입처
+  purchasePriceCol: number; // 구매단가
+  clientNameCol: number; // 업체명
+  endDateCol: number; // 종료일
+  overhaulDateCol: number; // 오버홀날짜
+  managerCol: number; // 담당자
+  osCol: number;
+  motherboardCol: number; // 메인보드
+  gpuCol: number; // 그래픽카드
+  powerCol: number; // POWER
+  caseCol: number; // 케이스
+  usageClassCol: number; // 용도구분
   columnCount: number;
 };
 
@@ -117,6 +131,18 @@ async function buildCache(category: string): Promise<SheetCache> {
     reserverCol: findIncludes(header, '예약자'),
     reserveDateCol: findIncludes(header, '예약일'),
     itemCol: findExact(header, '품목'),
+    vendorCol: findIncludes(header, '구입처'),
+    purchasePriceCol: findIncludes(header, '구매단가'),
+    clientNameCol: findIncludes(header, '업체명'),
+    endDateCol: findIncludes(header, '종료일'),
+    overhaulDateCol: findIncludes(header, '오버홀'),
+    managerCol: findIncludes(header, '담당자'),
+    osCol: findExact(header, 'OS'),
+    motherboardCol: findIncludes(header, '메인보드'),
+    gpuCol: findIncludes(header, '그래픽카드'),
+    powerCol: findExact(header, 'POWER'),
+    caseCol: findIncludes(header, '케이스'),
+    usageClassCol: findIncludes(header, '용도구분'),
     columnCount: header.length,
   };
 
@@ -203,6 +229,18 @@ function mapRowToAsset(row: unknown[], header: HeaderMap, category: string): Ass
     serialNo: cell(row, header.serialCol),
     reservedBy: reservedBy || undefined,
     reservedAt: cell(row, header.reserveDateCol) || undefined,
+    vendor: cell(row, header.vendorCol),
+    purchasePrice: cell(row, header.purchasePriceCol),
+    clientName: cell(row, header.clientNameCol),
+    endDate: cell(row, header.endDateCol),
+    overhaulDate: cell(row, header.overhaulDateCol),
+    manager: cell(row, header.managerCol),
+    os: cell(row, header.osCol),
+    motherboard: cell(row, header.motherboardCol),
+    gpu: cell(row, header.gpuCol),
+    power: cell(row, header.powerCol),
+    caseName: cell(row, header.caseCol),
+    usageClass: cell(row, header.usageClassCol),
   };
 }
 

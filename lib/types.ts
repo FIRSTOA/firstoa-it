@@ -38,6 +38,21 @@ export type Asset = {
   // 옵셔널로 둡니다 — rowToAsset/assetToRow는 안 건드려도 됨).
   reservedBy?: string;
   reservedAt?: string;
+  // 자산 상세 팝업 전용 표시 필드 — 구글시트엔 이미 있는 컬럼이지만 지금까지 안 읽던
+  // 것들. 필터링/검색엔 안 쓰고 순수 표시용이라, reservedBy/reservedAt과 동일하게
+  // 옵셔널로 둡니다(시드/엑셀 등 다른 Asset 생성 지점을 전부 손 안 대도 되게).
+  vendor?: string; // 구입처
+  purchasePrice?: string; // 구매단가
+  clientName?: string; // 업체명
+  endDate?: string; // 종료일
+  overhaulDate?: string; // 오버홀날짜
+  manager?: string; // 담당자
+  os?: string;
+  motherboard?: string; // 메인보드
+  gpu?: string; // 그래픽카드
+  power?: string; // POWER
+  caseName?: string; // 케이스
+  usageClass?: string; // 용도구분 원문(예: "2.사무용") — spec(분류값)과는 다른 시트 원문
 };
 
 /** Supabase `it_assets` 테이블 행 (snake_case) */
@@ -80,6 +95,18 @@ export function rowToAsset(row: AssetRow): Asset {
     cpuType: '',
     gubunCode: '',
     subItem: '',
+    vendor: '',
+    purchasePrice: '',
+    clientName: '',
+    endDate: '',
+    overhaulDate: '',
+    manager: '',
+    os: '',
+    motherboard: '',
+    gpu: '',
+    power: '',
+    caseName: '',
+    usageClass: '',
   };
 }
 
