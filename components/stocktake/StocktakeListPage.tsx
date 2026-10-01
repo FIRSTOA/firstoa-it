@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
+import { formatKstDateTime, stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
 import { startStocktake } from '@/app/stocktake/actions';
 
 export default function StocktakeListPage({
@@ -74,7 +74,7 @@ export default function StocktakeListPage({
                     </span>
                   </td>
                   <td>{s.startedBy || '-'}</td>
-                  <td style={{ fontSize: '12px' }}>{new Date(s.startedAt).toLocaleString('ko-KR')}</td>
+                  <td style={{ fontSize: '12px' }}>{formatKstDateTime(s.startedAt)}</td>
                   <td style={{ fontSize: '12px' }}>
                     확인 {sum.confirmed} / 전체 {sum.total}
                     {sum.unexpected > 0 && <span style={{ color: 'var(--red-600)' }}> · 목록외 {sum.unexpected}</span>}

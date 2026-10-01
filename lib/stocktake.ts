@@ -66,6 +66,21 @@ export function buildInitialResults(assetsAtLocation: Asset[]): StocktakeItem[] 
   }));
 }
 
+/**
+ * KST(UTC+9, DST 없음)로 고정 포맷팅합니다. Intl.toLocaleString은 서버(Vercel, 보통 UTC)와
+ * 클라이언트(브라우저 로컬 타임존/로케일)가 서로 다른 문자열을 만들어 React 하이드레이션
+ * 불일치(#418)를 일으킬 수 있어서, 타임존에 의존하지 않는 수동 포맷을 씁니다.
+ */
+export function formatKstDateTime(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${y}.${m}.${day} ${hh}:${mm}`;
+}
+
 export function stocktakeSummary(results: StocktakeItem[]) {
   const confirmed = results.filter((r) => r.status === '확인됨').length;
   const missing = results.filter((r) => r.status === '미확인').length;
