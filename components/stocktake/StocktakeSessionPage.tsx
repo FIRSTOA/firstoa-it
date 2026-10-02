@@ -5,10 +5,10 @@ import {
   addUnexpectedAssetToSession,
   bulkUpdateStocktakeItems,
   completeStocktake,
-  ocrScanAssetLabel,
   updateStocktakeItem,
 } from '@/app/stocktake/actions';
 import { resizeImageFile } from '@/lib/imageResize';
+import { scanLabelImage } from '@/lib/ocrClient';
 import { stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -47,12 +47,16 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
     setScanPending(true);
     try {
       const { base64, mediaType } = await resizeImageFile(file);
-      const result = await ocrScanAssetLabel(base64, mediaType);
+      const result = await scanLabelImage(base64, mediaType);
       if (!result.ok) {
         showToast(result.error);
         return;
       }
-      const assetId = result.assetId;
+      const assetId = result.fields.assetId;
+      if (!assetId) {
+        showToast('사진에서 자산번호를 읽지 못했어요.');
+        return;
+      }
       const inList = session.results.some((r) => r.assetId === assetId);
       if (inList) {
         startTransition(async () => {

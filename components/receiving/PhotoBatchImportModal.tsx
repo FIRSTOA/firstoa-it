@@ -1,10 +1,10 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ocrExtractSaleInfo } from '@/app/sales/actions';
 import { createAndCompleteReceivingBatch } from '@/app/receiving/actions';
 import { normalizeWonInput } from '@/lib/currency';
 import { resizeImageFile } from '@/lib/imageResize';
+import { scanLabelImage } from '@/lib/ocrClient';
 import { RECEIVING_KINDS, type ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES } from '@/lib/types';
 
@@ -74,7 +74,7 @@ export default function PhotoBatchImportModal({
     for (let i = 0; i < files.length; i++) {
       try {
         const { base64, mediaType } = await resizeImageFile(files[i]);
-        const result = await ocrExtractSaleInfo(base64, mediaType);
+        const result = await scanLabelImage(base64, mediaType);
         if (result.ok) {
           next.push({ assetId: result.fields.assetId, serialNumber: result.fields.serialNumber });
         }

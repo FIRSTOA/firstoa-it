@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ocrExtractSaleInfo } from '@/app/sales/actions';
 import { normalizeWonInput } from '@/lib/currency';
 import { resizeImageFile } from '@/lib/imageResize';
+import { scanLabelImage } from '@/lib/ocrClient';
 import type { SaleEntry, SaleInput } from '@/lib/sales';
 
 const BLANK: SaleInput = {
@@ -54,7 +54,7 @@ export default function SalesModal({ open, editing, pending, onClose, onSave }: 
     setOcrError('');
     try {
       const { base64, mediaType } = await resizeImageFile(file);
-      const result = await ocrExtractSaleInfo(base64, mediaType);
+      const result = await scanLabelImage(base64, mediaType);
       if (!result.ok) {
         setOcrError(result.error);
         return;

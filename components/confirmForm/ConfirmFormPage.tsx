@@ -1,11 +1,12 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ocrScanConfirmFormImage, ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
+import { ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
 import { CONFIRM_FORM_TABS, type ConfirmFormTab } from '@/lib/confirmForm';
 import type { DispatchEntry } from '@/lib/dispatch';
 import { resizeImageFile } from '@/lib/imageResize';
 import type { WithdrawalFormFields, WithdrawalFormItem } from '@/lib/ocr';
+import { scanWithdrawalFormImage } from '@/lib/ocrClient';
 import { CATEGORIES } from '@/lib/types';
 
 const PC_ITEMS = ['모니터', '데스크탑', '노트북'];
@@ -34,7 +35,7 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
     try {
       const { base64, mediaType } = await resizeImageFile(file);
       setImagePreview(`data:${mediaType};base64,${base64}`);
-      const result = await ocrScanConfirmFormImage(base64, mediaType);
+      const result = await scanWithdrawalFormImage(base64, mediaType);
       if (!result.ok) {
         showToast(result.error);
         return;

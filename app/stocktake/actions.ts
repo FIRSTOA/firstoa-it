@@ -1,7 +1,6 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { extractSaleInfoFromImage, isOcrConfigured } from '@/lib/ocr';
 import { DATA_SOURCE } from '@/lib/dataSource';
 import { getAssetFromSheets, listAllAssets } from '@/lib/inventory/sheets';
 import {
@@ -163,24 +162,6 @@ export async function addUnexpectedAssetToSession(sessionId: string, assetId: st
 
   revalidatePath(`/stocktake/${sessionId}`);
   return { ok: true };
-}
-
-export type OcrScanResult = { ok: true; assetId: string } | { ok: false; error: string };
-
-export async function ocrScanAssetLabel(base64Image: string, mediaType: string): Promise<OcrScanResult> {
-  if (!isOcrConfigured()) {
-    return { ok: false, error: 'OCR 기능을 쓰려면 관리자가 ANTHROPIC_API_KEY를 설정해야 해요.' };
-  }
-  try {
-    const fields = await extractSaleInfoFromImage(base64Image, mediaType);
-    if (!fields.assetId) {
-      return { ok: false, error: '사진에서 자산번호를 읽지 못했어요.' };
-    }
-    return { ok: true, assetId: fields.assetId };
-  } catch (err) {
-    console.error('[stocktake] ocrScanAssetLabel 실패:', err);
-    return { ok: false, error: err instanceof Error ? err.message : 'OCR 인식에 실패했어요.' };
-  }
 }
 
 export async function deleteStocktakeSession(id: string): Promise<ActionResult> {
