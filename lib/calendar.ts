@@ -5,6 +5,17 @@
 
 export const CALENDAR_STATUSES = ['진행중', '완료'] as const;
 
+/**
+ * "납품철수교체휴가교육" 같은 네이버 캘린더는 일정 제목에 "철수(일반)/퍼스트/..." 처럼 유형이
+ * 앞에 붙어 있어서, 별도 필드 없이 제목 텍스트에서 유형을 뽑아 필터링할 수 있게 합니다.
+ * 제목 어디에 있든(괄호 앞뒤 상관없이) 해당 단어가 포함되면 그 유형으로 봅니다.
+ */
+export const CALENDAR_EVENT_KINDS = ['납품', '교체', '철수', '휴가', '교육'] as const;
+
+export function parseEventKind(title: string): string | null {
+  return CALENDAR_EVENT_KINDS.find((k) => title.includes(k)) ?? null;
+}
+
 export type CalendarEvent = {
   id: string;
   title: string;

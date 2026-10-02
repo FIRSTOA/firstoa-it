@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { createEvent, deleteEvent, listConnectedCalendars, listEventsInRange, updateEvent } from '@/app/calendar/actions';
-import { groupEventsByDate, monthGridRange, toYmd, type CalendarEvent, type CalendarEventInput, type NaverCalendarConnection } from '@/lib/calendar';
+import {
+  CALENDAR_EVENT_KINDS,
+  groupEventsByDate,
+  monthGridRange,
+  parseEventKind,
+  toYmd,
+  type CalendarEvent,
+  type CalendarEventInput,
+  type NaverCalendarConnection,
+} from '@/lib/calendar';
 import CalendarConnectionsModal from './CalendarConnectionsModal';
 import EventModal from './EventModal';
 
@@ -33,6 +42,8 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
   const [viewMode, setViewMode] = useState<'month' | 'list'>('month');
   const [searchTerm, setSearchTerm] = useState('');
   const [calendarFilter, setCalendarFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'전체' | '진행중' | '완료'>('전체');
+  const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(todayYmd());
 
   function refetchConnectedCalendars() {
@@ -85,11 +96,29 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
     const term = searchTerm.trim().toLowerCase();
     return events.filter((e) => {
       if (calendarFilter && e.calendarId !== calendarFilter) return false;
+      if (statusFilter !== '전체' && e.status !== statusFilter) return false;
+      if (kindFilter && parseEventKind(e.title) !== kindFilter) return false;
       if (!term) return true;
       const hay = `${e.title} ${e.location} ${e.description} ${e.author}`.toLowerCase();
       return hay.includes(term);
     });
-  }, [events, searchTerm, calendarFilter]);
+  }, [events, searchTerm, calendarFilter, statusFilter, kindFilter]);
+
+  const statusCounts = useMemo(() => {
+    const base = events.filter((e) => !calendarFilter || e.calendarId === calendarFilter);
+    return {
+      전체: base.length,
+      진행중: base.filter((e) => e.status === '진행중').length,
+      완료: base.filter((e) => e.status === '완료').length,
+    };
+  }, [events, calendarFilter]);
+
+  const kindCounts = useMemo(() => {
+    const base = events.filter((e) => !calendarFilter || e.calendarId === calendarFilter);
+    const counts = new Map<string, number>();
+    for (const k of CALENDAR_EVENT_KINDS) counts.set(k, base.filter((e) => parseEventKind(e.title) === k).length);
+    return counts;
+  }, [events, calendarFilter]);
 
   const eventsByDate = useMemo(() => groupEventsByDate(visibleEvents), [visibleEvents]);
   const calendarNameById = useMemo(
@@ -207,6 +236,33 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
               onClick={() => setCalendarFilter(calendarFilter === c.id ? null : c.id)}
             >
               {c.name}
+            </button>
+          ))}
+        </div>
+        <div className="chip-group">
+          {(['전체', '진행중', '완료'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={`chip${statusFilter === s ? ' active' : ''}`}
+              onClick={() => setStatusFilter(s)}
+            >
+              {s} ({statusCounts[s]})
+            </button>
+          ))}
+        </div>
+        <div className="chip-group">
+          <button type="button" className={`chip${!kindFilter ? ' active' : ''}`} onClick={() => setKindFilter(null)}>
+            유형 전체
+          </button>
+          {CALENDAR_EVENT_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={`chip${kindFilter === k ? ' active' : ''}`}
+              onClick={() => setKindFilter(kindFilter === k ? null : k)}
+            >
+              {k} ({kindCounts.get(k) ?? 0})
             </button>
           ))}
         </div>
