@@ -4,12 +4,7 @@ import { revalidatePath } from 'next/cache';
 import type { ConfirmFormTab } from '@/lib/confirmForm';
 import { dispatchInputToRow, rowToDispatch, type DispatchEntry, type DispatchEntryRow } from '@/lib/dispatch';
 import { receivingInputToRow } from '@/lib/receiving';
-import {
-  extractWithdrawalFormFromImage,
-  extractWithdrawalFormFromText,
-  isOcrConfigured,
-  type WithdrawalFormFields,
-} from '@/lib/ocr';
+import { extractWithdrawalFormFromText, isOcrConfigured, type WithdrawalFormFields } from '@/lib/ocr';
 import { CATEGORIES } from '@/lib/types';
 import { createAdminClient, DISPATCH_TABLE, RECEIVING_TABLE } from '@/lib/supabase/server';
 
@@ -22,19 +17,6 @@ const CONFIRM_FORM_REMARK = '확인서 붙여넣기로 등록';
 function matchCategory(raw: string): string {
   const found = CATEGORIES.find((c) => raw.includes(c) || c.includes(raw));
   return found ?? CATEGORIES[0];
-}
-
-export async function ocrScanConfirmFormImage(base64Image: string, mediaType: string): Promise<OcrFormResult> {
-  if (!isOcrConfigured()) {
-    return { ok: false, error: 'OCR 기능을 쓰려면 관리자가 ANTHROPIC_API_KEY를 설정해야 해요.' };
-  }
-  try {
-    const fields = await extractWithdrawalFormFromImage(base64Image, mediaType);
-    return { ok: true, fields };
-  } catch (err) {
-    console.error('[confirmForm] ocrScanConfirmFormImage 실패:', err);
-    return { ok: false, error: err instanceof Error ? err.message : 'OCR 인식에 실패했어요.' };
-  }
 }
 
 export async function ocrScanConfirmFormText(text: string): Promise<OcrFormResult> {
