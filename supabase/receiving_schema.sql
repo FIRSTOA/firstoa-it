@@ -43,6 +43,7 @@ create table if not exists public.it_receiving_log (
 -- 기존에 이미 테이블이 있는 경우(create table if not exists가 no-op)에도 새 컬럼이 생기도록.
 alter table public.it_receiving_log add column if not exists purchase_price text not null default '';
 alter table public.it_receiving_log add column if not exists quantity integer not null default 1;
+alter table public.it_receiving_log add column if not exists purchase_url text not null default ''; -- 쿠팡 등 온라인 구매 링크
 
 create index if not exists it_receiving_log_created_at_idx on public.it_receiving_log (created_at desc, seq desc);
 create index if not exists it_receiving_log_status_idx     on public.it_receiving_log (status);

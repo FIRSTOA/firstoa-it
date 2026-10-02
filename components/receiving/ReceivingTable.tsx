@@ -188,6 +188,15 @@ function ReceivingRow({
           placeholder="매입가"
         />
       </td>
+      <td style={{ width: '36px', textAlign: 'center' }}>
+        {entry.purchaseUrl ? (
+          <a href={entry.purchaseUrl} target="_blank" rel="noreferrer" title="구매 링크 열기">
+            🔗
+          </a>
+        ) : (
+          '-'
+        )}
+      </td>
       <td style={{ width: '70px' }}>
         {entry.category === '기타주변기기' ? (
           <input
@@ -307,6 +316,7 @@ export default function ReceivingTable({
             <th>시리얼번호</th>
             <th>발주처</th>
             <th>매입가</th>
+            <th>🔗</th>
             <th>수량</th>
             <th>예상입고일</th>
             <th>담당자</th>

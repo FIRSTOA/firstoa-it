@@ -107,6 +107,7 @@ export async function registerConfirmForm(tab: ConfirmFormTab, fields: Withdrawa
         screen: '',
         vendor: fields.companyName,
         purchasePrice: '',
+        purchaseUrl: '',
         expectedDate: fields.date,
         manager: fields.requester,
         notes: `확인서(철수) 붙여넣기로 등록 — ${fields.reason}`.trim(),

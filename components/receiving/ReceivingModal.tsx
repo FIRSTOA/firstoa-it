@@ -19,6 +19,7 @@ const BLANK: ReceivingInput = {
   screen: '',
   vendor: '',
   purchasePrice: '',
+  purchaseUrl: '',
   expectedDate: '',
   manager: '',
   notes: '',
@@ -237,6 +238,15 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
               onChange={(e) => set('purchasePrice', e.target.value)}
               onBlur={() => setForm((prev) => ({ ...prev, purchasePrice: normalizeWonInput(prev.purchasePrice) }))}
               placeholder="예: 154만원 (자동으로 1,540,000원으로 정리돼요)"
+            />
+          </div>
+          <div className="form-field">
+            <label>구매URL</label>
+            <input
+              type="url"
+              value={form.purchaseUrl}
+              onChange={(e) => set('purchaseUrl', e.target.value)}
+              placeholder="예: 쿠팡 등 온라인 구매 링크"
             />
           </div>
           <div className="form-field">

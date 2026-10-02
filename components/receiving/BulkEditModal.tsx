@@ -23,6 +23,7 @@ const FIELD_LABELS: Record<BulkField, string> = {
   screen: '화면크기',
   vendor: '발주처',
   purchasePrice: '매입가',
+  purchaseUrl: '구매URL',
   expectedDate: '예상입고일',
   manager: '담당자',
   location: '위치',

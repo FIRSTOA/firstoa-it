@@ -163,6 +163,7 @@ export default function PhotoBatchImportModal({
         screen: '',
         vendor: header.vendor,
         purchasePrice: header.purchasePrice,
+        purchaseUrl: '',
         expectedDate: '',
         manager: header.manager,
         notes: '사진 일괄 등록',

@@ -12,6 +12,7 @@ export type PurchaseLineItem = {
   unitPrice: number;
   currentStock: string;
   safetyStock: string;
+  purchaseUrl: string;
 };
 
 const BLANK_LINE: PurchaseLineItem = {
@@ -21,6 +22,7 @@ const BLANK_LINE: PurchaseLineItem = {
   unitPrice: 0,
   currentStock: '',
   safetyStock: '',
+  purchaseUrl: '',
 };
 
 const PRICE_COMPARED_OPTIONS = ['해당사항없음', '2곳이상 체크'] as const;
@@ -99,6 +101,7 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
         screen: '',
         vendor: vendor.trim(),
         purchasePrice: `${line.unitPrice.toLocaleString()}원 x ${quantity} = ${lineTotal.toLocaleString()}원`,
+        purchaseUrl: line.purchaseUrl.trim(),
         expectedDate,
         manager: manager.trim(),
         notes: `구매입력 전표 (일자: ${date})`,
@@ -188,6 +191,7 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
                 <th style={{ width: '120px' }}>합계</th>
                 <th style={{ width: '90px' }}>현재고</th>
                 <th style={{ width: '90px' }}>안전재고</th>
+                <th style={{ width: '160px' }}>구매URL</th>
                 <th style={{ width: '40px' }} />
               </tr>
             </thead>
@@ -244,6 +248,15 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
                     <input
                       value={line.safetyStock}
                       onChange={(e) => updateLine(i, { safetyStock: e.target.value })}
+                      style={{ width: '100%' }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="url"
+                      value={line.purchaseUrl}
+                      onChange={(e) => updateLine(i, { purchaseUrl: e.target.value })}
+                      placeholder="쿠팡 등 구매 링크"
                       style={{ width: '100%' }}
                     />
                   </td>

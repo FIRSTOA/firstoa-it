@@ -305,6 +305,7 @@ export function expandParsedGroup(group: ParsedReceivingGroup): ReceivingInput[]
     screen: group.screen,
     vendor: group.vendor,
     purchasePrice: group.purchasePrice,
+    purchaseUrl: '',
     expectedDate: group.expectedDate,
     manager: group.manager,
     notes: group.notes,
