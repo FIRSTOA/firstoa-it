@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { ocrExtractSaleInfo } from '@/app/sales/actions';
 import { createAndCompleteReceivingBatch } from '@/app/receiving/actions';
 import { normalizeWonInput } from '@/lib/currency';
+import { resizeImageFile } from '@/lib/imageResize';
 import { RECEIVING_KINDS, type ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES } from '@/lib/types';
 
@@ -30,19 +31,6 @@ const BLANK_HEADER: Header = {
   location: '',
   manager: '',
 };
-
-function readFileAsBase64(file: File): Promise<{ base64: string; mediaType: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const comma = result.indexOf(',');
-      resolve({ base64: result.slice(comma + 1), mediaType: file.type || 'image/jpeg' });
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 /** "P3613  0YR6HNCL803630H" 같은 줄들을 자산번호/시리얼 쌍으로 파싱합니다. */
 function parsePairsFromText(text: string): Row[] {
@@ -85,7 +73,7 @@ export default function PhotoBatchImportModal({
     const next: Row[] = [];
     for (let i = 0; i < files.length; i++) {
       try {
-        const { base64, mediaType } = await readFileAsBase64(files[i]);
+        const { base64, mediaType } = await resizeImageFile(files[i]);
         const result = await ocrExtractSaleInfo(base64, mediaType);
         if (result.ok) {
           next.push({ assetId: result.fields.assetId, serialNumber: result.fields.serialNumber });

@@ -59,11 +59,11 @@ export default function StocktakeListPage({
         <table>
           <thead>
             <tr>
-              <th>순번</th>
+              <th className="hide-mobile">순번</th>
               <th>위치</th>
               <th>상태</th>
-              <th>담당자</th>
-              <th>시작일시</th>
+              <th className="hide-mobile">담당자</th>
+              <th className="hide-mobile">시작일시</th>
               <th>확인 현황</th>
               <th />
             </tr>
@@ -73,15 +73,15 @@ export default function StocktakeListPage({
               const sum = stocktakeSummary(s.results);
               return (
                 <tr key={s.id}>
-                  <td>{s.seq}</td>
+                  <td className="hide-mobile">{s.seq}</td>
                   <td>{s.location}</td>
                   <td>
                     <span className={`badge badge-${s.status === '완료' ? '상품화완료' : '상품화준비중'}`}>
                       {s.status}
                     </span>
                   </td>
-                  <td>{s.startedBy || '-'}</td>
-                  <td style={{ fontSize: '12px' }}>{formatKstDateTime(s.startedAt)}</td>
+                  <td className="hide-mobile">{s.startedBy || '-'}</td>
+                  <td className="hide-mobile" style={{ fontSize: '12px' }}>{formatKstDateTime(s.startedAt)}</td>
                   <td style={{ fontSize: '12px' }}>
                     확인 {sum.confirmed} / 전체 {sum.total}
                     {sum.unexpected > 0 && <span style={{ color: 'var(--red-600)' }}> · 목록외 {sum.unexpected}</span>}

@@ -99,6 +99,32 @@ export async function updateStocktakeItem(
   return { ok: true };
 }
 
+/** 체크박스로 여러 건 골라 한 번에 확인 처리 — 한 번만 읽고 한 번만 써서 N번 왕복하지 않습니다. */
+export async function bulkUpdateStocktakeItems(
+  sessionId: string,
+  assetIds: string[],
+  status: StocktakeItemStatus,
+): Promise<ActionResult> {
+  const session = await loadSession(sessionId);
+  if (!session) return { ok: false, error: '조사 세션을 찾지 못했어요.' };
+
+  const idSet = new Set(assetIds);
+  const now = new Date().toISOString();
+  const results: StocktakeItem[] = session.results.map((r) =>
+    idSet.has(r.assetId) ? { ...r, status, scannedAt: now } : r,
+  );
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(STOCKTAKE_TABLE).update({ results }).eq('id', sessionId);
+  if (error) {
+    console.error('[stocktake] bulkUpdateStocktakeItems 실패:', error);
+    return { ok: false, error: toMessage(error) };
+  }
+
+  revalidatePath(`/stocktake/${sessionId}`);
+  return { ok: true };
+}
+
 export async function addUnexpectedAssetToSession(sessionId: string, assetId: string): Promise<ActionResult> {
   const trimmed = assetId.trim();
   if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };

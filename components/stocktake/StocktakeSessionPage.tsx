@@ -3,24 +3,13 @@
 import { useRef, useState, useTransition } from 'react';
 import {
   addUnexpectedAssetToSession,
+  bulkUpdateStocktakeItems,
   completeStocktake,
   ocrScanAssetLabel,
   updateStocktakeItem,
 } from '@/app/stocktake/actions';
+import { resizeImageFile } from '@/lib/imageResize';
 import { stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
-
-function readFileAsBase64(file: File): Promise<{ base64: string; mediaType: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const comma = result.indexOf(',');
-      resolve({ base64: result.slice(comma + 1), mediaType: file.type || 'image/jpeg' });
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 const STATUS_LABEL: Record<string, string> = {
   미확인: '미확인',
@@ -32,6 +21,9 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
   const [toast, setToast] = useState({ msg: '', show: false });
   const [scanPending, setScanPending] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmingComplete, setConfirmingComplete] = useState(false);
+  const [unexpectedAssetId, setUnexpectedAssetId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sum = stocktakeSummary(session.results);
@@ -54,7 +46,7 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
     if (!file) return;
     setScanPending(true);
     try {
-      const { base64, mediaType } = await readFileAsBase64(file);
+      const { base64, mediaType } = await resizeImageFile(file);
       const result = await ocrScanAssetLabel(base64, mediaType);
       if (!result.ok) {
         showToast(result.error);
@@ -68,14 +60,10 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
           showToast(upd.ok ? `${assetId} 확인했어요.` : upd.error);
         });
       } else {
-        const addIt = confirm(
-          `"${assetId}"는 이 위치 목록에 없는 자산번호예요. 그래도 여기서 발견된 걸로 추가할까요?`,
-        );
-        if (!addIt) return;
-        startTransition(async () => {
-          const added = await addUnexpectedAssetToSession(session.id, assetId);
-          showToast(added.ok ? `${assetId}를 목록외 발견으로 추가했어요.` : added.error);
-        });
+        // 카톡 인앱 브라우저 등에서 window.confirm()이 아예 반응 없이 무시되는 경우가 있어서
+        // (버튼을 눌러도 "아무 반응 없음"처럼 보임), 네이티브 다이얼로그 대신 화면 안에서 직접
+        // 예/아니오를 받습니다.
+        setUnexpectedAssetId(assetId);
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : '사진을 읽는 중 오류가 났어요.');
@@ -85,11 +73,47 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
     }
   }
 
+  function toggleSelect(assetId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => {
+      const allSelected = session.results.length > 0 && session.results.every((r) => prev.has(r.assetId));
+      if (allSelected) return new Set();
+      return new Set(session.results.map((r) => r.assetId));
+    });
+  }
+
+  function handleBulkConfirm() {
+    if (selected.size === 0) return;
+    startTransition(async () => {
+      const result = await bulkUpdateStocktakeItems(session.id, [...selected], '확인됨');
+      showToast(result.ok ? `${selected.size}건 확인 처리했어요.` : result.error);
+      if (result.ok) setSelected(new Set());
+    });
+  }
+
   function handleComplete() {
-    if (!confirm('조사를 종료할까요? 종료 후에도 목록은 볼 수 있지만 더 이상 체크할 수 없어요.')) return;
     startTransition(async () => {
       const result = await completeStocktake(session.id);
+      setConfirmingComplete(false);
       showToast(result.ok ? '조사를 종료했어요.' : result.error);
+    });
+  }
+
+  function handleAddUnexpected() {
+    const assetId = unexpectedAssetId;
+    if (!assetId) return;
+    setUnexpectedAssetId(null);
+    startTransition(async () => {
+      const added = await addUnexpectedAssetToSession(session.id, assetId);
+      showToast(added.ok ? `${assetId}를 목록외 발견으로 추가했어요.` : added.error);
     });
   }
 
@@ -119,34 +143,92 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
             >
               {scanPending ? '인식 중…' : '📷 사진으로 스캔'}
             </button>
-            <button type="button" className="btn btn-primary" disabled={pending} onClick={handleComplete}>
-              조사 종료
-            </button>
+            {confirmingComplete ? (
+              <>
+                <span style={{ fontSize: '12.5px', color: 'var(--ink-500)' }}>정말 종료할까요?</span>
+                <button type="button" className="btn btn-primary" disabled={pending} onClick={handleComplete}>
+                  예, 종료
+                </button>
+                <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setConfirmingComplete(false)}>
+                  아니오
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn btn-primary" disabled={pending} onClick={() => setConfirmingComplete(true)}>
+                조사 종료
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {unexpectedAssetId && (
+        <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', borderColor: 'var(--red-100)' }}>
+          <span style={{ fontSize: '13px' }}>
+            <b>&quot;{unexpectedAssetId}&quot;</b>는 이 위치 목록에 없는 자산번호예요. 그래도 여기서 발견된 걸로 추가할까요?
+          </span>
+          <button type="button" className="btn btn-primary" disabled={pending} onClick={handleAddUnexpected}>
+            추가
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setUnexpectedAssetId(null)}>
+            무시
+          </button>
+        </div>
+      )}
+
+      {!done && selected.size > 0 && (
+        <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700 }}>{selected.size}건 선택됨</span>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={handleBulkConfirm}>
+            선택 확인 처리
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setSelected(new Set())}>
+            선택 해제
+          </button>
+        </div>
+      )}
 
       <div className="panel" style={{ paddingTop: '6px' }}>
         <table>
           <thead>
             <tr>
+              {!done && (
+                <th style={{ width: '32px' }}>
+                  <input
+                    type="checkbox"
+                    checked={session.results.length > 0 && session.results.every((r) => selected.has(r.assetId))}
+                    onChange={toggleSelectAll}
+                    aria-label="전체 선택"
+                  />
+                </th>
+              )}
               <th>자산번호</th>
               <th>품목</th>
-              <th>브랜드</th>
+              <th className="hide-mobile">브랜드</th>
               <th>모델명</th>
               <th>상태</th>
-              <th>비고</th>
+              <th className="hide-mobile">비고</th>
               {!done && <th style={{ width: '90px' }} />}
             </tr>
           </thead>
           <tbody>
             {session.results.map((r) => (
               <tr key={r.assetId}>
+                {!done && (
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.assetId)}
+                      onChange={() => toggleSelect(r.assetId)}
+                      aria-label={`${r.assetId} 선택`}
+                    />
+                  </td>
+                )}
                 <td>
                   <span className="asset-id">{r.assetId}</span>
                 </td>
                 <td>{r.category}</td>
-                <td>{r.brand}</td>
+                <td className="hide-mobile">{r.brand}</td>
                 <td>{r.model}</td>
                 <td>
                   <span
@@ -161,7 +243,7 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
                     {STATUS_LABEL[r.status]}
                   </span>
                 </td>
-                <td style={{ fontSize: '12px', color: 'var(--ink-500)' }}>{r.note || '-'}</td>
+                <td className="hide-mobile" style={{ fontSize: '12px', color: 'var(--ink-500)' }}>{r.note || '-'}</td>
                 {!done && (
                   <td>
                     <button type="button" className="chip" disabled={pending} onClick={() => toggleItem(r.assetId, r.status)}>
@@ -173,7 +255,7 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
             ))}
             {session.results.length === 0 && (
               <tr>
-                <td colSpan={done ? 6 : 7} className="empty-state">
+                <td colSpan={done ? 6 : 8} className="empty-state">
                   <div>📋</div>이 위치에 전산상 등록된 자산이 없어요.
                 </td>
               </tr>

@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { ocrScanConfirmFormImage, ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
 import { CONFIRM_FORM_TABS, type ConfirmFormTab } from '@/lib/confirmForm';
 import type { DispatchEntry } from '@/lib/dispatch';
+import { resizeImageFile } from '@/lib/imageResize';
 import type { WithdrawalFormFields, WithdrawalFormItem } from '@/lib/ocr';
 import { CATEGORIES } from '@/lib/types';
 
@@ -11,19 +12,6 @@ const PC_ITEMS = ['모니터', '데스크탑', '노트북'];
 
 const BLANK_FIELDS: WithdrawalFormFields = { companyName: '', date: '', requester: '', reason: '', items: [] };
 const BLANK_ITEM: WithdrawalFormItem = { category: CATEGORIES[0], model: '', serialNumber: '', assetId: '' };
-
-function readFileAsBase64(file: File): Promise<{ base64: string; mediaType: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const comma = result.indexOf(',');
-      resolve({ base64: result.slice(comma + 1), mediaType: file.type || 'image/jpeg' });
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 export default function ConfirmFormPage({ initialEntries: entries }: { initialEntries: DispatchEntry[] }) {
   const [tab, setTab] = useState<ConfirmFormTab>('철수');
@@ -44,7 +32,7 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
   async function scanFile(file: File) {
     setScanning(true);
     try {
-      const { base64, mediaType } = await readFileAsBase64(file);
+      const { base64, mediaType } = await resizeImageFile(file);
       setImagePreview(`data:${mediaType};base64,${base64}`);
       const result = await ocrScanConfirmFormImage(base64, mediaType);
       if (!result.ok) {

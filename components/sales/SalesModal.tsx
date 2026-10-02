@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ocrExtractSaleInfo } from '@/app/sales/actions';
 import { normalizeWonInput } from '@/lib/currency';
+import { resizeImageFile } from '@/lib/imageResize';
 import type { SaleEntry, SaleInput } from '@/lib/sales';
 
 const BLANK: SaleInput = {
@@ -25,19 +26,6 @@ type Props = {
   onClose: () => void;
   onSave: (entry: SaleInput) => void;
 };
-
-function readFileAsBase64(file: File): Promise<{ base64: string; mediaType: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string; // "data:image/jpeg;base64,AAAA..."
-      const comma = result.indexOf(',');
-      resolve({ base64: result.slice(comma + 1), mediaType: file.type || 'image/jpeg' });
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 export default function SalesModal({ open, editing, pending, onClose, onSave }: Props) {
   const [form, setForm] = useState<SaleInput>(BLANK);
@@ -65,7 +53,7 @@ export default function SalesModal({ open, editing, pending, onClose, onSave }: 
     setOcrPending(true);
     setOcrError('');
     try {
-      const { base64, mediaType } = await readFileAsBase64(file);
+      const { base64, mediaType } = await resizeImageFile(file);
       const result = await ocrExtractSaleInfo(base64, mediaType);
       if (!result.ok) {
         setOcrError(result.error);

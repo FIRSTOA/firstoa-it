@@ -425,4 +425,5 @@ tbody tr:hover{background:var(--indigo-50);}
   .topbar{gap:10px;}
   .hr-pill{padding:7px 9px;}
   .panel{overflow-x:auto;}
+  .hide-mobile{display:none;}
 }
