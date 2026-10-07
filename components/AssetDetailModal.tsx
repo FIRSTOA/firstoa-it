@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { listAssetMovements, logAssetNote, type AssetNoteEntry } from '@/app/actions';
 import { parseHistoryEntries } from '@/lib/inventory/history';
 import type { Asset } from '@/lib/types';
 
@@ -12,6 +14,21 @@ type Props = {
   onCancelReservation: (item: Asset) => void;
   onPrint: (items: Asset[]) => void;
 };
+
+function formatDateTime(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
 
 function Field({ label, value }: { label: string; value: string | undefined }) {
   return (
@@ -31,6 +48,42 @@ export default function AssetDetailModal({
   onCancelReservation,
   onPrint,
 }: Props) {
+  const [movements, setMovements] = useState<AssetNoteEntry[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
+  const [noteError, setNoteError] = useState('');
+
+  const assetId = item?.assetId ?? '';
+  const category = item?.category ?? '';
+
+  useEffect(() => {
+    if (!open || !assetId) {
+      setMovements([]);
+      return;
+    }
+    let cancelled = false;
+    listAssetMovements(assetId).then((rows) => {
+      if (!cancelled) setMovements(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, assetId]);
+
+  async function handleAddNote() {
+    if (!noteText.trim()) return;
+    setAddingNote(true);
+    setNoteError('');
+    const result = await logAssetNote(assetId, category, noteText.trim());
+    if (!result.ok) {
+      setNoteError(result.error);
+    } else {
+      setNoteText('');
+      setMovements(await listAssetMovements(assetId));
+    }
+    setAddingNote(false);
+  }
+
   if (!item) return null;
 
   const historyEntries = parseHistoryEntries(item.history);
@@ -106,6 +159,30 @@ export default function AssetDetailModal({
         ) : (
           <div className="detail-empty">이력이 없어요.</div>
         )}
+
+        <div className="detail-section-title">작업 이력(앱 기록) — 신규등록/위치변경/수리/파손 메모</div>
+        {movements.length > 0 ? (
+          movements.map((m) => (
+            <div key={m.id} className="detail-history-entry">
+              <span style={{ color: 'var(--ink-400)', marginRight: '6px' }}>{formatDateTime(m.movedAt)}</span>
+              {m.memo || (m.fromLocation || m.toLocation ? `${m.fromLocation || '(신규)'} → ${m.toLocation || '(없음)'}` : '-')}
+            </div>
+          ))
+        ) : (
+          <div className="detail-empty">기록이 없어요.</div>
+        )}
+        <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+          <input
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            placeholder="예: 액정 파손 발견, 상세 증상/위치"
+            style={{ flex: 1 }}
+          />
+          <button type="button" className="btn btn-ghost" disabled={addingNote || !noteText.trim()} onClick={handleAddNote}>
+            {addingNote ? '저장 중…' : '+ 메모 추가'}
+          </button>
+        </div>
+        {noteError && <div style={{ fontSize: '12px', color: 'var(--red-600)', marginTop: '4px' }}>{noteError}</div>}
 
         <div className="detail-section-title">AS접수 이력</div>
         <div className="detail-empty">AS접수 이력 기능은 아직 없어요.</div>

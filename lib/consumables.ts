@@ -32,6 +32,24 @@ export const BLANK_CONSUMABLE: ConsumableInput = {
   internetPrice: '',
 };
 
+/** "₩ 18,480"처럼 원화 기호/콤마/공백이 섞인 값에서 숫자만 뽑습니다(통계용 엄격 파싱과 달리
+ * 여기선 마진 계산용으로 쓰기 좋게 느슨하게 받습니다). */
+function parsePriceLoose(raw: string): number | null {
+  const digits = raw.replace(/[^\d.]/g, '');
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** 마진 = (판매단가 - 구매단가) / 구매단가 * 100, "26.08%" 형식. 둘 다 숫자로 못 읽으면 빈 문자열. */
+export function computeMarginPercent(purchasePrice: string, salePrice: string): string {
+  const buy = parsePriceLoose(purchasePrice);
+  const sell = parsePriceLoose(salePrice);
+  if (buy === null || sell === null) return '';
+  const margin = ((sell - buy) / buy) * 100;
+  return `${margin.toFixed(2)}%`;
+}
+
 export function filterConsumables(items: ConsumableItem[], searchTerm: string): ConsumableItem[] {
   const term = searchTerm.trim().toLowerCase();
   if (!term) return items;

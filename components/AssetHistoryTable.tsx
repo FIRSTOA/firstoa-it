@@ -64,10 +64,12 @@ export default function AssetHistoryTable({ movements }: Props) {
                 </td>
                 <td style={{ fontSize: '12px', color: 'var(--ink-500)' }}>{formatDateTime(m.movedAt)}</td>
                 <td>
-                  {m.fromLocation || '(신규)'} → {m.toLocation || '(없음)'}
+                  {m.fromLocation || m.toLocation
+                    ? `${m.fromLocation || '(신규)'} → ${m.toLocation || '(없음)'}`
+                    : '-'}
                 </td>
                 <td>
-                  {m.fromStatus || '-'} → {m.toStatus || '-'}
+                  {m.fromStatus || m.toStatus ? `${m.fromStatus || '-'} → ${m.toStatus || '-'}` : '-'}
                 </td>
                 <td>{m.actor || '-'}</td>
                 <td>{m.memo || '-'}</td>

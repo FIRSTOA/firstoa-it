@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BLANK_CONSUMABLE, type ConsumableInput, type ConsumableItem } from '@/lib/consumables';
+import { BLANK_CONSUMABLE, computeMarginPercent, type ConsumableInput, type ConsumableItem } from '@/lib/consumables';
 
 type Props = {
   open: boolean;
@@ -20,6 +20,12 @@ export default function ConsumableModal({ open, editing, pending, onClose, onSav
 
   const set = <K extends keyof ConsumableInput>(key: K, value: ConsumableInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  // 구매단가/판매단가 중 하나를 고치고 나가면 마진(%)을 자동으로 다시 계산해서 채웁니다 —
+  // 직접 적어둔 값이 있어도 둘 중 하나가 바뀌면 최신 값과 안 맞을 수 있어서 덮어씁니다.
+  function recomputeMargin(next: ConsumableInput) {
+    setForm({ ...next, margin: computeMarginPercent(next.purchasePrice, next.salePrice) });
+  }
 
   function handleSave() {
     onSave({
@@ -78,12 +84,18 @@ export default function ConsumableModal({ open, editing, pending, onClose, onSav
             <input
               value={form.purchasePrice}
               onChange={(e) => set('purchasePrice', e.target.value)}
+              onBlur={() => recomputeMargin(form)}
               placeholder="예: ₩ 18,480"
             />
           </div>
           <div className="form-field">
             <label>판매단가</label>
-            <input value={form.salePrice} onChange={(e) => set('salePrice', e.target.value)} placeholder="예: ₩ 25,000" />
+            <input
+              value={form.salePrice}
+              onChange={(e) => set('salePrice', e.target.value)}
+              onBlur={() => recomputeMargin(form)}
+              placeholder="예: ₩ 25,000"
+            />
           </div>
           <div className="form-field">
             <label>마진</label>

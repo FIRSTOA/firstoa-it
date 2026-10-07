@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { type ConsumableInput, type ConsumableItem } from '@/lib/consumables';
+import { computeMarginPercent, type ConsumableInput, type ConsumableItem } from '@/lib/consumables';
 
 function toInput(item: ConsumableItem): ConsumableInput {
   const { rowNumber, ...input } = item;
@@ -47,9 +47,15 @@ function ConsumableRow({ item, disabled, selected, onToggleSelect, onInlineSave,
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  function handleBlur() {
-    if (isSame(form, toInput(item))) return;
-    onInlineSave(item.rowNumber, form);
+  function handleBlur(key: keyof ConsumableInput) {
+    // 구매단가/판매단가를 고치고 나가면 마진(%)도 같이 다시 계산해서 저장합니다.
+    const next =
+      key === 'purchasePrice' || key === 'salePrice'
+        ? { ...form, margin: computeMarginPercent(form.purchasePrice, form.salePrice) }
+        : form;
+    if (next !== form) setForm(next);
+    if (isSame(next, toInput(item))) return;
+    onInlineSave(item.rowNumber, next);
   }
 
   return (
@@ -68,7 +74,7 @@ function ConsumableRow({ item, disabled, selected, onToggleSelect, onInlineSave,
             className="inline-cell-input"
             value={form[key]}
             onChange={(e) => set(key, e.target.value)}
-            onBlur={handleBlur}
+            onBlur={() => handleBlur(key)}
             disabled={disabled}
           />
         </td>

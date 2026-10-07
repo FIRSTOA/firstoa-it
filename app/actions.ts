@@ -11,7 +11,7 @@ import {
   updateAssetInSheet,
 } from '@/lib/inventory/sheets';
 import { lookupRentalByAssetId } from '@/lib/rentals/server';
-import { ASSETS_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
+import { ASSET_MOVEMENTS_TABLE, ASSETS_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
 import { seedData } from '@/lib/seed';
 import { assetToRow, type Asset } from '@/lib/types';
 
@@ -198,6 +198,67 @@ export async function requestRepair(asset: Asset, repairVendor: string): Promise
   }
 
   revalidatePath('/receiving');
+  return { ok: true };
+}
+
+/**
+ * 자산 상세 팝업의 "메모 추가" — 파손/분실 같은, 위치·상태 변경 없이 그냥 기록만 남기고
+ * 싶은 내용을 자산 이력(/asset-history)에 남깁니다. 새 테이블을 만들지 않고 기존
+ * asset_movements를 그대로 재사용합니다 — from/to가 전부 비어있는 행은 "위치 이동" 없이
+ * 순수 메모 한 줄로 취급됩니다(AssetHistoryTable이 "(신규) → (없음)"처럼 보여주는 대신
+ * memo만 읽도록 이미 메모 우선으로 표시함).
+ */
+export type AssetNoteEntry = { id: string; movedAt: string; memo: string; fromLocation: string | null; toLocation: string | null };
+
+/**
+ * 자산 상세 팝업의 "작업 이력(앱 기록)" — asset_movements를 자산번호로 조회합니다. 구글시트
+ * 비고(이동/작업 이력 섹션, parseHistoryEntries)는 과거부터 수기로 적어온 원문이고, 이쪽은
+ * 이 앱이 신규등록/위치수정/수리요청/메모 때마다 자동으로 쌓은 구조화된 기록이라 따로
+ * 보여줍니다 — 상세 팝업을 열 때만 조회해서(목록엔 전체 Asset 데이터만 있고 이 로그는 없음)
+ * 평소 재고 목록 로딩은 그대로 가볍게 유지합니다.
+ */
+export async function listAssetMovements(assetId: string): Promise<AssetNoteEntry[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from(ASSET_MOVEMENTS_TABLE)
+    .select('id,moved_at,memo,from_location,to_location')
+    .eq('asset_number', assetId)
+    .order('moved_at', { ascending: false })
+    .limit(50);
+  if (error) {
+    console.error('[actions] listAssetMovements 실패:', error);
+    return [];
+  }
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    movedAt: row.moved_at as string,
+    memo: row.memo as string,
+    fromLocation: row.from_location as string | null,
+    toLocation: row.to_location as string | null,
+  }));
+}
+
+export async function logAssetNote(assetId: string, category: string, note: string): Promise<ActionResult> {
+  const trimmed = note.trim();
+  if (!trimmed) return { ok: false, error: '내용을 입력해주세요.' };
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(ASSET_MOVEMENTS_TABLE).insert({
+    asset_number: assetId,
+    category,
+    from_location: null,
+    to_location: null,
+    from_status: null,
+    to_status: null,
+    actor: '',
+    memo: trimmed,
+  });
+  if (error) {
+    console.error('[actions] logAssetNote 실패:', error);
+    return { ok: false, error: `메모 저장에 실패했어요: ${error.message}` };
+  }
+
+  revalidatePath('/asset-history');
   return { ok: true };
 }
 
