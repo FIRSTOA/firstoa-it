@@ -1,9 +1,17 @@
 'use client';
 
+import { useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
-import { formatKstDateTime, stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
+import {
+  formatDateTabLabel,
+  formatKstDateTime,
+  stocktakeSummary,
+  toKstDateKey,
+  type StocktakeSession,
+} from '@/lib/stocktake';
 import { deleteStocktakeSession, startStocktake } from '@/app/stocktake/actions';
+
+const STARTED_BY_KEY = 'firstoa_stocktake_started_by';
 
 export default function StocktakeListPage({
   sessions,
@@ -17,11 +25,33 @@ export default function StocktakeListPage({
   const [location, setLocation] = useState('');
   const [startedBy, setStartedBy] = useState('');
   const [error, setError] = useState('');
+  const [dateFilter, setDateFilter] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const rememberedOnOpen = useRef(false);
+
+  const dateTabs = useMemo(() => {
+    const keys = Array.from(new Set(sessions.map((s) => toKstDateKey(s.startedAt))));
+    return keys.sort((a, b) => b.localeCompare(a));
+  }, [sessions]);
+
+  const visibleSessions = dateFilter ? sessions.filter((s) => toKstDateKey(s.startedAt) === dateFilter) : sessions;
+
+  function openModal() {
+    if (!rememberedOnOpen.current) {
+      rememberedOnOpen.current = true;
+      try {
+        const saved = localStorage.getItem(STARTED_BY_KEY);
+        if (saved) setStartedBy(saved);
+      } catch {
+        // 프라이빗 모드 등으로 localStorage를 못 쓰면 그냥 빈 칸으로 둡니다.
+      }
+    }
+    setOpen(true);
+  }
 
   function handleStart() {
     if (!location.trim()) {
-      setError('위치를 입력해주세요.');
+      setError('위치를 선택해주세요.');
       return;
     }
     setError('');
@@ -30,6 +60,11 @@ export default function StocktakeListPage({
       if (!result.ok) {
         setError(result.error);
         return;
+      }
+      try {
+        localStorage.setItem(STARTED_BY_KEY, startedBy.trim());
+      } catch {
+        // 무시 — 다음에 또 직접 입력하면 됨
       }
       router.push(`/stocktake/${result.id}`);
     });
@@ -49,11 +84,29 @@ export default function StocktakeListPage({
           총 {sessions.length}건
         </div>
         <div className="actions">
-          <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>
+          <button type="button" className="btn btn-primary" onClick={openModal}>
             ＋ 새 조사 시작
           </button>
         </div>
       </div>
+
+      {dateTabs.length > 1 && (
+        <div className="chip-group" style={{ marginBottom: '12px' }}>
+          <button type="button" className={`chip${!dateFilter ? ' active' : ''}`} onClick={() => setDateFilter(null)}>
+            전체
+          </button>
+          {dateTabs.map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={`chip${dateFilter === key ? ' active' : ''}`}
+              onClick={() => setDateFilter(dateFilter === key ? null : key)}
+            >
+              {formatDateTabLabel(key)}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="panel" style={{ paddingTop: '6px' }}>
         <table>
@@ -62,14 +115,13 @@ export default function StocktakeListPage({
               <th className="hide-mobile">순번</th>
               <th>위치</th>
               <th>상태</th>
-              <th className="hide-mobile">담당자</th>
-              <th className="hide-mobile">시작일시</th>
+              <th>담당자·시작일시</th>
               <th>확인 현황</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {sessions.map((s) => {
+            {visibleSessions.map((s) => {
               const sum = stocktakeSummary(s.results);
               return (
                 <tr key={s.id}>
@@ -80,8 +132,10 @@ export default function StocktakeListPage({
                       {s.status}
                     </span>
                   </td>
-                  <td className="hide-mobile">{s.startedBy || '-'}</td>
-                  <td className="hide-mobile" style={{ fontSize: '12px' }}>{formatKstDateTime(s.startedAt)}</td>
+                  <td style={{ fontSize: '12px' }}>
+                    <div>{s.startedBy || '-'}</div>
+                    <div style={{ color: 'var(--ink-400)' }}>{formatKstDateTime(s.startedAt)}</div>
+                  </td>
                   <td style={{ fontSize: '12px' }}>
                     확인 {sum.confirmed} / 전체 {sum.total}
                     {sum.unexpected > 0 && <span style={{ color: 'var(--red-600)' }}> · 목록외 {sum.unexpected}</span>}
@@ -105,11 +159,11 @@ export default function StocktakeListPage({
                 </tr>
               );
             })}
-            {sessions.length === 0 && (
+            {visibleSessions.length === 0 && (
               <tr>
-                <td colSpan={7} className="empty-state">
+                <td colSpan={6} className="empty-state">
                   <div>📋</div>
-                  아직 조사 기록이 없어요.
+                  {sessions.length === 0 ? '아직 조사 기록이 없어요.' : '이 날짜엔 조사 기록이 없어요.'}
                 </td>
               </tr>
             )}
@@ -120,21 +174,18 @@ export default function StocktakeListPage({
       <div className={`modal-overlay${open ? ' open' : ''}`} onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
         <div className="modal" style={{ width: '420px' }}>
           <h2>새 실재고 조사 시작</h2>
-          <div className="sub">위치를 입력하면 그 위치에 전산상 있어야 할 자산 목록으로 조사를 시작해요.</div>
+          <div className="sub">위치를 고르면 그 위치에 전산상 있어야 할 자산 목록으로 조사를 시작해요.</div>
           <div className="form-grid">
             <div className="form-field full">
               <label>위치 *</label>
-              <input
-                list="stocktake-locations"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="예: G4"
-              />
-              <datalist id="stocktake-locations">
+              <select value={location} onChange={(e) => setLocation(e.target.value)}>
+                <option value="">위치 선택</option>
                 {locations.map((loc) => (
-                  <option key={loc} value={loc} />
+                  <option key={loc} value={loc}>
+                    {loc}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </div>
             <div className="form-field full">
               <label>담당자</label>

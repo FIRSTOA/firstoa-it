@@ -5,7 +5,9 @@ import {
   addUnexpectedAssetToSession,
   bulkUpdateStocktakeItems,
   completeStocktake,
+  lookupUnexpectedAsset,
   updateStocktakeItem,
+  type UnexpectedAssetInfo,
 } from '@/app/stocktake/actions';
 import { resizeImageFile } from '@/lib/imageResize';
 import { scanLabelImage } from '@/lib/ocrClient';
@@ -23,7 +25,7 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmingComplete, setConfirmingComplete] = useState(false);
-  const [unexpectedAssetId, setUnexpectedAssetId] = useState<string | null>(null);
+  const [unexpected, setUnexpected] = useState<UnexpectedAssetInfo | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sum = stocktakeSummary(session.results);
@@ -66,8 +68,13 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
       } else {
         // 카톡 인앱 브라우저 등에서 window.confirm()이 아예 반응 없이 무시되는 경우가 있어서
         // (버튼을 눌러도 "아무 반응 없음"처럼 보임), 네이티브 다이얼로그 대신 화면 안에서 직접
-        // 예/아니오를 받습니다.
-        setUnexpectedAssetId(assetId);
+        // 예/아니오를 받습니다. 어느 위치 자산인지 먼저 조회해서 같이 보여줍니다.
+        const lookup = await lookupUnexpectedAsset(assetId);
+        if (!lookup.ok) {
+          showToast(lookup.error);
+        } else {
+          setUnexpected(lookup.info);
+        }
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : '사진을 읽는 중 오류가 났어요.');
@@ -111,13 +118,19 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
     });
   }
 
-  function handleAddUnexpected() {
-    const assetId = unexpectedAssetId;
-    if (!assetId) return;
-    setUnexpectedAssetId(null);
+  function handleAddUnexpected(relocate: boolean) {
+    const info = unexpected;
+    if (!info) return;
+    setUnexpected(null);
     startTransition(async () => {
-      const added = await addUnexpectedAssetToSession(session.id, assetId);
-      showToast(added.ok ? `${assetId}를 목록외 발견으로 추가했어요.` : added.error);
+      const added = await addUnexpectedAssetToSession(session.id, info.assetId, relocate ? session.location : undefined);
+      showToast(
+        added.ok
+          ? relocate
+            ? `${info.assetId}를 "${session.location}" 위치로 강제변경하고 기록했어요.`
+            : `${info.assetId}를 목록외 발견으로 추가했어요.`
+          : added.error,
+      );
     });
   }
 
@@ -166,15 +179,20 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
         )}
       </div>
 
-      {unexpectedAssetId && (
-        <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', borderColor: 'var(--red-100)' }}>
+      {unexpected && (
+        <div className="panel" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginBottom: '12px', borderColor: 'var(--red-100)' }}>
           <span style={{ fontSize: '13px' }}>
-            <b>&quot;{unexpectedAssetId}&quot;</b>는 이 위치 목록에 없는 자산번호예요. 그래도 여기서 발견된 걸로 추가할까요?
+            <b>&quot;{unexpected.assetId}&quot;</b>({unexpected.brand} {unexpected.model})는 전산상{' '}
+            <b>{unexpected.location || '위치 미상'}</b> 위치에 있는 장비예요. 지금 조사 중인 &quot;{session.location}
+            &quot;(으)로 강제변경할까요?
           </span>
-          <button type="button" className="btn btn-primary" disabled={pending} onClick={handleAddUnexpected}>
-            추가
+          <button type="button" className="btn btn-primary" disabled={pending} onClick={() => handleAddUnexpected(true)}>
+            강제변경
           </button>
-          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setUnexpectedAssetId(null)}>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => handleAddUnexpected(false)}>
+            위치는 안 바꾸고 기록만
+          </button>
+          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setUnexpected(null)}>
             무시
           </button>
         </div>

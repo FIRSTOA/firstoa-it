@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { updateAsset } from '@/app/actions';
 import { DATA_SOURCE } from '@/lib/dataSource';
 import { getAssetFromSheets, listAllAssets } from '@/lib/inventory/sheets';
 import {
@@ -124,7 +125,42 @@ export async function bulkUpdateStocktakeItems(
   return { ok: true };
 }
 
-export async function addUnexpectedAssetToSession(sessionId: string, assetId: string): Promise<ActionResult> {
+export type UnexpectedAssetInfo = {
+  assetId: string;
+  category: string;
+  model: string;
+  brand: string;
+  location: string;
+};
+
+/**
+ * 사진 스캔으로 읽은 자산번호가 이 세션 목록에 없을 때, 실제로 전산상 어디 있는 자산인지
+ * 미리 보여주기 위한 조회입니다(확정은 addUnexpectedAssetToSession에서). "이 장비는 A3
+ * 위치에 있는 장비입니다 — 강제변경하시겠습니까?" 안내에 씁니다.
+ */
+export async function lookupUnexpectedAsset(
+  assetId: string,
+): Promise<{ ok: true; info: UnexpectedAssetInfo } | { ok: false; error: string }> {
+  const trimmed = assetId.trim();
+  if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };
+  const found = DATA_SOURCE === 'sheets' ? await getAssetFromSheets(trimmed).catch(() => null) : null;
+  if (!found) return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
+  return {
+    ok: true,
+    info: { assetId: found.assetId, category: found.category, model: found.model, brand: found.brand, location: found.location },
+  };
+}
+
+/**
+ * relocateTo를 넘기면 "강제변경" — 이 세션에 목록외발견으로 기록할 뿐 아니라, 그 자산의 실제
+ * 전산 위치도 이 세션의 위치로 고쳐씁니다(updateAsset 재사용 — 다른 값은 그대로 두고 위치만).
+ * 기본(넘기지 않음)은 기존처럼 기록만 하고 실제 재고는 건드리지 않습니다.
+ */
+export async function addUnexpectedAssetToSession(
+  sessionId: string,
+  assetId: string,
+  relocateTo?: string,
+): Promise<ActionResult> {
   const trimmed = assetId.trim();
   if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };
 
@@ -140,6 +176,13 @@ export async function addUnexpectedAssetToSession(sessionId: string, assetId: st
     return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
   }
 
+  if (relocateTo && relocateTo.trim() && relocateTo.trim() !== found.location.trim()) {
+    const relocateResult = await updateAsset(found.assetId, { ...found, location: relocateTo.trim() });
+    if (!relocateResult.ok) {
+      return { ok: false, error: `위치 강제변경에 실패했어요: ${relocateResult.error}` };
+    }
+  }
+
   const newItem: StocktakeItem = {
     assetId: found.assetId,
     category: found.category,
@@ -147,7 +190,7 @@ export async function addUnexpectedAssetToSession(sessionId: string, assetId: st
     brand: found.brand,
     status: '목록외발견',
     scannedAt: new Date().toISOString(),
-    note: `원래 위치: ${found.location || '-'}`,
+    note: relocateTo ? `원래 위치: ${found.location || '-'} → ${relocateTo}로 강제변경함` : `원래 위치: ${found.location || '-'}`,
   };
 
   const supabase = createAdminClient();

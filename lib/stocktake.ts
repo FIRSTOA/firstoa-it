@@ -71,6 +71,28 @@ export function buildInitialResults(assetsAtLocation: Asset[]): StocktakeItem[] 
  * 클라이언트(브라우저 로컬 타임존/로케일)가 서로 다른 문자열을 만들어 React 하이드레이션
  * 불일치(#418)를 일으킬 수 있어서, 타임존에 의존하지 않는 수동 포맷을 씁니다.
  */
+/** KST 기준 YYYY-MM-DD만 — 날짜별 탭 묶음 키로 씁니다. */
+export function toKstDateKey(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** 날짜 탭 라벨 — 오늘/어제는 글자로, 그 외는 "10/7(화)" 형식으로. */
+export function formatDateTabLabel(dateKey: string): string {
+  const todayKey = toKstDateKey(new Date().toISOString());
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = toKstDateKey(yesterday.toISOString());
+  if (dateKey === todayKey) return '오늘';
+  if (dateKey === yesterdayKey) return '어제';
+  const [, m, d] = dateKey.split('-').map(Number);
+  const weekday = ['일', '월', '화', '수', '목', '금', '토'][new Date(dateKey).getDay()];
+  return `${m}/${d}(${weekday})`;
+}
+
 export function formatKstDateTime(iso: string): string {
   const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
   const y = d.getUTCFullYear();
