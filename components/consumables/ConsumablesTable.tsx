@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { lookupInternetPrice } from '@/app/consumables/actions';
 import { computeMarginPercent, type ConsumableInput, type ConsumableItem } from '@/lib/consumables';
 
 function toInput(item: ConsumableItem): ConsumableInput {
@@ -38,10 +39,29 @@ const FIELDS: (keyof ConsumableInput)[] = [
 
 function ConsumableRow({ item, disabled, selected, onToggleSelect, onInlineSave, onEdit, onDelete }: RowProps) {
   const [form, setForm] = useState<ConsumableInput>(() => toInput(item));
+  const [priceSearching, setPriceSearching] = useState(false);
+  const [priceSearchError, setPriceSearchError] = useState('');
 
   useEffect(() => {
     setForm(toInput(item));
   }, [item]);
+
+  async function handleLookupPrice() {
+    setPriceSearching(true);
+    setPriceSearchError('');
+    try {
+      const result = await lookupInternetPrice(form.item, form.model, form.manufacturer);
+      if (!result.ok) {
+        setPriceSearchError(result.error);
+        return;
+      }
+      const next = { ...form, internetPrice: result.source ? `${result.price} (${result.source})` : result.price };
+      setForm(next);
+      onInlineSave(item.rowNumber, next);
+    } finally {
+      setPriceSearching(false);
+    }
+  }
 
   function set(key: keyof ConsumableInput, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -70,13 +90,39 @@ function ConsumableRow({ item, disabled, selected, onToggleSelect, onInlineSave,
       </td>
       {FIELDS.map((key) => (
         <td key={key}>
-          <input
-            className="inline-cell-input"
-            value={form[key]}
-            onChange={(e) => set(key, e.target.value)}
-            onBlur={() => handleBlur(key)}
-            disabled={disabled}
-          />
+          {key === 'internetPrice' ? (
+            <div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <input
+                  className="inline-cell-input"
+                  value={form[key]}
+                  onChange={(e) => set(key, e.target.value)}
+                  onBlur={() => handleBlur(key)}
+                  disabled={disabled}
+                />
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title="품목조회"
+                  disabled={disabled || priceSearching}
+                  onClick={handleLookupPrice}
+                >
+                  {priceSearching ? '…' : '🔍'}
+                </button>
+              </div>
+              {priceSearchError && (
+                <div style={{ fontSize: '10.5px', color: 'var(--red-600)' }}>{priceSearchError}</div>
+              )}
+            </div>
+          ) : (
+            <input
+              className="inline-cell-input"
+              value={form[key]}
+              onChange={(e) => set(key, e.target.value)}
+              onBlur={() => handleBlur(key)}
+              disabled={disabled}
+            />
+          )}
         </td>
       ))}
       <td>

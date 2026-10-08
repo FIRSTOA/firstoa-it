@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { lookupInternetPrice } from '@/app/consumables/actions';
 import { BLANK_CONSUMABLE, computeMarginPercent, type ConsumableInput, type ConsumableItem } from '@/lib/consumables';
 
 type Props = {
@@ -13,10 +14,30 @@ type Props = {
 
 export default function ConsumableModal({ open, editing, pending, onClose, onSave }: Props) {
   const [form, setForm] = useState<ConsumableInput>(BLANK_CONSUMABLE);
+  const [priceSearching, setPriceSearching] = useState(false);
+  const [priceSearchError, setPriceSearchError] = useState('');
 
   useEffect(() => {
-    if (open) setForm(editing ?? BLANK_CONSUMABLE);
+    if (open) {
+      setForm(editing ?? BLANK_CONSUMABLE);
+      setPriceSearchError('');
+    }
   }, [open, editing]);
+
+  async function handleLookupPrice() {
+    setPriceSearching(true);
+    setPriceSearchError('');
+    try {
+      const result = await lookupInternetPrice(form.item, form.model, form.manufacturer);
+      if (!result.ok) {
+        setPriceSearchError(result.error);
+        return;
+      }
+      set('internetPrice', result.source ? `${result.price} (${result.source})` : result.price);
+    } finally {
+      setPriceSearching(false);
+    }
+  }
 
   const set = <K extends keyof ConsumableInput>(key: K, value: ConsumableInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -103,11 +124,20 @@ export default function ConsumableModal({ open, editing, pending, onClose, onSav
           </div>
           <div className="form-field">
             <label>인터넷가격</label>
-            <input
-              value={form.internetPrice}
-              onChange={(e) => set('internetPrice', e.target.value)}
-              placeholder="예: ₩ 22,000"
-            />
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input
+                value={form.internetPrice}
+                onChange={(e) => set('internetPrice', e.target.value)}
+                placeholder="예: ₩ 22,000"
+                style={{ flex: 1 }}
+              />
+              <button type="button" className="btn btn-ghost" disabled={priceSearching} onClick={handleLookupPrice}>
+                {priceSearching ? '조회 중…' : '🔍 품목조회'}
+              </button>
+            </div>
+            {priceSearchError && (
+              <div style={{ fontSize: '11px', color: 'var(--red-600)', marginTop: '4px' }}>{priceSearchError}</div>
+            )}
           </div>
         </div>
         <div className="modal-footer">

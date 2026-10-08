@@ -9,6 +9,7 @@ import {
   updateConsumableInSheet,
   updateConsumablesInSheet,
 } from '@/lib/inventory/consumablesSheet';
+import { isPriceSearchConfigured, searchInternetPrice } from '@/lib/priceSearch';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -76,6 +77,28 @@ export async function deleteConsumables(rowNumbers: number[]): Promise<ActionRes
 
   revalidatePath('/consumables');
   return { ok: true };
+}
+
+export type PriceSearchActionResult =
+  | { ok: true; price: string; source: string }
+  | { ok: false; error: string };
+
+/** "품목조회" 버튼 — 인터넷가격을 실시간으로 찾아 채웁니다(lib/priceSearch.ts). */
+export async function lookupInternetPrice(item: string, model: string, manufacturer: string): Promise<PriceSearchActionResult> {
+  if (!isPriceSearchConfigured()) {
+    return { ok: false, error: '가격 조회를 쓰려면 관리자가 ANTHROPIC_API_KEY를 설정해야 해요.' };
+  }
+  if (!item.trim() && !model.trim()) {
+    return { ok: false, error: '품목이나 모델명을 먼저 입력해주세요.' };
+  }
+  try {
+    const result = await searchInternetPrice(item, model, manufacturer);
+    if (!result.price) return { ok: false, error: '인터넷에서 가격을 찾지 못했어요.' };
+    return { ok: true, price: result.price, source: result.source };
+  } catch (err) {
+    console.error('[consumables] lookupInternetPrice 실패:', err);
+    return { ok: false, error: err instanceof Error ? err.message : '가격 조회에 실패했어요.' };
+  }
 }
 
 export async function updateConsumablesBulk(
