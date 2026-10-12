@@ -1,3 +1,4 @@
+import { listStaffNames } from '@/app/actions';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
 import StocktakeListPage from '@/components/stocktake/StocktakeListPage';
@@ -17,9 +18,10 @@ export default async function Page() {
   }
 
   const supabase = createAdminClient();
-  const [{ data, error }, assets] = await Promise.all([
+  const [{ data, error }, assets, staffNames] = await Promise.all([
     supabase.from(STOCKTAKE_TABLE).select('*').order('seq', { ascending: false }),
     listAllAssetsUnified().catch(() => []),
+    listStaffNames(),
   ]);
 
   if (error) {
@@ -35,7 +37,7 @@ export default async function Page() {
 
   return (
     <Shell activeMenu="실재고 조사" title="📋 실재고 조사" note="위치별로 돌아보며 전산 재고와 실물을 맞춰보는 조사예요.">
-      <StocktakeListPage sessions={sessions} locations={locations} />
+      <StocktakeListPage sessions={sessions} locations={locations} staffNames={staffNames} />
     </Shell>
   );
 }

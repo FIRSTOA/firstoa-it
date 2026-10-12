@@ -9,21 +9,26 @@ import {
   toKstDateKey,
   type StocktakeSession,
 } from '@/lib/stocktake';
+import { addStaffNameIfNew } from '@/app/actions';
 import { deleteStocktakeSession, startStocktake } from '@/app/stocktake/actions';
 
 const STARTED_BY_KEY = 'firstoa_stocktake_started_by';
+const CUSTOM_OPTION = '__custom__';
 
 export default function StocktakeListPage({
   sessions,
   locations,
+  staffNames,
 }: {
   sessions: StocktakeSession[];
   locations: string[];
+  staffNames: string[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [location, setLocation] = useState('');
   const [startedBy, setStartedBy] = useState('');
+  const [customMode, setCustomMode] = useState(false);
   const [error, setError] = useState('');
   const [dateFilter, setDateFilter] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -41,7 +46,12 @@ export default function StocktakeListPage({
       rememberedOnOpen.current = true;
       try {
         const saved = localStorage.getItem(STARTED_BY_KEY);
-        if (saved) setStartedBy(saved);
+        if (saved) {
+          setStartedBy(saved);
+          // 저장된 이름이 공용 목록에 아직 없으면(다른 기기에서 막 추가했거나 동기화 전)
+          // 드롭다운에 안 보일 수 있어서 직접입력 모드로 보여줍니다.
+          if (!staffNames.includes(saved)) setCustomMode(true);
+        }
       } catch {
         // 프라이빗 모드 등으로 localStorage를 못 쓰면 그냥 빈 칸으로 둡니다.
       }
@@ -61,10 +71,15 @@ export default function StocktakeListPage({
         setError(result.error);
         return;
       }
+      const trimmedName = startedBy.trim();
       try {
-        localStorage.setItem(STARTED_BY_KEY, startedBy.trim());
+        localStorage.setItem(STARTED_BY_KEY, trimmedName);
       } catch {
         // 무시 — 다음에 또 직접 입력하면 됨
+      }
+      // 드롭다운에 없던 새 이름이면 공용 목록에 추가해서 다음부터 다른 사람 드롭다운에도 뜨게 함.
+      if (trimmedName && !staffNames.includes(trimmedName)) {
+        addStaffNameIfNew(trimmedName).catch(() => {});
       }
       router.push(`/stocktake/${result.id}`);
     });
@@ -189,7 +204,42 @@ export default function StocktakeListPage({
             </div>
             <div className="form-field full">
               <label>담당자</label>
-              <input value={startedBy} onChange={(e) => setStartedBy(e.target.value)} placeholder="예: 신동원" />
+              {customMode || staffNames.length === 0 ? (
+                <input value={startedBy} onChange={(e) => setStartedBy(e.target.value)} placeholder="이름 입력" />
+              ) : (
+                <select
+                  value={staffNames.includes(startedBy) ? startedBy : ''}
+                  onChange={(e) => {
+                    if (e.target.value === CUSTOM_OPTION) {
+                      setCustomMode(true);
+                      setStartedBy('');
+                    } else {
+                      setStartedBy(e.target.value);
+                    }
+                  }}
+                >
+                  <option value="">담당자 선택</option>
+                  {staffNames.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_OPTION}>➕ 새 이름 입력</option>
+                </select>
+              )}
+              {customMode && staffNames.length > 0 && (
+                <button
+                  type="button"
+                  className="chip"
+                  style={{ marginTop: '4px', alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    setCustomMode(false);
+                    setStartedBy('');
+                  }}
+                >
+                  목록에서 선택
+                </button>
+              )}
             </div>
           </div>
           {error && <div className="setup-alert" style={{ marginTop: '10px' }}>{error}</div>}

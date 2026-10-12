@@ -11,7 +11,13 @@ import {
   updateAssetInSheet,
 } from '@/lib/inventory/sheets';
 import { lookupRentalByAssetId } from '@/lib/rentals/server';
-import { ASSET_MOVEMENTS_TABLE, ASSETS_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
+import {
+  ASSET_MOVEMENTS_TABLE,
+  ASSETS_TABLE,
+  createAdminClient,
+  RECEIVING_TABLE,
+  STAFF_NAMES_TABLE,
+} from '@/lib/supabase/server';
 import { seedData } from '@/lib/seed';
 import { assetToRow, type Asset } from '@/lib/types';
 
@@ -335,6 +341,30 @@ export async function lookupKnownAsset(assetId: string): Promise<KnownAssetLooku
   }
 
   return { found: false };
+}
+
+/**
+ * 담당자 이름 드롭다운 — 실재고 조사 등 "담당자"를 입력받는 곳에서 공용으로 씁니다.
+ * localStorage(기기별)가 아니라 공유 테이블이라, 한 명이 새 이름을 쓰면 다음부터 모두의
+ * 드롭다운에 같이 뜹니다. 목록 자체는 작고 자주 안 바뀌니 단순하게 전체를 읽어옵니다.
+ */
+export async function listStaffNames(): Promise<string[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.from(STAFF_NAMES_TABLE).select('name').order('name');
+  if (error) {
+    console.error('[actions] listStaffNames 실패:', error);
+    return [];
+  }
+  return (data ?? []).map((r) => (r as { name: string }).name);
+}
+
+/** 드롭다운에 없는 새 이름으로 등록/조사를 시작하면 호출 — 실패해도 본 작업을 막지 않습니다. */
+export async function addStaffNameIfNew(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(STAFF_NAMES_TABLE).upsert({ name: trimmed }, { onConflict: 'name' });
+  if (error) console.error('[actions] addStaffNameIfNew 실패:', error);
 }
 
 /** 테이블을 비우고 lib/seed.ts 의 샘플 데이터로 되돌립니다. */
