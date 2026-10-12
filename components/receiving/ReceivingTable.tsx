@@ -21,11 +21,22 @@ function todayStr(): string {
 }
 
 function toInput(entry: ReceivingEntry): ReceivingInput {
-  const { id, seq, completedAt, ...input } = entry;
+  const { id, seq, completedAt, createdAt, ...input } = entry;
   void id;
   void seq;
   void completedAt;
+  void createdAt;
   return input;
+}
+
+/** KST 고정 수동 포맷 — toLocaleString은 서버/클라이언트 환경 차이로 하이드레이션 불일치를
+ * 일으킬 수 있어서(이 세션에서 실측) 타임존에 의존하지 않는 수동 포맷을 씁니다. */
+function formatKstDate(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 9 * 60 * 60 * 1000);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function isSame(a: ReceivingInput, b: ReceivingInput): boolean {
@@ -93,6 +104,7 @@ function ReceivingRow({
         />
       </td>
       <td>{entry.seq}</td>
+      <td style={{ fontSize: '12px', color: 'var(--ink-500)' }}>{formatKstDate(entry.createdAt)}</td>
       <td>
         <select
           className="inline-cell-input"
@@ -307,6 +319,7 @@ export default function ReceivingTable({
               <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="전체 선택" />
             </th>
             <th style={{ width: '50px' }}>순번</th>
+            <th style={{ width: '85px' }}>등록일</th>
             <th>유형</th>
             <th>상태</th>
             <th>품목</th>
