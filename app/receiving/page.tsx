@@ -6,6 +6,10 @@ import { rowToReceiving, type ReceivingRow } from '@/lib/receiving';
 import { createAdminClient, isSupabaseConfigured, RECEIVING_TABLE } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
+// 입고완료 처리(완료 팝업에서 호출하는 서버 액션)가 구글시트 API 콜드 캐시 상태에서 느릴 수
+// 있어서, 이 페이지에서 호출되는 서버 액션들의 실행시간 제한을 기본값보다 넉넉하게 둡니다.
+// (Server Action 파일 자체(`'use server'`)에는 maxDuration을 못 넣으므로 라우트인 여기서 설정)
+export const maxDuration = 60;
 
 export default async function Page() {
   if (!isSupabaseConfigured()) {

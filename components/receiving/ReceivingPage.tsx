@@ -2,11 +2,12 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import {
-  completeReceiving,
+  completeReceivingWithDetails,
   createReceiving,
   createReceivingBatch,
   deleteReceiving,
   updateReceiving,
+  type ActionResult,
 } from '@/app/receiving/actions';
 import {
   EMPTY_RECEIVING_FILTERS,
@@ -19,10 +20,29 @@ import BulkEditModal from './BulkEditModal';
 import PasteImportModal from './PasteImportModal';
 import PhotoBatchImportModal from './PhotoBatchImportModal';
 import PurchaseEntryModal from './PurchaseEntryModal';
+import ReceivingCompleteModal, { type CompleteUpdate } from './ReceivingCompleteModal';
 import ReceivingFilters from './ReceivingFilters';
 import ReceivingModal from './ReceivingModal';
 import ReceivingStats from './ReceivingStats';
 import ReceivingTable from './ReceivingTable';
+
+/**
+ * 여러 건을 한꺼번에 처리할 때 하나씩 순서대로 기다리면(특히 구글시트 API 호출이 끼면) 너무
+ * 느려서, limit개씩 동시에 돌립니다. 개별 호출이 실패/타임아웃나도 catch로 감싸서 나머지
+ * 항목 처리가 끊기지 않게 합니다(기존엔 for..await라 하나가 오래 걸리면 전체가 멈췄음).
+ */
+async function runWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 export default function ReceivingPage({
   entries,
@@ -40,6 +60,7 @@ export default function ReceivingPage({
   const [editing, setEditing] = useState<ReceivingEntry | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [completeTargets, setCompleteTargets] = useState<ReceivingEntry[]>([]);
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
 
@@ -121,11 +142,37 @@ export default function ReceivingPage({
     });
   }
 
+  // 입고완료 처리는 더 이상 confirm()으로 바로 처리하지 않고, 위치/자산번호/시리얼을
+  // 채우는 팝업(ReceivingCompleteModal)을 먼저 띄웁니다. 자세한 이유: 1) 이 값들이 아직 안
+  // 채워진 건이 많아서 바로 처리하면 "필수값 누락"으로 조용히 실패했었고, 2) confirm()은
+  // 카카오톡 인앱 브라우저 등에서 무시될 수 있어 이 앱 전반에서 피하는 패턴입니다.
   function handleComplete(entry: ReceivingEntry) {
-    if (!confirm(`자산번호 "${entry.assetId}"를 IT재고에 등록하고 입고완료 처리할까요?`)) return;
+    setCompleteTargets([entry]);
+  }
+
+  function handleCompleteSubmit(updates: CompleteUpdate[]) {
     startTransition(async () => {
-      const result = await completeReceiving(entry.id);
-      showToast(result.ok ? '입고완료 처리했어요. 재고에 자산이 등록됐어요.' : result.error);
+      const results = await runWithConcurrency(updates, 3, async (u): Promise<ActionResult> => {
+        try {
+          return await completeReceivingWithDetails(u.id, u);
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : '처리 중 오류가 났어요(시간 초과일 수 있어요).' };
+        }
+      });
+      let success = 0;
+      const failures: string[] = [];
+      updates.forEach((u, i) => {
+        const r = results[i];
+        if (r.ok) success++;
+        else failures.push(`${u.assetId || u.id}: ${r.error}`);
+      });
+      setCompleteTargets([]);
+      clearSelection();
+      if (failures.length === 0) {
+        showToast(`${success}건 입고완료 처리했어요. 재고에 반영됐어요.`);
+      } else {
+        showToast(`${success}건 처리, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
+      }
     });
   }
 
@@ -158,22 +205,7 @@ export default function ReceivingPage({
       showToast('선택한 건 중에 입고대기 상태가 없어요.');
       return;
     }
-    if (!confirm(`선택한 ${targets.length}건을 IT재고에 등록하고 입고완료 처리할까요?`)) return;
-    startTransition(async () => {
-      let success = 0;
-      const failures: string[] = [];
-      for (const entry of targets) {
-        const result = await completeReceiving(entry.id);
-        if (result.ok) success++;
-        else failures.push(`${entry.assetId || entry.model || entry.seq}: ${result.error}`);
-      }
-      clearSelection();
-      if (failures.length === 0) {
-        showToast(`${success}건 입고완료 처리했어요.`);
-      } else {
-        showToast(`${success}건 처리, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
-      }
-    });
+    setCompleteTargets(targets);
   }
 
   function handleBulkDelete() {
@@ -335,6 +367,15 @@ export default function ReceivingPage({
         locations={locations}
         onClose={() => setPhotoModalOpen(false)}
         onDone={showToast}
+      />
+
+      <ReceivingCompleteModal
+        open={completeTargets.length > 0}
+        entries={completeTargets}
+        locations={locations}
+        pending={pending}
+        onClose={() => setCompleteTargets([])}
+        onSubmit={handleCompleteSubmit}
       />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>

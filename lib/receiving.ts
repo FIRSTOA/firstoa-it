@@ -157,7 +157,10 @@ export function missingRequiredFields(entry: ReceivingEntry): string[] {
   if (!entry.category.trim()) missing.push('품목');
   if (!entry.brand.trim()) missing.push('브랜드');
   if (!entry.model.trim()) missing.push('모델명');
-  if (entry.category !== '기타주변기기' && !entry.assetId.trim()) missing.push('자산번호');
-  if (!entry.location.trim()) missing.push('위치');
+  // 기타주변기기는 소모성 재고라 개별 자산번호/위치 없이도 입고완료 처리할 수 있게 둡니다.
+  if (entry.category !== '기타주변기기') {
+    if (!entry.assetId.trim()) missing.push('자산번호');
+    if (!entry.location.trim()) missing.push('위치');
+  }
   return missing;
 }

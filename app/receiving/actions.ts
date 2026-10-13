@@ -156,6 +156,32 @@ export async function updateReceiving(id: string, entry: ReceivingInput): Promis
   return { ok: true };
 }
 
+/**
+ * 입고완료 처리 팝업(ReceivingCompleteModal)에서 위치/자산번호/시리얼번호를 입력받은 뒤,
+ * 그 값들을 행에 먼저 반영하고 바로 completeReceiving을 재사용합니다. 기타주변기기는
+ * 팝업에서 아예 입력을 안 받으므로 details가 빈 문자열이어도(기존 값 그대로) 괜찮습니다 —
+ * missingRequiredFields가 기타주변기기는 자산번호/위치를 요구하지 않습니다.
+ */
+export async function completeReceivingWithDetails(
+  id: string,
+  details: { location: string; assetId: string; serialNumber: string },
+): Promise<ActionResult> {
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from(RECEIVING_TABLE)
+    .update({
+      location: details.location.trim(),
+      asset_id: details.assetId.trim(),
+      serial_number: details.serialNumber.trim(),
+    })
+    .eq('id', id);
+  if (error) {
+    console.error('[receiving] completeReceivingWithDetails 업데이트 실패:', error);
+    return { ok: false, error: toMessage(error) };
+  }
+  return completeReceiving(id);
+}
+
 export async function deleteReceiving(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
   const { error } = await supabase.from(RECEIVING_TABLE).delete().eq('id', id);
