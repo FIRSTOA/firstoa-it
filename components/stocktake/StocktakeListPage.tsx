@@ -30,7 +30,10 @@ export default function StocktakeListPage({
   const [startedBy, setStartedBy] = useState('');
   const [customMode, setCustomMode] = useState(false);
   const [error, setError] = useState('');
-  const [dateFilter, setDateFilter] = useState<string | null>(null);
+  const todayKey = toKstDateKey(new Date().toISOString());
+  const [dateFilter, setDateFilter] = useState<string | null>(() =>
+    sessions.some((s) => toKstDateKey(s.startedAt) === todayKey) ? todayKey : null,
+  );
   const [pending, startTransition] = useTransition();
   const rememberedOnOpen = useRef(false);
 
@@ -40,6 +43,18 @@ export default function StocktakeListPage({
   }, [sessions]);
 
   const visibleSessions = dateFilter ? sessions.filter((s) => toKstDateKey(s.startedAt) === dateFilter) : sessions;
+
+  // 선택된 날짜(기본: 오늘) 조사 세션들을 통틀어서 아직 "미확인"인 자산을 한눈에 모아 보여줍니다.
+  // 완료된 세션/진행중인 세션 둘 다 포함 — "오늘 돌아본 곳 중 아직 못 찾은 게 뭐지?"에 바로 답하는 용도.
+  const missingItems = useMemo(
+    () =>
+      visibleSessions.flatMap((s) =>
+        s.results
+          .filter((r) => r.status === '미확인')
+          .map((r) => ({ ...r, sessionId: s.id, location: s.location })),
+      ),
+    [visibleSessions],
+  );
 
   function openModal() {
     if (!rememberedOnOpen.current) {
@@ -120,6 +135,42 @@ export default function StocktakeListPage({
               {formatDateTabLabel(key)}
             </button>
           ))}
+        </div>
+      )}
+
+      {missingItems.length > 0 && (
+        <div className="panel" style={{ marginBottom: '12px', borderColor: 'var(--red-100)' }}>
+          <div style={{ fontWeight: 700, color: 'var(--red-600)', marginBottom: '8px' }}>
+            ⚠️ {dateFilter ? formatDateTabLabel(dateFilter) : '전체 기간'} 미확인 자산 {missingItems.length}건
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {missingItems.map((item) => (
+              <button
+                key={`${item.sessionId}-${item.assetId}`}
+                type="button"
+                onClick={() => router.push(`/stocktake/${item.sessionId}`)}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  padding: '6px 8px',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: '1px solid var(--ink-100)',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  color: 'var(--ink-700)',
+                  textAlign: 'left',
+                }}
+              >
+                <span>
+                  <b>{item.location}</b> · <span className="asset-id">{item.assetId}</span> · {item.category} {item.brand}{' '}
+                  {item.model}
+                </span>
+                <span style={{ color: 'var(--ink-400)' }}>열기 →</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
