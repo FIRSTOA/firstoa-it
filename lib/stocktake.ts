@@ -103,6 +103,15 @@ export function formatKstDateTime(iso: string): string {
   return `${y}.${m}.${day} ${hh}:${mm}`;
 }
 
+/**
+ * 사진 스캔으로 뽑힌 문자열이 실제 자산번호 스티커 형식(영문 1~3글자 + 숫자 3~6자리, 예:
+ * P1388/X8744)인지 확인합니다. "A3"/"B1" 같은 선반 위치 라벨처럼 숫자가 1~2자리뿐인 짧은
+ * 토큰은 자산번호로 보지 않고 걸러내려는 목적 — 실제 자산번호는 항상 숫자 3자리 이상입니다.
+ */
+export function isLikelyAssetId(value: string): boolean {
+  return /^[A-Za-z]{1,3}\d{3,6}$/.test(value.trim());
+}
+
 export function stocktakeSummary(results: StocktakeItem[]) {
   const confirmed = results.filter((r) => r.status === '확인됨').length;
   const missing = results.filter((r) => r.status === '미확인').length;

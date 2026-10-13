@@ -11,7 +11,7 @@ import {
 } from '@/app/stocktake/actions';
 import { resizeImageFile } from '@/lib/imageResize';
 import { scanLabelImage } from '@/lib/ocrClient';
-import { stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
+import { isLikelyAssetId, stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
 import { CATEGORIES } from '@/lib/types';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -105,16 +105,23 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
       try {
         const { base64, mediaType } = await resizeImageFile(files[i]);
         const result = await scanLabelImage(base64, mediaType);
-        const assetId = result.ok ? result.fields.assetId : '';
+        const rawAssetId = result.ok ? result.fields.assetId : '';
+        // 위치 라벨("A3" 등)이나 다른 텍스트를 잘못 읽은 경우 걸러냅니다 — 실제 자산번호는
+        // 항상 영문자+숫자 3자리 이상 형식(예: P1388)이라 isLikelyAssetId로 한 번 더 검증.
+        const assetId = rawAssetId && isLikelyAssetId(rawAssetId) ? rawAssetId : '';
 
         if (!assetId) {
           next.push({
             key: `fail-${i}`,
-            assetId: '(인식 안 됨)',
+            assetId: rawAssetId ? `(인식 오류: "${rawAssetId}")` : '(인식 안 됨)',
             status: '인식실패',
             category: defaultCategory,
             model: '',
-            errorNote: result.ok ? '사진에서 자산번호를 못 읽었어요.' : result.error,
+            errorNote: !result.ok
+              ? result.error
+              : rawAssetId
+                ? '자산번호 형식이 아니에요(위치 라벨 등을 잘못 읽었을 수 있어요). 다시 찍어주세요.'
+                : '사진에서 자산번호를 못 읽었어요.',
           });
         } else if (session.results.some((r) => r.assetId === assetId) || next.some((r) => r.assetId === assetId)) {
           next.push({ key: assetId, assetId, status: '정상', category: '', model: '' });
