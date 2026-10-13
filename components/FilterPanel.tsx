@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import {
   cascadingBrandOptions,
   cascadingOptions,
+  cascadingScreenOptions,
   categoryVisibility,
   toggleInternalStock,
   toggleMultiValue,
@@ -99,13 +100,14 @@ export default function FilterPanel({
 
   // items/filters/filterSearchTerm이 실제로 안 바뀌었으면(예: 다른 상태로 인한 재렌더) 다시
   // 안 훑도록 메모이즈 — 4번의 전체 배열 스캔이라 글자 입력마다 그냥 돌리면 버벅거립니다.
-  const { specOptions, cpuTypeOptions, subItemOptions, brandOptions } = useMemo(() => {
+  const { specOptions, cpuTypeOptions, subItemOptions, brandOptions, screenOptions } = useMemo(() => {
     const specPresent = new Set(cascadingOptions(items, filters, filterSearchTerm, 'spec'));
     return {
       specOptions: SPECS.filter((s) => specPresent.has(s)),
       cpuTypeOptions: cascadingOptions(items, filters, filterSearchTerm, 'cpuType'),
       subItemOptions: cascadingOptions(items, filters, filterSearchTerm, 'subItem'),
       brandOptions: cascadingBrandOptions(items, filters, filterSearchTerm),
+      screenOptions: cascadingScreenOptions(items, filters, filterSearchTerm),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, filters, filterSearchTerm]);
@@ -187,7 +189,7 @@ export default function FilterPanel({
       {visibility.showScreen && (
         <ChipGroup
           label="화면크기"
-          options={['15인치 이상', '15인치 미만']}
+          options={screenOptions}
           selected={filters.screenGroup ? [filters.screenGroup] : []}
           onToggle={(v) => onSetFilter('screenGroup', filters.screenGroup === v ? null : v)}
           onClearAll={() => onSetFilter('screenGroup', null)}

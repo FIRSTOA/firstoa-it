@@ -137,13 +137,6 @@ export function toggleMultiValue(list: string[], value: string): string[] {
     : [...list, value];
 }
 
-export function screenGroupOf(screen: string): string {
-  if (!screen || screen === '-') return '기타';
-  const num = parseFloat(screen);
-  if (Number.isNaN(num)) return '기타';
-  return num >= 15 ? '15인치 이상' : '15인치 미만';
-}
-
 export function filterAssets(items: Asset[], filters: Filters, searchTerm: string): Asset[] {
   const term = normalizeForCompare(searchTerm);
   return items.filter((it) => {
@@ -156,7 +149,7 @@ export function filterAssets(items: Asset[], filters: Filters, searchTerm: strin
     if (!normalizedIncludes(filters.subItem, it.subItem)) return false;
     if (filters.brand && !normalizedEquals(it.brand, filters.brand)) return false;
     if (filters.newDevice === 'new' && !it.isNew) return false;
-    if (filters.screenGroup && screenGroupOf(it.screen) !== filters.screenGroup) return false;
+    if (filters.screenGroup && !normalizedEquals(it.screen, filters.screenGroup)) return false;
     if (term) {
       const hay = normalizeForCompare(`${it.assetId} ${it.model} ${it.brand} ${it.screen}`);
       if (!hay.includes(term)) return false;
@@ -204,4 +197,16 @@ export function cascadingBrandOptions(items: Asset[], filters: Filters, searchTe
   const relaxed: Filters = { ...filters, brand: null };
   const scoped = filterAssets(items, relaxed, searchTerm);
   return [...new Set(scoped.map((it) => it.brand).filter(Boolean))];
+}
+
+/**
+ * 화면크기 옵션 — "15인치 이상/미만" 2분류 대신 실제 존재하는 인치값 그대로(예: 13.3인치/
+ * 14인치/15.6인치) 보여줍니다. 문자열 정렬은 "13.3인치" > "9인치"로 잘못 정렬되므로 숫자로
+ * 뽑아 오름차순 정렬합니다.
+ */
+export function cascadingScreenOptions(items: Asset[], filters: Filters, searchTerm: string): string[] {
+  const relaxed: Filters = { ...filters, screenGroup: null };
+  const scoped = filterAssets(items, relaxed, searchTerm);
+  const values = [...new Set(scoped.map((it) => it.screen).filter((s) => s && s !== '-'))];
+  return values.sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0));
 }
