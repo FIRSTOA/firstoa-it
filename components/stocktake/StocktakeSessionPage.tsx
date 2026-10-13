@@ -251,7 +251,6 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               multiple
               style={{ display: 'none' }}
               onChange={handleScanFiles}
@@ -262,8 +261,11 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
               disabled={!!scanProgress || pending}
               onClick={() => fileInputRef.current?.click()}
             >
-              {scanProgress ? `인식 중… (${scanProgress.done}/${scanProgress.total})` : '📷 사진으로 스캔(여러 장 가능)'}
+              {scanProgress ? `인식 중… (${scanProgress.done}/${scanProgress.total})` : '📷 사진 올려서 스캔'}
             </button>
+            <span style={{ fontSize: '11.5px', color: 'var(--ink-400)' }}>
+              먼저 카메라로 사진 다 찍어두고, 갤러리에서 여러 장 골라 올리면 한꺼번에 인식해요
+            </span>
             {confirmingComplete ? (
               <>
                 <span style={{ fontSize: '12.5px', color: 'var(--ink-500)' }}>정말 종료할까요?</span>
