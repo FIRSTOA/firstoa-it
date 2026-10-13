@@ -39,11 +39,12 @@ type Props = {
   open: boolean;
   editing: ReceivingEntry | null;
   pending: boolean;
+  locations: string[];
   onClose: () => void;
   onSave: (entry: ReceivingInput, quantity: number) => void;
 };
 
-export default function ReceivingModal({ open, editing, pending, onClose, onSave }: Props) {
+export default function ReceivingModal({ open, editing, pending, locations, onClose, onSave }: Props) {
   const [form, setForm] = useState<ReceivingInput>(BLANK);
   const [quantity, setQuantity] = useState(1);
   const [knownLookup, setKnownLookup] = useState<KnownAssetLookupState>({ status: 'idle' });
@@ -259,11 +260,17 @@ export default function ReceivingModal({ open, editing, pending, onClose, onSave
           </div>
           <div className="form-field">
             <label>위치</label>
-            <input
-              value={form.location}
-              onChange={(e) => set('location', e.target.value)}
-              placeholder="예: J1 (입고완료 처리 시 필요)"
-            />
+            <select value={form.location} onChange={(e) => set('location', e.target.value)}>
+              <option value="">위치 선택 (입고완료 처리 시 필요)</option>
+              {form.location && !locations.includes(form.location) && (
+                <option value={form.location}>{form.location}</option>
+              )}
+              {locations.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
           </div>
           {showQuantityField && (
             <div className="form-field">

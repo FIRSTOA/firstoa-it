@@ -47,10 +47,12 @@ function parsePairsFromText(text: string): Row[] {
 
 export default function PhotoBatchImportModal({
   open,
+  locations,
   onClose,
   onDone,
 }: {
   open: boolean;
+  locations: string[];
   onClose: () => void;
   onDone: (msg: string) => void;
 }) {
@@ -238,7 +240,14 @@ export default function PhotoBatchImportModal({
           </div>
           <div className="form-field">
             <label>위치 *</label>
-            <input value={header.location} onChange={(e) => setHeaderField('location', e.target.value)} placeholder="예: J1" />
+            <select value={header.location} onChange={(e) => setHeaderField('location', e.target.value)}>
+              <option value="">위치 선택</option>
+              {locations.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-field">
             <label>담당자</label>

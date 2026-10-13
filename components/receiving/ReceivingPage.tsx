@@ -24,7 +24,13 @@ import ReceivingModal from './ReceivingModal';
 import ReceivingStats from './ReceivingStats';
 import ReceivingTable from './ReceivingTable';
 
-export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }) {
+export default function ReceivingPage({
+  entries,
+  locations,
+}: {
+  entries: ReceivingEntry[];
+  locations: string[];
+}) {
   const [filters, setFilters] = useState(EMPTY_RECEIVING_FILTERS);
   const [searchTerm, setSearchTerm] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -293,6 +299,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         open={bulkEditOpen}
         pending={pending}
         count={selectedIds.size}
+        locations={locations}
         onClose={() => setBulkEditOpen(false)}
         onSave={handleBulkEditSave}
       />
@@ -301,6 +308,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
         open={modalOpen}
         editing={editing}
         pending={pending}
+        locations={locations}
         onClose={() => {
           setModalOpen(false);
           setEditing(null);
@@ -324,6 +332,7 @@ export default function ReceivingPage({ entries }: { entries: ReceivingEntry[] }
 
       <PhotoBatchImportModal
         open={photoModalOpen}
+        locations={locations}
         onClose={() => setPhotoModalOpen(false)}
         onDone={showToast}
       />

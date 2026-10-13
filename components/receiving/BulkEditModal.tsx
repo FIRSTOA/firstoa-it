@@ -60,6 +60,7 @@ type Props = {
   open: boolean;
   pending: boolean;
   count: number;
+  locations: string[];
   onClose: () => void;
   onSave: (patch: Partial<ReceivingInput>) => void;
 };
@@ -68,7 +69,7 @@ type Props = {
  * 체크된 필드만 선택된 건들에 한꺼번에 적용합니다(체크 안 한 필드는 각 건 값 그대로 유지).
  * 자산번호/시리얼번호처럼 건마다 달라야 하는 값은 대상에서 뺐습니다.
  */
-export default function BulkEditModal({ open, pending, count, onClose, onSave }: Props) {
+export default function BulkEditModal({ open, pending, count, locations, onClose, onSave }: Props) {
   const [enabled, setEnabled] = useState<Record<BulkField, boolean>>(
     () => FIELD_ORDER.reduce((acc, key) => ({ ...acc, [key]: false }), {} as Record<BulkField, boolean>),
   );
@@ -155,6 +156,18 @@ export default function BulkEditModal({ open, pending, count, onClose, onSave }:
           onChange={(e) => set('expectedDate', e.target.value)}
           disabled={!enabled.expectedDate}
         />
+      );
+    }
+    if (key === 'location') {
+      return (
+        <select value={form.location} onChange={(e) => set('location', e.target.value)} disabled={!enabled.location}>
+          <option value="">위치 선택</option>
+          {locations.map((loc) => (
+            <option key={loc} value={loc}>
+              {loc}
+            </option>
+          ))}
+        </select>
       );
     }
     return <input value={form[key]} onChange={(e) => set(key, e.target.value)} disabled={!enabled[key]} />;
