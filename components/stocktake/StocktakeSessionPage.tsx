@@ -5,13 +5,14 @@ import {
   addUnexpectedAssetToSession,
   bulkUpdateStocktakeItems,
   completeStocktake,
+  createAssetFromScan,
   lookupUnexpectedAsset,
   updateStocktakeItem,
-  type UnexpectedAssetInfo,
 } from '@/app/stocktake/actions';
 import { resizeImageFile } from '@/lib/imageResize';
 import { scanLabelImage } from '@/lib/ocrClient';
 import { stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
+import { CATEGORIES } from '@/lib/types';
 
 const STATUS_LABEL: Record<string, string> = {
   미확인: '미확인',
@@ -19,17 +20,60 @@ const STATUS_LABEL: Record<string, string> = {
   목록외발견: '목록외 발견',
 };
 
+type ReviewStatus = '정상' | '위치변경' | '신규등록' | '인식실패';
+
+type ReviewItem = {
+  key: string;
+  assetId: string;
+  status: ReviewStatus;
+  currentLocation?: string;
+  category: string;
+  model: string;
+  brand?: string;
+  errorNote?: string;
+};
+
+const REVIEW_LABEL: Record<ReviewStatus, string> = {
+  정상: '정상(확인됨)',
+  위치변경: '위치변경 필요',
+  신규등록: '신규등록 필요(ERP 미등록)',
+  인식실패: '인식 실패',
+};
+
+const REVIEW_BADGE: Record<ReviewStatus, string> = {
+  정상: 'badge-상품화완료',
+  위치변경: 'badge-임대중',
+  신규등록: 'badge-악성',
+  인식실패: 'badge-기타',
+};
+
 export default function StocktakeSessionPage({ session }: { session: StocktakeSession }) {
   const [toast, setToast] = useState({ msg: '', show: false });
-  const [scanPending, setScanPending] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmingComplete, setConfirmingComplete] = useState(false);
-  const [unexpected, setUnexpected] = useState<UnexpectedAssetInfo | null>(null);
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+  const [applying, setApplying] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sum = stocktakeSummary(session.results);
   const done = session.status === '완료';
+
+  // 신규등록 항목의 기본 품목값 — 이 위치에 이미 있던 자산들 중 가장 많은 품목으로 추정.
+  const defaultCategory = (() => {
+    const counts = new Map<string, number>();
+    for (const r of session.results) counts.set(r.category, (counts.get(r.category) ?? 0) + 1);
+    let best = CATEGORIES[0] as string;
+    let bestCount = 0;
+    for (const [cat, count] of counts) {
+      if (count > bestCount) {
+        best = cat;
+        bestCount = count;
+      }
+    }
+    return best;
+  })();
 
   function showToast(msg: string) {
     setToast({ msg, show: true });
@@ -43,45 +87,113 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
     });
   }
 
-  async function handleScan(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setScanPending(true);
-    try {
-      const { base64, mediaType } = await resizeImageFile(file);
-      const result = await scanLabelImage(base64, mediaType);
-      if (!result.ok) {
-        showToast(result.error);
-        return;
-      }
-      const assetId = result.fields.assetId;
-      if (!assetId) {
-        showToast('사진에서 자산번호를 읽지 못했어요.');
-        return;
-      }
-      const inList = session.results.some((r) => r.assetId === assetId);
-      if (inList) {
-        startTransition(async () => {
-          const upd = await updateStocktakeItem(session.id, assetId, '확인됨');
-          showToast(upd.ok ? `${assetId} 확인했어요.` : upd.error);
-        });
-      } else {
-        // 카톡 인앱 브라우저 등에서 window.confirm()이 아예 반응 없이 무시되는 경우가 있어서
-        // (버튼을 눌러도 "아무 반응 없음"처럼 보임), 네이티브 다이얼로그 대신 화면 안에서 직접
-        // 예/아니오를 받습니다. 어느 위치 자산인지 먼저 조회해서 같이 보여줍니다.
-        const lookup = await lookupUnexpectedAsset(assetId);
-        if (!lookup.ok) {
-          showToast(lookup.error);
+  /**
+   * 여러 장 사진을 순서대로 OCR 인식해서 전산 재고와 비교한 뒤, 바로 반영하지 않고 검토
+   * 목록으로 모아 보여줍니다(인포그래픽 플로우: 찍기 → 업로드 → 비교 → 차이 발견 → 반영).
+   * - 이미 이 세션 목록에 있는 자산번호 → "정상"
+   * - 전산상 다른 위치에 있는 자산번호 → "위치변경 필요"
+   * - 전산 어디에도 없는 자산번호 → "신규등록 필요"
+   */
+  async function handleScanFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+
+    setScanProgress({ done: 0, total: files.length });
+    const next: ReviewItem[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const { base64, mediaType } = await resizeImageFile(files[i]);
+        const result = await scanLabelImage(base64, mediaType);
+        const assetId = result.ok ? result.fields.assetId : '';
+
+        if (!assetId) {
+          next.push({
+            key: `fail-${i}`,
+            assetId: '(인식 안 됨)',
+            status: '인식실패',
+            category: defaultCategory,
+            model: '',
+            errorNote: result.ok ? '사진에서 자산번호를 못 읽었어요.' : result.error,
+          });
+        } else if (session.results.some((r) => r.assetId === assetId) || next.some((r) => r.assetId === assetId)) {
+          next.push({ key: assetId, assetId, status: '정상', category: '', model: '' });
         } else {
-          setUnexpected(lookup.info);
+          const lookup = await lookupUnexpectedAsset(assetId);
+          if (lookup.ok) {
+            next.push({
+              key: assetId,
+              assetId,
+              status: '위치변경',
+              currentLocation: lookup.info.location,
+              category: lookup.info.category,
+              model: lookup.info.model,
+              brand: lookup.info.brand,
+            });
+          } else {
+            next.push({
+              key: assetId,
+              assetId,
+              status: '신규등록',
+              category: defaultCategory,
+              model: result.ok ? result.fields.model : '',
+            });
+          }
         }
+      } catch (err) {
+        next.push({
+          key: `error-${i}`,
+          assetId: '(오류)',
+          status: '인식실패',
+          category: defaultCategory,
+          model: '',
+          errorNote: err instanceof Error ? err.message : '사진을 읽는 중 오류가 났어요.',
+        });
       }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '사진을 읽는 중 오류가 났어요.');
-    } finally {
-      setScanPending(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setScanProgress({ done: i + 1, total: files.length });
     }
+
+    setReviewItems((prev) => [...prev, ...next]);
+    setScanProgress(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function updateReviewCategory(key: string, category: string) {
+    setReviewItems((prev) => prev.map((it) => (it.key === key ? { ...it, category } : it)));
+  }
+
+  function removeReviewItem(key: string) {
+    setReviewItems((prev) => prev.filter((it) => it.key !== key));
+  }
+
+  /** "재고 반영하기" — 검토 목록을 한꺼번에 적용합니다. 웹앱(Supabase)과 구글시트 둘 다
+   * createAsset/updateAsset이 이미 같이 처리하므로 여기서 따로 손댈 게 없습니다. */
+  async function handleApplyReview() {
+    setApplying(true);
+    let okCount = 0;
+    const failures: string[] = [];
+
+    for (const item of reviewItems) {
+      if (item.status === '인식실패') continue;
+      let result;
+      if (item.status === '정상') {
+        result = await updateStocktakeItem(session.id, item.assetId, '확인됨');
+      } else if (item.status === '위치변경') {
+        result = await addUnexpectedAssetToSession(session.id, item.assetId, session.location);
+      } else {
+        result = await createAssetFromScan(session.id, item.assetId, item.category, item.model, session.location);
+      }
+      if (result.ok) okCount++;
+      else failures.push(`${item.assetId}: ${result.error}`);
+    }
+
+    setApplying(false);
+    setReviewItems([]);
+    showToast(
+      failures.length === 0
+        ? `${okCount}건 재고에 반영했어요. (웹앱 + 구글시트 모두 반영됨)`
+        : `${okCount}건 반영, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`,
+    );
   }
 
   function toggleSelect(assetId: string) {
@@ -118,21 +230,12 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
     });
   }
 
-  function handleAddUnexpected(relocate: boolean) {
-    const info = unexpected;
-    if (!info) return;
-    setUnexpected(null);
-    startTransition(async () => {
-      const added = await addUnexpectedAssetToSession(session.id, info.assetId, relocate ? session.location : undefined);
-      showToast(
-        added.ok
-          ? relocate
-            ? `${info.assetId}를 "${session.location}" 위치로 강제변경하고 기록했어요.`
-            : `${info.assetId}를 목록외 발견으로 추가했어요.`
-          : added.error,
-      );
-    });
-  }
+  const reviewCounts = {
+    정상: reviewItems.filter((i) => i.status === '정상').length,
+    위치변경: reviewItems.filter((i) => i.status === '위치변경').length,
+    신규등록: reviewItems.filter((i) => i.status === '신규등록').length,
+    인식실패: reviewItems.filter((i) => i.status === '인식실패').length,
+  };
 
   return (
     <div className="app">
@@ -149,16 +252,17 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
               type="file"
               accept="image/*"
               capture="environment"
+              multiple
               style={{ display: 'none' }}
-              onChange={handleScan}
+              onChange={handleScanFiles}
             />
             <button
               type="button"
               className="btn btn-ghost"
-              disabled={scanPending || pending}
+              disabled={!!scanProgress || pending}
               onClick={() => fileInputRef.current?.click()}
             >
-              {scanPending ? '인식 중…' : '📷 사진으로 스캔'}
+              {scanProgress ? `인식 중… (${scanProgress.done}/${scanProgress.total})` : '📷 사진으로 스캔(여러 장 가능)'}
             </button>
             {confirmingComplete ? (
               <>
@@ -179,22 +283,77 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
         )}
       </div>
 
-      {unexpected && (
-        <div className="panel" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '10px', marginBottom: '12px', borderColor: 'var(--red-100)' }}>
-          <span style={{ fontSize: '13px' }}>
-            <b>&quot;{unexpected.assetId}&quot;</b>({unexpected.brand} {unexpected.model})는 전산상{' '}
-            <b>{unexpected.location || '위치 미상'}</b> 위치에 있는 장비예요. 지금 조사 중인 &quot;{session.location}
-            &quot;(으)로 강제변경할까요?
-          </span>
-          <button type="button" className="btn btn-primary" disabled={pending} onClick={() => handleAddUnexpected(true)}>
-            강제변경
-          </button>
-          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => handleAddUnexpected(false)}>
-            위치는 안 바꾸고 기록만
-          </button>
-          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => setUnexpected(null)}>
-            무시
-          </button>
+      {reviewItems.length > 0 && (
+        <div className="panel" style={{ marginBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ fontWeight: 700, fontSize: '14px' }}>
+              차이 발견 — 전체 {reviewItems.length} · 정상 {reviewCounts.정상} · 위치변경 {reviewCounts.위치변경} · 신규등록{' '}
+              {reviewCounts.신규등록}
+              {reviewCounts.인식실패 > 0 && <span style={{ color: 'var(--ink-400)' }}> · 인식실패 {reviewCounts.인식실패}</span>}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" className="btn btn-ghost" disabled={applying} onClick={() => setReviewItems([])}>
+                취소
+              </button>
+              <button type="button" className="btn btn-primary" disabled={applying} onClick={handleApplyReview}>
+                {applying ? '반영 중…' : '✅ 재고 반영하기'}
+              </button>
+            </div>
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--ink-500)', margin: '6px 0 10px' }}>
+            반영하면 위치변경·신규등록 건은 웹앱과 구글시트(IT재고 탭) 양쪽에 바로 반영돼요.
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>자산번호</th>
+                <th>구분</th>
+                <th>상세</th>
+                <th style={{ width: '36px' }} />
+              </tr>
+            </thead>
+            <tbody>
+              {reviewItems.map((item) => (
+                <tr key={item.key}>
+                  <td>
+                    <span className="asset-id">{item.assetId}</span>
+                  </td>
+                  <td>
+                    <span className={`badge ${REVIEW_BADGE[item.status]}`}>{REVIEW_LABEL[item.status]}</span>
+                  </td>
+                  <td style={{ fontSize: '12px', color: 'var(--ink-600)' }}>
+                    {item.status === '위치변경' && (
+                      <>
+                        현재 위치: <b>{item.currentLocation || '위치 미상'}</b> → &quot;{session.location}&quot;(으)로 변경 ·{' '}
+                        {item.brand} {item.model}
+                      </>
+                    )}
+                    {item.status === '신규등록' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>품목:</span>
+                        <select value={item.category} onChange={(e) => updateReviewCategory(item.key, e.target.value)}>
+                          {CATEGORIES.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                        <span>· 위치: {session.location}</span>
+                        {item.model && <span>· 모델명(인식): {item.model}</span>}
+                      </div>
+                    )}
+                    {item.status === '정상' && '이 세션 목록에 있던 자산이에요 — 확인됨으로 처리돼요.'}
+                    {item.status === '인식실패' && (item.errorNote || '다시 찍어주세요.')}
+                  </td>
+                  <td>
+                    <button type="button" className="icon-btn" title="목록에서 제외" onClick={() => removeReviewItem(item.key)}>
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

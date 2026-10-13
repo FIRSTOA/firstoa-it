@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { updateAsset } from '@/app/actions';
+import { createAsset, updateAsset } from '@/app/actions';
 import { DATA_SOURCE } from '@/lib/dataSource';
 import { getAssetFromSheets, listAllAssets } from '@/lib/inventory/sheets';
 import {
@@ -205,6 +205,51 @@ export async function addUnexpectedAssetToSession(
 
   revalidatePath(`/stocktake/${sessionId}`);
   return { ok: true };
+}
+
+/**
+ * 사진 일괄 스캔(여러 장)에서 "ERP 미등록" 자산번호를 발견했을 때 — 스티커에 자산번호는
+ * 있는데 전산(구글시트)엔 아예 없는 경우, 최소 정보로 신규 등록하고 이 세션에도 확인됨으로
+ * 기록합니다. 브랜드/모델 등 자세한 정보는 스티커 사진만으론 알기 어려워서 이후 IT재고
+ * 리스트에서 ✎ 수정으로 보완하면 됩니다.
+ */
+export async function createAssetFromScan(
+  sessionId: string,
+  assetId: string,
+  category: string,
+  model: string,
+  location: string,
+): Promise<ActionResult> {
+  const trimmed = assetId.trim();
+  if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };
+
+  const asset: Asset = {
+    assetId: trimmed,
+    category,
+    brand: '',
+    model: model.trim() || '확인필요',
+    cpu: '',
+    spec: '확인필요',
+    specLabel: '',
+    cpuType: '',
+    gubunCode: '',
+    subItem: '',
+    ram: '',
+    storage: '',
+    screen: '-',
+    location,
+    status: '상품화준비중',
+    history: '실재고 조사 사진 스캔으로 신규 등록',
+    isNew: true,
+    malicious: false,
+    serialNo: '',
+  };
+
+  const result = await createAsset(asset);
+  if (!result.ok) return result;
+
+  // 방금 만들었으니 getAssetFromSheets로 바로 찾아져서, 이 세션에 "확인됨"으로 기록됩니다.
+  return addUnexpectedAssetToSession(sessionId, trimmed);
 }
 
 export async function deleteStocktakeSession(id: string): Promise<ActionResult> {
