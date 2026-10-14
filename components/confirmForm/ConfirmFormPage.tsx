@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { lookupKnownAsset } from '@/app/actions';
 import { getDeliveryConfirmForm, ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
 import { CONFIRM_FORM_TABS, type ConfirmFormTab } from '@/lib/confirmForm';
 import type { DeliveryConfirmForm } from '@/lib/deliveryConfirmForm';
@@ -118,6 +119,29 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
 
   function addItem() {
     setFields((prev) => ({ ...prev, items: [...prev.items, BLANK_ITEM] }));
+  }
+
+  // 자산번호(예: P2238)를 입력하고 다른 칸으로 넘어가면 기존 데이터(IT재고 구글시트 →
+  // 임대리스트 순서, app/actions.ts의 lookupKnownAsset)에서 모델명/시리얼을 자동으로
+  // 채웁니다. 철수는 여기서 등록된 내용이 입고 대장에 렌탈입고예정으로 그대로 넘어가므로
+  // 미리 정확히 채워두면 입고완료 처리 때도 도움이 됩니다. 이미 입력된 값은 안 덮어씁니다.
+  async function handleItemAssetIdBlur(index: number) {
+    const assetId = fields.items[index]?.assetId.trim();
+    if (!assetId) return;
+    const result = await lookupKnownAsset(assetId);
+    if (!result.found) return;
+    setFields((prev) => ({
+      ...prev,
+      items: prev.items.map((it, i) =>
+        i === index
+          ? {
+              ...it,
+              model: it.model || result.model,
+              serialNumber: it.serialNumber || result.serialNo,
+            }
+          : it,
+      ),
+    }));
   }
 
   function removeItem(index: number) {
@@ -329,6 +353,7 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
                       className="inline-cell-input"
                       value={item.assetId}
                       onChange={(e) => updateItem(i, { assetId: e.target.value })}
+                      onBlur={() => handleItemAssetIdBlur(i)}
                     />
                   </td>
                   <td>
