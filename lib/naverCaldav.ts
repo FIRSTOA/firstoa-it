@@ -59,6 +59,10 @@ type IcalInput = {
   time: string; // 'HH:MM' 또는 빈 값(종일)
   location: string;
   description: string;
+  // 네이버 캘린더의 "완료 체크"(X-NAVER-COMPLETED) — mergeUpdate가 VEVENT를 통째로 새로
+  // 만들어 바꿔치기하므로, 호출부가 매번 현재 값을 명시적으로 넘겨야 기존 완료 표시가
+  // 수정할 때마다 조용히 false로 덮어써지는 사고를 막을 수 있습니다(그래서 옵셔널 아님).
+  completed: boolean;
 };
 
 function pad(n: number): string {
@@ -108,6 +112,7 @@ export function buildIcal(input: IcalInput): string {
     `SUMMARY:${icalEscape(input.title)}`,
     input.location ? `LOCATION:${icalEscape(input.location)}` : '',
     input.description ? `DESCRIPTION:${icalEscape(input.description)}` : '',
+    `X-NAVER-COMPLETED:${input.completed ? 'true' : 'false'}`,
     'CLASS:PUBLIC',
     'END:VEVENT',
     'END:VCALENDAR',
@@ -124,6 +129,7 @@ export type ParsedEvent = {
   time: string;
   location: string;
   description: string;
+  completed: boolean;
 };
 
 function eventBlockOf(ics: string): string {
@@ -169,6 +175,7 @@ export function parseEventBlock(ics: string): ParsedEvent | null {
     time,
     location: icsProp(unfolded, 'LOCATION'),
     description: icsProp(unfolded, 'DESCRIPTION'),
+    completed: /^(true|1|yes)$/i.test(icsProp(unfolded, 'X-NAVER-COMPLETED')),
   };
 }
 

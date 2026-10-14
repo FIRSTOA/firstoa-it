@@ -173,6 +173,29 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
     });
   }
 
+  // 완료 체크를 바로바로 할 수 있게(수정 모달을 열지 않고) — updateEvent를 그대로 재사용,
+  // 네이버 쪽에도 X-NAVER-COMPLETED로 같이 반영됩니다(app/calendar/actions.ts).
+  function handleToggleStatus(ev: CalendarEvent) {
+    const nextStatus = ev.status === '완료' ? '진행중' : '완료';
+    setEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...e, status: nextStatus } : e)));
+    startTransition(async () => {
+      const result = await updateEvent(ev.id, {
+        title: ev.title,
+        date: ev.date,
+        time: ev.time,
+        location: ev.location,
+        description: ev.description,
+        status: nextStatus,
+        author: ev.author,
+        calendarId: ev.calendarId,
+      });
+      if (!result.ok) {
+        showToast(result.error);
+        refetch();
+      }
+    });
+  }
+
   function handleDelete(id: string) {
     if (!confirm('이 일정을 삭제할까요?')) return;
     startTransition(async () => {
@@ -280,6 +303,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
           <table>
             <thead>
               <tr>
+                <th style={{ width: '36px' }} />
                 <th>날짜</th>
                 <th>시간</th>
                 <th>제목</th>
@@ -294,6 +318,14 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                 .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
                 .map((ev) => (
                   <tr key={ev.id} className="asset-id" onClick={() => openEdit(ev)} style={{ cursor: 'pointer' }}>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={ev.status === '완료'}
+                        onChange={() => handleToggleStatus(ev)}
+                        title="완료 체크"
+                      />
+                    </td>
                     <td>{ev.date}</td>
                     <td>{ev.time || '종일'}</td>
                     <td>{ev.title}</td>
@@ -309,7 +341,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                 ))}
               {visibleEvents.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty-state">
+                  <td colSpan={8} className="empty-state">
                     <div>📅</div>이 달에 조건에 맞는 일정이 없어요.
                   </td>
                 </tr>
@@ -391,16 +423,23 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               {selectedDayEvents.map((ev) => (
-                <button
-                  key={ev.id}
-                  type="button"
-                  className={`calendar-event-chip${ev.status === '완료' ? ' done' : ''}`}
-                  style={{ width: '100%', textAlign: 'left' }}
-                  onClick={() => openEdit(ev)}
-                >
-                  {ev.time && <span className="calendar-event-time">{ev.time}</span>} {ev.title}
-                  {ev.location && <span style={{ color: 'var(--ink-400)' }}> · {ev.location}</span>}
-                </button>
+                <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={ev.status === '완료'}
+                    onChange={() => handleToggleStatus(ev)}
+                    title="완료 체크"
+                  />
+                  <button
+                    type="button"
+                    className={`calendar-event-chip${ev.status === '완료' ? ' done' : ''}`}
+                    style={{ flex: 1, textAlign: 'left' }}
+                    onClick={() => openEdit(ev)}
+                  >
+                    {ev.time && <span className="calendar-event-time">{ev.time}</span>} {ev.title}
+                    {ev.location && <span style={{ color: 'var(--ink-400)' }}> · {ev.location}</span>}
+                  </button>
+                </div>
               ))}
             </div>
           )}

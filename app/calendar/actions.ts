@@ -81,7 +81,15 @@ export async function createEvent(input: CalendarEventInput): Promise<ActionResu
   if (input.calendarId) {
     await syncToNaverBestEffort(async () => {
       const uid = `it-${id}`;
-      const ical = buildIcal({ uid, title: input.title, date: input.date, time: input.time, location: input.location, description: input.description });
+      const ical = buildIcal({
+        uid,
+        title: input.title,
+        date: input.date,
+        time: input.time,
+        location: input.location,
+        description: input.description,
+        completed: input.status === '완료',
+      });
       await naverPutEvent(input.calendarId as string, uid, ical);
       await supabase.from(CALENDAR_TABLE).update({ naver_uid: uid, naver_synced_at: new Date().toISOString() }).eq('id', id);
     }, 'createEvent');
@@ -112,7 +120,15 @@ export async function updateEvent(id: string, input: CalendarEventInput): Promis
       await naverDeleteEvent(prevCalendarId, uid);
     }
     if (input.calendarId) {
-      const patch = { uid, title: input.title, date: input.date, time: input.time, location: input.location, description: input.description };
+      const patch = {
+        uid,
+        title: input.title,
+        date: input.date,
+        time: input.time,
+        location: input.location,
+        description: input.description,
+        completed: input.status === '완료',
+      };
       const existing = prevCalendarId === input.calendarId ? await naverGetEvent(input.calendarId, uid) : null;
       const ical = existing ? mergeUpdate(existing, patch) : buildIcal(patch);
       await naverPutEvent(input.calendarId, uid, ical);

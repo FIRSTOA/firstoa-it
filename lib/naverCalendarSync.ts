@@ -90,6 +90,7 @@ export async function syncNaverCalendars(): Promise<{ ok: true; results: Record<
                 time: parsed.time,
                 location: parsed.location,
                 description: parsed.description,
+                status: parsed.completed ? '완료' : '진행중',
                 naver_synced_at: new Date().toISOString(),
               })
               .eq('id', localId);
@@ -103,7 +104,7 @@ export async function syncNaverCalendars(): Promise<{ ok: true; results: Record<
                 time: parsed.time,
                 location: parsed.location,
                 description: parsed.description,
-                status: '진행중',
+                status: parsed.completed ? '완료' : '진행중',
                 author: '',
                 naver_uid: parsed.uid,
                 source: 'naver',
