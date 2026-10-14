@@ -308,10 +308,14 @@ tbody tr:hover{background:var(--indigo-50);}
 .print-label{width:70mm; height:35mm; border:1px dashed #999; border-radius:4px; padding:8px 10px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center; page-break-inside:avoid;}
 .print-label-id{font-size:22px; font-weight:800;}
 .print-label-sub{font-size:11px; color:#444; margin-top:4px;}
+/* 정식 납품확인서 인쇄 */
+#print-confirm-form-root{display:none;}
 @media print{
   body *{visibility:hidden;}
   #print-labels-root, #print-labels-root *{visibility:visible;}
   #print-labels-root{display:flex!important; position:fixed; inset:0; flex-wrap:wrap; gap:8px; padding:10mm; background:#fff;}
+  #print-confirm-form-root, #print-confirm-form-root *{visibility:visible;}
+  #print-confirm-form-root{display:block!important; position:fixed; inset:0; padding:12mm; background:#fff; overflow:visible;}
 }
 .toast{
   position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--ink-900); color:#fff;

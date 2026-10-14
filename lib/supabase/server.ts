@@ -39,3 +39,4 @@ export const ASSET_MOVEMENTS_TABLE = 'asset_movements';
 export const ASSET_OVERHAUL_TABLE = 'asset_overhaul_records';
 export const STOCKTAKE_TABLE = 'it_stocktake_sessions';
 export const STAFF_NAMES_TABLE = 'it_staff_names';
+export const DELIVERY_CONFIRM_FORM_TABLE = 'it_delivery_confirm_forms';

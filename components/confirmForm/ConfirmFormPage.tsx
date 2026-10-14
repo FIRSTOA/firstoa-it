@@ -1,20 +1,25 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
+import { getDeliveryConfirmForm, ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
 import { CONFIRM_FORM_TABS, type ConfirmFormTab } from '@/lib/confirmForm';
+import type { DeliveryConfirmForm } from '@/lib/deliveryConfirmForm';
 import type { DispatchEntry } from '@/lib/dispatch';
 import { resizeImageFile } from '@/lib/imageResize';
 import type { WithdrawalFormFields, WithdrawalFormItem } from '@/lib/ocr';
 import { scanWithdrawalFormImage } from '@/lib/ocrClient';
 import { CATEGORIES } from '@/lib/types';
+import DeliveryConfirmFormDetail from './DeliveryConfirmFormDetail';
+import DeliveryConfirmFormEditor from './DeliveryConfirmFormEditor';
 
 const PC_ITEMS = ['모니터', '데스크탑', '노트북'];
+type EntryMode = 'simple' | 'delivery';
 
 const BLANK_FIELDS: WithdrawalFormFields = { companyName: '', date: '', requester: '', reason: '', items: [] };
 const BLANK_ITEM: WithdrawalFormItem = { category: CATEGORIES[0], model: '', serialNumber: '', assetId: '' };
 
 export default function ConfirmFormPage({ initialEntries: entries }: { initialEntries: DispatchEntry[] }) {
+  const [entryMode, setEntryMode] = useState<EntryMode>('simple');
   const [tab, setTab] = useState<ConfirmFormTab>('철수');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'pc' | string>('all');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -24,10 +29,20 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
   const [registering, setRegistering] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState({ msg: '', show: false });
+  const [deliveryDetail, setDeliveryDetail] = useState<DeliveryConfirmForm | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function showToast(msg: string) {
     setToast({ msg, show: true });
+  }
+
+  async function openDeliveryDetail(id: string) {
+    const form = await getDeliveryConfirmForm(id);
+    if (!form) {
+      showToast('확인서를 불러오지 못했어요.');
+      return;
+    }
+    setDeliveryDetail(form);
   }
 
   async function scanFile(file: File) {
@@ -136,6 +151,35 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
 
   return (
     <div className="app">
+      <div className="chip-group" style={{ marginBottom: '14px' }}>
+        <button
+          type="button"
+          className={`chip${entryMode === 'simple' ? ' active' : ''}`}
+          onClick={() => setEntryMode('simple')}
+        >
+          간단 등록 (사진/텍스트 인식)
+        </button>
+        <button
+          type="button"
+          className={`chip${entryMode === 'delivery' ? ' active' : ''}`}
+          onClick={() => setEntryMode('delivery')}
+        >
+          정식 납품확인서 작성
+        </button>
+      </div>
+
+      {entryMode === 'delivery' && (
+        <div className="panel" style={{ marginBottom: '14px' }}>
+          <h2 style={{ fontSize: '15px', margin: '0 0 10px' }}>정식 납품확인서 작성</h2>
+          <div className="sub" style={{ marginBottom: '10px' }}>
+            IT/복합기 납품 건을 원본 양식과 같은 항목으로 등록해요. 등록하면 출고/접수 대장에도 반영돼요.
+          </div>
+          <DeliveryConfirmFormEditor onRegistered={showToast} />
+        </div>
+      )}
+
+      {entryMode === 'simple' && (
+        <>
       <div className="panel">
         <div className="chip-group" style={{ marginBottom: '14px' }}>
           {CONFIRM_FORM_TABS.map((t) => (
@@ -310,6 +354,8 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
           </div>
         </div>
       )}
+        </>
+      )}
 
       <div className="panel" style={{ marginTop: '14px' }}>
         <h2 style={{ fontSize: '15px', margin: '0 0 10px' }}>이 도구로 등록한 내역 (최근 100건)</h2>
@@ -319,6 +365,13 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
           </button>
           <button type="button" className={`chip${historyFilter === 'pc' ? ' active' : ''}`} onClick={() => setHistoryFilter('pc')}>
             🖥️ PC관련(모니터·데스크탑·노트북)
+          </button>
+          <button
+            type="button"
+            className={`chip${historyFilter === '복합기' ? ' active' : ''}`}
+            onClick={() => setHistoryFilter('복합기')}
+          >
+            🖨️ 복합기
           </button>
           {CATEGORIES.map((c) => (
             <button
@@ -340,28 +393,44 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
               <th>자산번호</th>
               <th>거래처</th>
               <th>날짜</th>
+              <th />
             </tr>
           </thead>
           <tbody>
-            {entries
-              .filter((e) => {
+            {(() => {
+              const filtered = entries.filter((e) => {
                 if (historyFilter === 'all') return true;
                 if (historyFilter === 'pc') return PC_ITEMS.includes(e.item);
                 return e.item === historyFilter;
-              })
-              .map((e) => (
-                <tr key={e.id}>
-                  <td>{e.type}</td>
-                  <td>{e.item}</td>
-                  <td>{e.directSpec || '-'}</td>
-                  <td>{e.assetId || '-'}</td>
-                  <td>{e.company}</td>
-                  <td style={{ fontSize: '12px' }}>{e.deliveryDate || '-'}</td>
-                </tr>
-              ))}
+              });
+              const seenFormIds = new Set<string>();
+              return filtered.map((e) => {
+                // 같은 정식 납품확인서에서 나온 유닛 행이 여러 개면, 그 그룹의 첫 행에만
+                // "상세보기" 버튼을 보여줍니다(묶여서 하나의 확인서니까).
+                const showDetailButton = !!e.deliveryFormId && !seenFormIds.has(e.deliveryFormId);
+                if (e.deliveryFormId) seenFormIds.add(e.deliveryFormId);
+                return (
+                  <tr key={e.id}>
+                    <td>{e.type}</td>
+                    <td>{e.item}</td>
+                    <td>{e.directSpec || '-'}</td>
+                    <td>{e.assetId || '-'}</td>
+                    <td>{e.company}</td>
+                    <td style={{ fontSize: '12px' }}>{e.deliveryDate || '-'}</td>
+                    <td>
+                      {showDetailButton && (
+                        <button type="button" className="chip" onClick={() => openDeliveryDetail(e.deliveryFormId!)}>
+                          상세보기
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              });
+            })()}
             {entries.length === 0 && (
               <tr>
-                <td colSpan={6} className="empty-state">
+                <td colSpan={7} className="empty-state">
                   <div>📋</div>아직 등록한 내역이 없어요.
                 </td>
               </tr>
@@ -369,6 +438,8 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
           </tbody>
         </table>
       </div>
+
+      <DeliveryConfirmFormDetail form={deliveryDetail} onClose={() => setDeliveryDetail(null)} />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
         <span>{toast.msg}</span>

@@ -28,6 +28,7 @@ export type DispatchEntry = {
   assetId: string; // 자산번호
   remarks: string; // 비고
   serialNumber: string; // 시리얼번호
+  deliveryFormId: string | null; // 정식 납품확인서(it_delivery_confirm_forms)에서 나온 건이면 그 id
 };
 
 export type DispatchEntryRow = {
@@ -50,6 +51,7 @@ export type DispatchEntryRow = {
   asset_id: string;
   remarks: string;
   serial_number: string;
+  delivery_form_id: string | null;
 };
 
 export function rowToDispatch(row: DispatchEntryRow): DispatchEntry {
@@ -73,10 +75,15 @@ export function rowToDispatch(row: DispatchEntryRow): DispatchEntry {
     assetId: row.asset_id,
     remarks: row.remarks,
     serialNumber: row.serial_number,
+    deliveryFormId: row.delivery_form_id,
   };
 }
 
-export type DispatchInput = Omit<DispatchEntry, 'id' | 'seq'>;
+// deliveryFormId는 정식 납품확인서 등록(app/confirmForm/actions.ts) 전용이라, 일반 출고/
+// 접수 등록(DispatchModal 등)은 안 넘겨도 되게 옵셔널로 둡니다(안 넘기면 null로 저장).
+export type DispatchInput = Omit<DispatchEntry, 'id' | 'seq' | 'deliveryFormId'> & {
+  deliveryFormId?: string | null;
+};
 
 export function dispatchInputToRow(entry: DispatchInput) {
   return {
@@ -97,6 +104,7 @@ export function dispatchInputToRow(entry: DispatchInput) {
     asset_id: entry.assetId,
     remarks: entry.remarks,
     serial_number: entry.serialNumber,
+    delivery_form_id: entry.deliveryFormId ?? null,
   };
 }
 

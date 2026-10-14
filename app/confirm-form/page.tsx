@@ -10,7 +10,7 @@ export default async function Page() {
   if (!isSupabaseConfigured()) {
     return (
       <Shell activeMenu="반출 확인서" title="📋 반출 확인서">
-        <SetupGuide schemaFile="supabase/schema.sql, supabase/dispatch_schema.sql, supabase/receiving_schema.sql" />
+        <SetupGuide schemaFile="supabase/schema.sql, supabase/dispatch_schema.sql, supabase/receiving_schema.sql, supabase/delivery_confirm_form_schema.sql" />
       </Shell>
     );
   }
