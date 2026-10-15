@@ -252,6 +252,137 @@ export async function createAssetFromScan(
   return addUnexpectedAssetToSession(sessionId, trimmed);
 }
 
+async function runWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+export type ReviewApplyInput = {
+  assetId: string;
+  status: '정상' | '위치변경' | '신규등록';
+  category?: string;
+  model?: string;
+};
+
+export type ReviewApplyResult =
+  | { ok: true; successCount: number; failures: string[] }
+  | { ok: false; error: string };
+
+/**
+ * 사진 일괄 스캔 검토 화면("재고 반영하기")의 배치 처리. 기존엔 항목마다 별도 서버 액션을
+ * 순서대로 호출해서(위치변경/신규등록은 세션 results를 매번 읽고 다시 썼음) 느렸고, 여러
+ * 건을 동시에 돌리면 세션 results 경쟁 조건(서로 덮어쓰기)이 생길 위험도 있었습니다.
+ *
+ * 느린 부분(구글시트 조회/쓰기 — 위치변경·신규등록)만 병렬로 처리하고, 세션 results는 맨
+ * 마지막에 딱 한 번만 읽고 한 번만 씁니다(bulkUpdateStocktakeItems와 동일한 원칙).
+ */
+export async function applyStocktakeReviewBatch(
+  sessionId: string,
+  items: ReviewApplyInput[],
+  location: string,
+): Promise<ReviewApplyResult> {
+  const session = await loadSession(sessionId);
+  if (!session) return { ok: false, error: '조사 세션을 찾지 못했어요.' };
+
+  const failures: string[] = [];
+  const newItems: StocktakeItem[] = [];
+
+  const slowItems = items.filter((i) => i.status !== '정상');
+  await runWithConcurrency(slowItems, 3, async (item) => {
+    if (item.status === '위치변경') {
+      const found = DATA_SOURCE === 'sheets' ? await getAssetFromSheets(item.assetId).catch(() => null) : null;
+      if (!found) {
+        failures.push(`${item.assetId}: 전산 재고에서 못 찾았어요.`);
+        return;
+      }
+      const trimmedLocation = location.trim();
+      if (trimmedLocation && trimmedLocation !== found.location.trim()) {
+        const relocateResult = await updateAsset(found.assetId, { ...found, location: trimmedLocation });
+        if (!relocateResult.ok) {
+          failures.push(`${item.assetId}: 위치 변경 실패 - ${relocateResult.error}`);
+          return;
+        }
+      }
+      newItems.push({
+        assetId: found.assetId,
+        category: found.category,
+        model: found.model,
+        brand: found.brand,
+        status: '목록외발견',
+        scannedAt: new Date().toISOString(),
+        note: trimmedLocation
+          ? `원래 위치: ${found.location || '-'} → ${trimmedLocation}로 강제변경함`
+          : `원래 위치: ${found.location || '-'}`,
+      });
+    } else if (item.status === '신규등록') {
+      const trimmed = item.assetId.trim();
+      const asset: Asset = {
+        assetId: trimmed,
+        category: item.category ?? '',
+        brand: '',
+        model: (item.model ?? '').trim() || '확인필요',
+        cpu: '',
+        spec: '확인필요',
+        specLabel: '',
+        cpuType: '',
+        gubunCode: '',
+        subItem: '',
+        ram: '',
+        storage: '',
+        screen: '-',
+        location: location.trim(),
+        status: '상품화준비중',
+        history: '실재고 조사 사진 스캔으로 신규 등록',
+        isNew: true,
+        malicious: false,
+        serialNo: '',
+      };
+      const result = await createAsset(asset);
+      if (!result.ok) {
+        failures.push(`${item.assetId}: ${result.error}`);
+        return;
+      }
+      newItems.push({
+        assetId: trimmed,
+        category: asset.category,
+        model: asset.model,
+        brand: '',
+        status: '목록외발견',
+        scannedAt: new Date().toISOString(),
+        note: '신규 등록(실재고 조사 사진 스캔)',
+      });
+    }
+  });
+
+  // "정상" 항목(이미 이 세션 목록에 있는 자산)은 확인됨으로 상태만 바꿉니다.
+  const confirmIds = new Set(
+    items.filter((i) => i.status === '정상' && session.results.some((r) => r.assetId === i.assetId)).map((i) => i.assetId),
+  );
+  const now = new Date().toISOString();
+  const updatedResults = session.results.map((r) =>
+    confirmIds.has(r.assetId) ? { ...r, status: '확인됨' as const, scannedAt: now } : r,
+  );
+  const finalResults = [...updatedResults, ...newItems];
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(STOCKTAKE_TABLE).update({ results: finalResults }).eq('id', sessionId);
+  if (error) {
+    console.error('[stocktake] applyStocktakeReviewBatch 세션 반영 실패:', error);
+    return { ok: false, error: toMessage(error) };
+  }
+
+  revalidatePath(`/stocktake/${sessionId}`);
+  return { ok: true, successCount: confirmIds.size + newItems.length, failures };
+}
+
 export async function deleteStocktakeSession(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
   const { error } = await supabase.from(STOCKTAKE_TABLE).delete().eq('id', id);

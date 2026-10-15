@@ -1,18 +1,23 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import {
-  addUnexpectedAssetToSession,
+  applyStocktakeReviewBatch,
   bulkUpdateStocktakeItems,
   completeStocktake,
-  createAssetFromScan,
   lookupUnexpectedAsset,
+  startStocktake,
   updateStocktakeItem,
+  type ReviewApplyInput,
 } from '@/app/stocktake/actions';
+import { addStaffNameIfNew } from '@/app/actions';
 import { resizeImageFile } from '@/lib/imageResize';
 import { scanLabelImage } from '@/lib/ocrClient';
 import { isLikelyAssetId, stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
 import { CATEGORIES } from '@/lib/types';
+
+const STARTED_BY_KEY = 'firstoa_stocktake_started_by';
 
 const STATUS_LABEL: Record<string, string> = {
   미확인: '미확인',
@@ -47,8 +52,20 @@ const REVIEW_BADGE: Record<ReviewStatus, string> = {
   인식실패: 'badge-기타',
 };
 
-export default function StocktakeSessionPage({ session }: { session: StocktakeSession }) {
+type Props = {
+  session: StocktakeSession;
+  locations: string[];
+  staffNames: string[];
+  completedTodayLocations: string[];
+};
+
+export default function StocktakeSessionPage({ session, locations, staffNames, completedTodayLocations }: Props) {
+  const router = useRouter();
   const [toast, setToast] = useState({ msg: '', show: false });
+  const [nextLocation, setNextLocation] = useState('');
+  const [nextStartedBy, setNextStartedBy] = useState(session.startedBy);
+  const [startingNext, setStartingNext] = useState(false);
+  const [justCompleted, setJustCompleted] = useState(false);
   const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -173,33 +190,27 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
     setReviewItems((prev) => prev.filter((it) => it.key !== key));
   }
 
-  /** "재고 반영하기" — 검토 목록을 한꺼번에 적용합니다. 웹앱(Supabase)과 구글시트 둘 다
-   * createAsset/updateAsset이 이미 같이 처리하므로 여기서 따로 손댈 게 없습니다. */
+  /** "재고 반영하기" — 검토 목록을 한꺼번에 적용합니다. 느린 구글시트 작업(위치변경/신규등록)은
+   * 서버에서 병렬로 처리하고, 세션 결과는 한 번만 읽고 쓰도록 배치 액션 하나로 넘깁니다
+   * (기존엔 항목마다 왕복해서 느렸고 동시 처리 시 세션 데이터가 덮어써질 위험도 있었음). */
   async function handleApplyReview() {
     setApplying(true);
-    let okCount = 0;
-    const failures: string[] = [];
+    const applyItems: ReviewApplyInput[] = reviewItems
+      .filter((item): item is ReviewItem & { status: '정상' | '위치변경' | '신규등록' } => item.status !== '인식실패')
+      .map((item) => ({ assetId: item.assetId, status: item.status, category: item.category, model: item.model }));
 
-    for (const item of reviewItems) {
-      if (item.status === '인식실패') continue;
-      let result;
-      if (item.status === '정상') {
-        result = await updateStocktakeItem(session.id, item.assetId, '확인됨');
-      } else if (item.status === '위치변경') {
-        result = await addUnexpectedAssetToSession(session.id, item.assetId, session.location);
-      } else {
-        result = await createAssetFromScan(session.id, item.assetId, item.category, item.model, session.location);
-      }
-      if (result.ok) okCount++;
-      else failures.push(`${item.assetId}: ${result.error}`);
-    }
+    const result = await applyStocktakeReviewBatch(session.id, applyItems, session.location);
 
     setApplying(false);
     setReviewItems([]);
+    if (!result.ok) {
+      showToast(result.error);
+      return;
+    }
     showToast(
-      failures.length === 0
-        ? `${okCount}건 재고에 반영했어요. (웹앱 + 구글시트 모두 반영됨)`
-        : `${okCount}건 반영, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`,
+      result.failures.length === 0
+        ? `${result.successCount}건 재고에 반영했어요. (웹앱 + 구글시트 모두 반영됨)`
+        : `${result.successCount}건 반영, ${result.failures.length}건 실패 — ${result.failures.slice(0, 2).join(' / ')}`,
     );
   }
 
@@ -234,6 +245,40 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
       const result = await completeStocktake(session.id);
       setConfirmingComplete(false);
       showToast(result.ok ? '조사를 종료했어요.' : result.error);
+      // 뒤로가기 해서 목록 → 새 조사 시작을 다시 누르는 번거로움 없이, 바로 다음 위치로
+      // 넘어갈 수 있게 제안합니다(오늘 조사한 위치를 쭉 이어서 도는 현장 작업 흐름).
+      if (result.ok) setJustCompleted(true);
+    });
+  }
+
+  // 오늘 이미 끝낸 위치(방금 끝낸 이 위치 포함)는 다음 위치 후보에서 뺍니다.
+  const nextLocationOptions = locations.filter(
+    (loc) => loc !== session.location && !completedTodayLocations.includes(loc),
+  );
+
+  function handleStartNext() {
+    if (!nextLocation.trim()) {
+      showToast('다음 위치를 선택해주세요.');
+      return;
+    }
+    setStartingNext(true);
+    startTransition(async () => {
+      const result = await startStocktake(nextLocation, nextStartedBy);
+      setStartingNext(false);
+      if (!result.ok || !result.id) {
+        showToast(result.ok ? '세션을 만들지 못했어요.' : result.error);
+        return;
+      }
+      const trimmedName = nextStartedBy.trim();
+      try {
+        localStorage.setItem(STARTED_BY_KEY, trimmedName);
+      } catch {
+        // 무시
+      }
+      if (trimmedName && !staffNames.includes(trimmedName)) {
+        addStaffNameIfNew(trimmedName).catch(() => {});
+      }
+      router.push(`/stocktake/${result.id}`);
     });
   }
 
@@ -292,6 +337,37 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
             ))}
         </div>
       </div>
+
+      {justCompleted && (
+        <div className="panel" style={{ marginBottom: '12px', borderColor: 'var(--green-100, #bbf7d0)' }}>
+          <div style={{ fontWeight: 700, marginBottom: '8px' }}>✅ "{session.location}" 조사 종료 — 바로 다음 위치 시작할까요?</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <select value={nextLocation} onChange={(e) => setNextLocation(e.target.value)}>
+              <option value="">다음 위치 선택</option>
+              {nextLocationOptions.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
+            <input
+              value={nextStartedBy}
+              onChange={(e) => setNextStartedBy(e.target.value)}
+              placeholder="담당자"
+              style={{ width: '120px' }}
+            />
+            <button type="button" className="btn btn-primary" disabled={startingNext || pending} onClick={handleStartNext}>
+              {startingNext ? '시작 중…' : '다음 위치 조사 시작'}
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => router.push('/stocktake')}>
+              목록으로
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setJustCompleted(false)}>
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
 
       {reviewItems.length > 0 && (
         <div className="panel" style={{ marginBottom: '12px' }}>
