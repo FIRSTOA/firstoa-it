@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import { markZoneVerified, setLocationFloor, setZoneVerifier, updateZoneStatus } from '@/app/inventoryStatus/actions';
+import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import {
+  buildLocationCheckTables,
   buildZoneMatrix,
   CONDITION_STATUSES,
   findCell,
@@ -18,6 +20,7 @@ type Props = {
   assets: Asset[];
   zoneStatuses: ZoneStatus[];
   zoneVerifications: ZoneVerification[];
+  stocktakeConfirmations: Record<string, StocktakeConfirmation>;
   zoneLocations: string[];
   staffNames: string[];
   locationFloorMap: LocationFloorMap[];
@@ -39,6 +42,7 @@ export default function InventoryStatusPage({
   zoneLocations,
   staffNames,
   locationFloorMap,
+  stocktakeConfirmations,
 }: Props) {
   const [statuses, setStatuses] = useState(zoneStatuses);
   const [verifications, setVerifications] = useState(zoneVerifications);
@@ -54,6 +58,10 @@ export default function InventoryStatusPage({
 
   const zoneByAssetId = useMemo(() => new Map(statuses.map((s) => [s.assetId, s])), [statuses]);
   const floorByCode = useMemo(() => new Map(floorMap.map((m) => [m.code, m.floor])), [floorMap]);
+  const checkTables = useMemo(
+    () => buildLocationCheckTables(assets, stocktakeConfirmations),
+    [assets, stocktakeConfirmations],
+  );
   const matrix = useMemo(
     () => buildZoneMatrix(assets, zoneByAssetId, floorByCode),
     [assets, zoneByAssetId, floorByCode],
@@ -313,6 +321,62 @@ export default function InventoryStatusPage({
         {matrix.locations.length === 0 && (
           <div className="empty-state">
             <div>📊</div>아직 위치가 태깅된 자산이 없어요.
+          </div>
+        )}
+      </div>
+
+      <div className="panel" style={{ marginBottom: '12px' }}>
+        <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>1차 수량 체크</div>
+        <div className="sub" style={{ marginBottom: '10px' }}>
+          위치별 시스템 수량과 실재고조사(2차 검증)로 실제 확인된 수량을 비교해요. 숫자가
+          다르면 빨갛게 표시돼요 — 실재고조사를 아직 안 했거나 위치가 바뀌었을 수 있어요.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
+          {checkTables.map(({ category, rows, total }) => (
+            <div key={category} style={{ minWidth: '320px', flex: '1 1 320px' }}>
+              <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>{category}</div>
+              <table style={{ fontSize: '12.5px' }}>
+                <thead>
+                  <tr>
+                    <th>위치</th>
+                    <th>{category}</th>
+                    <th>실재고체크</th>
+                    <th>업데이트</th>
+                    <th>담당자</th>
+                    <th>비고</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.location} style={r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined}>
+                      <td>{r.location}</td>
+                      <td>{r.systemCount}</td>
+                      <td>{r.confirmedCount}</td>
+                      <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
+                        {r.lastScannedAt ? formatKstDateTime(r.lastScannedAt) : '-'}
+                      </td>
+                      <td>{r.verifiedBy || '-'}</td>
+                      <td style={{ fontWeight: 700, color: r.mismatch ? 'var(--red-600)' : 'var(--green-600)' }}>
+                        {r.confirmedCount === 0 && r.lastScannedAt === null ? '미확인' : r.mismatch ? '불일치' : '일치'}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td style={{ fontWeight: 700 }}>총계</td>
+                    <td style={{ fontWeight: 700 }}>{total.system}</td>
+                    <td style={{ fontWeight: 700 }}>{total.confirmed}</td>
+                    <td />
+                    <td />
+                    <td />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+        {checkTables.length === 0 && (
+          <div className="empty-state">
+            <div>📋</div>위치가 입력된 가용 자산이 없어요.
           </div>
         )}
       </div>

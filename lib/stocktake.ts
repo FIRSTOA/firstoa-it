@@ -112,7 +112,7 @@ export function isLikelyAssetId(value: string): boolean {
   return /^[A-Za-z]{1,3}\d{3,6}$/.test(value.trim());
 }
 
-export type StocktakeConfirmation = { scannedAt: string; location: string; sessionId: string };
+export type StocktakeConfirmation = { scannedAt: string; location: string; sessionId: string; startedBy: string };
 
 /**
  * IT재고 리스트에 "실재고체크완료" 배지를 달기 위한 조회표 — 모든 조사 세션의 결과를
@@ -127,7 +127,12 @@ export function buildLatestConfirmationMap(sessions: StocktakeSession[]): Record
       if (!item.scannedAt) continue;
       const existing = map[item.assetId];
       if (!existing || item.scannedAt > existing.scannedAt) {
-        map[item.assetId] = { scannedAt: item.scannedAt, location: session.location, sessionId: session.id };
+        map[item.assetId] = {
+          scannedAt: item.scannedAt,
+          location: session.location,
+          sessionId: session.id,
+          startedBy: session.startedBy,
+        };
       }
     }
   }

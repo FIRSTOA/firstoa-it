@@ -3,6 +3,7 @@
  * 'use server'라 상수/타입만 내보내는 파일을 못 써서(lib/confirmForm.ts와 동일한 이유)
  * 분리합니다. 구글시트 원장과 무관한 Supabase 전용 오버레이 데이터입니다.
  */
+import type { StocktakeConfirmation } from './stocktake';
 import type { Asset } from './types';
 
 export const CONDITION_STATUSES = ['수리대기', '수리완료', '단순오버홀', '가용'] as const;
@@ -193,4 +194,69 @@ export function buildZoneMatrix(
 
 export function findCell(cells: ZoneMatrixCell[], location: string, category: string): ZoneMatrixCell | null {
   return cells.find((c) => c.location === location && c.category === category) ?? null;
+}
+
+export type LocationCheckRow = {
+  location: string; // 실재고조사와 똑같이 쓰는 원문 위치값(예: "A1", "G3 오버홀") — 코드로 안 줄임
+  systemCount: number; // 지금 시스템(구글시트) 기준 그 위치·품목의 대수
+  confirmedCount: number; // 그중 실재고조사로 실제 확인된 대수
+  lastScannedAt: string | null;
+  verifiedBy: string;
+  mismatch: boolean;
+};
+
+/**
+ * "1차 수량 체크" — 위치별/품목별로 시스템 수량과 실재고조사(2차 검증)로 실제 확인된
+ * 수량을 나란히 비교합니다. 실재고조사가 이미 하는 자산 단위 스캔 결과를 그대로
+ * 재사용하므로, 여기서 따로 숫자를 입력받지 않습니다(화면만 다르고 데이터 출처는
+ * confirmationByAssetId = lib/stocktake.ts의 buildLatestConfirmationMap 결과 그대로).
+ */
+export function buildLocationCheckTables(
+  assets: Asset[],
+  confirmationByAssetId: Record<string, StocktakeConfirmation>,
+): { category: string; rows: LocationCheckRow[]; total: { system: number; confirmed: number } }[] {
+  type Bucket = { system: number; confirmed: number; lastScannedAt: string | null; verifiedBy: string };
+  const byCategory = new Map<string, Map<string, Bucket>>();
+
+  for (const asset of assets) {
+    if (asset.status === '임대중') continue;
+    if (!asset.assetId.trim()) continue;
+    const location = asset.location.trim();
+    if (!location) continue;
+
+    const byLocation = byCategory.get(asset.category) ?? new Map<string, Bucket>();
+    byCategory.set(asset.category, byLocation);
+    const bucket = byLocation.get(location) ?? { system: 0, confirmed: 0, lastScannedAt: null, verifiedBy: '' };
+    bucket.system += 1;
+
+    const confirmation = confirmationByAssetId[asset.assetId];
+    if (confirmation) {
+      bucket.confirmed += 1;
+      if (!bucket.lastScannedAt || confirmation.scannedAt > bucket.lastScannedAt) {
+        bucket.lastScannedAt = confirmation.scannedAt;
+        bucket.verifiedBy = confirmation.startedBy;
+      }
+    }
+    byLocation.set(location, bucket);
+  }
+
+  return [...byCategory.entries()]
+    .map(([category, byLocation]) => {
+      const rows = [...byLocation.entries()]
+        .map(([location, b]) => ({
+          location,
+          systemCount: b.system,
+          confirmedCount: b.confirmed,
+          lastScannedAt: b.lastScannedAt,
+          verifiedBy: b.verifiedBy,
+          mismatch: b.confirmed !== b.system,
+        }))
+        .sort((a, b) => a.location.localeCompare(b.location, 'ko'));
+      const total = rows.reduce(
+        (acc, r) => ({ system: acc.system + r.systemCount, confirmed: acc.confirmed + r.confirmedCount }),
+        { system: 0, confirmed: 0 },
+      );
+      return { category, rows, total };
+    })
+    .sort((a, b) => a.category.localeCompare(b.category, 'ko'));
 }

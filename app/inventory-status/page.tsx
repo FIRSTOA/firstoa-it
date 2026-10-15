@@ -9,6 +9,7 @@ import { listAllAssetsUnified } from '@/app/stocktake/actions';
 import InventoryStatusPage from '@/components/inventoryStatus/InventoryStatusPage';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
+import { loadStocktakeConfirmations } from '@/lib/inventory/stocktakeConfirmations';
 import { isSupabaseConfigured } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -22,14 +23,16 @@ export default async function Page() {
     );
   }
 
-  const [assets, zoneStatuses, zoneVerifications, zoneLocations, staffNames, locationFloorMap] = await Promise.all([
-    listAllAssetsUnified().catch(() => []),
-    listZoneStatuses(),
-    listZoneVerifications(),
-    listZoneLocations(),
-    listStaffNames(),
-    listLocationFloorMap(),
-  ]);
+  const [assets, zoneStatuses, zoneVerifications, zoneLocations, staffNames, locationFloorMap, stocktakeConfirmations] =
+    await Promise.all([
+      listAllAssetsUnified().catch(() => []),
+      listZoneStatuses(),
+      listZoneVerifications(),
+      listZoneLocations(),
+      listStaffNames(),
+      listLocationFloorMap(),
+      loadStocktakeConfirmations(),
+    ]);
 
   return (
     <Shell
@@ -44,6 +47,7 @@ export default async function Page() {
         zoneLocations={zoneLocations}
         staffNames={staffNames}
         locationFloorMap={locationFloorMap}
+        stocktakeConfirmations={stocktakeConfirmations}
       />
     </Shell>
   );
