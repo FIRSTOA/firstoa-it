@@ -4,10 +4,13 @@
  * 분리합니다. 구글시트 원장과 무관한 Supabase 전용 오버레이 데이터입니다.
  */
 import type { StocktakeConfirmation } from './stocktake';
-import type { Asset } from './types';
+import { STATUSES, type Asset } from './types';
 
 export const CONDITION_STATUSES = ['수리대기', '수리완료', '단순오버홀', '가용'] as const;
 export type ConditionStatus = (typeof CONDITION_STATUSES)[number];
+
+/** 품목별 집계 열로 쓰는 재고상태 — 임대중은 애초에 재고현황판 범위(가용 자산만)에서 빼므로 제외. */
+export const BREAKDOWN_STATUSES = STATUSES.filter((s) => s !== '임대중');
 
 export type ZoneStatus = {
   assetId: string;
@@ -211,7 +214,6 @@ export function findCell(cells: ZoneMatrixCell[], location: string, category: st
 
 export type QuantityCheck = {
   location: string;
-  category: string;
   countedCount: number;
   checkedBy: string;
   checkedAt: string;
@@ -219,7 +221,6 @@ export type QuantityCheck = {
 
 export type QuantityCheckRow = {
   location: string;
-  category: string;
   counted_count: number;
   checked_by: string;
   checked_at: string;
@@ -228,34 +229,33 @@ export type QuantityCheckRow = {
 export function rowToQuantityCheck(row: QuantityCheckRow): QuantityCheck {
   return {
     location: row.location,
-    category: row.category,
     countedCount: row.counted_count,
     checkedBy: row.checked_by,
     checkedAt: row.checked_at,
   };
 }
 
-export type QuantityCheckTableRow = {
+export type LocationAssetRef = { assetId: string; category: string; model: string };
+
+export type LocationQuantityRow = {
   location: string;
   systemCount: number;
   countedCount: number | null;
   checkedBy: string;
   checkedAt: string | null;
   mismatch: boolean;
+  assetIds: LocationAssetRef[];
 };
 
 /**
- * "숫자만 맞는지" 체크 — 실재고조사(자산번호 단위 스캔)와 별개로, 누가 선반을 보고 대수만
- * 세서 입력한 값(QuantityCheck)과 시스템 수량을 비교합니다. 아직 아무도 입력 안 한 위치는
- * countedCount: null로 돌려주고(화면에서 "미확인"으로 소란스럽게 보여줄지는 호출부 판단),
- * 입력된 것만 일치/불일치로 판정됩니다.
+ * "숫자만 맞는지" 체크 — 실재고조사(자산번호 단위 스캔)와 별개로, 위치 하나를 보고 눈으로
+ * 센 대수(QuantityCheck, 품목 구분 없이 위치 전체)와 시스템 수량을 비교합니다. 품목으로는
+ * 안 나누고 위치 단위로만 집계하고, 각 위치에 실제로 어떤 자산번호가 있는지도 같이
+ * 돌려줘서 화면에서 위치를 클릭하면 바로 펼쳐볼 수 있게 합니다.
  */
-export function buildQuantityCheckTables(
-  assets: Asset[],
-  checks: QuantityCheck[],
-): { category: string; rows: QuantityCheckTableRow[]; total: { system: number; counted: number } }[] {
-  const checkByKey = new Map(checks.map((c) => [`${c.location}\u0000${c.category}`, c]));
-  const byCategory = new Map<string, Map<string, number>>();
+export function buildLocationQuantitySummary(assets: Asset[], checks: QuantityCheck[]): LocationQuantityRow[] {
+  const checkByLocation = new Map(checks.map((c) => [c.location, c]));
+  const byLocation = new Map<string, LocationAssetRef[]>();
 
   for (const asset of assets) {
     if (asset.status === '임대중') continue;
@@ -263,33 +263,26 @@ export function buildQuantityCheckTables(
     const location = asset.location.trim();
     if (!location) continue;
 
-    const byLocation = byCategory.get(asset.category) ?? new Map<string, number>();
-    byCategory.set(asset.category, byLocation);
-    byLocation.set(location, (byLocation.get(location) ?? 0) + 1);
+    const list = byLocation.get(location) ?? [];
+    list.push({ assetId: asset.assetId, category: asset.category, model: asset.model });
+    byLocation.set(location, list);
   }
 
-  return [...byCategory.entries()]
-    .map(([category, byLocation]) => {
-      const rows = [...byLocation.entries()]
-        .map(([location, systemCount]) => {
-          const check = checkByKey.get(`${location}\u0000${category}`);
-          return {
-            location,
-            systemCount,
-            countedCount: check ? check.countedCount : null,
-            checkedBy: check?.checkedBy ?? '',
-            checkedAt: check?.checkedAt ?? null,
-            mismatch: check ? check.countedCount !== systemCount : false,
-          };
-        })
-        .sort((a, b) => a.location.localeCompare(b.location, 'ko'));
-      const total = rows.reduce(
-        (acc, r) => ({ system: acc.system + r.systemCount, counted: acc.counted + (r.countedCount ?? 0) }),
-        { system: 0, counted: 0 },
-      );
-      return { category, rows, total };
+  return [...byLocation.entries()]
+    .map(([location, assetIds]) => {
+      const check = checkByLocation.get(location);
+      const systemCount = assetIds.length;
+      return {
+        location,
+        systemCount,
+        countedCount: check ? check.countedCount : null,
+        checkedBy: check?.checkedBy ?? '',
+        checkedAt: check?.checkedAt ?? null,
+        mismatch: check ? check.countedCount !== systemCount : false,
+        assetIds,
+      };
     })
-    .sort((a, b) => a.category.localeCompare(b.category, 'ko'));
+    .sort((a, b) => a.location.localeCompare(b.location, 'ko'));
 }
 
 export type LocationCheckRow = {
@@ -355,4 +348,57 @@ export function buildLocationCheckTables(
       return { category, rows, total };
     })
     .sort((a, b) => a.category.localeCompare(b.category, 'ko'));
+}
+
+export type CategoryBreakdownRow = {
+  detailCode: string;
+  total: number;
+  byStatus: Record<string, number>;
+};
+
+export type CategoryBreakdownGroup = {
+  category: string;
+  rows: CategoryBreakdownRow[];
+  total: number;
+  totalByStatus: Record<string, number>;
+};
+
+/**
+ * 품목 → 세부구분코드별 수량 집계(참고: first-as-search의 SKU별 재고 현황판과 비슷한
+ * 구조). 층/선반 위치 매핑 없이, 품목별로 "구분코드" 한 단계만 내려가서 재고상태별 대수를
+ * 보여줍니다. 세부구분코드는 노트북/데스크탑이면 gubunCode(예: "I5고설데"), 기타주변기기면
+ * subItem(나스/마우스 등), 그 외(모니터/빔프로젝트) 또는 값이 없으면 모델명으로 묶습니다.
+ */
+export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[] {
+  type Bucket = { total: number; byStatus: Record<string, number> };
+  const byCategory = new Map<string, Map<string, Bucket>>();
+
+  for (const asset of assets) {
+    if (asset.status === '임대중') continue;
+    if (!asset.assetId.trim()) continue;
+    const detailCode = asset.gubunCode.trim() || asset.subItem.trim() || asset.model.trim() || '(미상)';
+
+    const byDetail = byCategory.get(asset.category) ?? new Map<string, Bucket>();
+    byCategory.set(asset.category, byDetail);
+    const bucket = byDetail.get(detailCode) ?? { total: 0, byStatus: {} };
+    bucket.total += 1;
+    bucket.byStatus[asset.status] = (bucket.byStatus[asset.status] ?? 0) + 1;
+    byDetail.set(detailCode, bucket);
+  }
+
+  return [...byCategory.entries()]
+    .map(([category, byDetail]) => {
+      const rows = [...byDetail.entries()]
+        .map(([detailCode, b]) => ({ detailCode, total: b.total, byStatus: b.byStatus }))
+        .sort((a, b) => b.total - a.total);
+      const total = rows.reduce((s, r) => s + r.total, 0);
+      const totalByStatus: Record<string, number> = {};
+      for (const r of rows) {
+        for (const [status, count] of Object.entries(r.byStatus)) {
+          totalByStatus[status] = (totalByStatus[status] ?? 0) + count;
+        }
+      }
+      return { category, rows, total, totalByStatus };
+    })
+    .sort((a, b) => b.total - a.total);
 }

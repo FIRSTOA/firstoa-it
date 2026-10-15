@@ -48,14 +48,14 @@ create table if not exists public.it_zone_verifications (
 );
 
 -- 위치별 "숫자만" 체크 — 자산번호 단위 실재고조사(2차 검증)와 별개로, 선반 위치를 돌며
--- 대수만 세서 전산 수량과 맞는지 빠르게 확인하는 1차 체크용 (자산번호 매칭 없음)
-create table if not exists public.it_quantity_checks (
-  location       text not null,
-  category       text not null,
+-- 대수만 세서 전산 수량과 맞는지 빠르게 확인하는 1차 체크용 (자산번호/품목 매칭 없음, 위치
+-- 하나당 한 줄). 품목(category) 컬럼이 있던 이전 버전은 데이터 없이 바로 재설계합니다.
+drop table if exists public.it_quantity_checks;
+create table public.it_quantity_checks (
+  location       text primary key,
   counted_count  integer not null,
   checked_by     text not null default '',
-  checked_at     timestamptz not null default now(),
-  primary key (location, category)
+  checked_at     timestamptz not null default now()
 );
 
 drop trigger if exists it_zone_status_set_updated_at on public.it_zone_status;

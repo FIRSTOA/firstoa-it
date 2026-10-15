@@ -195,13 +195,8 @@ export async function listQuantityChecks(): Promise<QuantityCheck[]> {
   return ((data ?? []) as QuantityCheckRow[]).map(rowToQuantityCheck);
 }
 
-/** 자산번호 매칭 없이, 선반 위치를 보고 센 대수만 입력해서 시스템 수량과 비교합니다(1차 숫자 체크). */
-export async function setQuantityCheck(
-  location: string,
-  category: string,
-  count: number,
-  checkedBy: string,
-): Promise<ActionResult> {
+/** 자산번호/품목 매칭 없이, 위치 하나를 보고 센 대수만 입력해서 시스템 수량과 비교합니다(1차 숫자 체크). */
+export async function setQuantityCheck(location: string, count: number, checkedBy: string): Promise<ActionResult> {
   const trimmedLocation = location.trim();
   if (!trimmedLocation) return { ok: false, error: '위치가 비어있어요.' };
   if (!Number.isFinite(count) || count < 0) return { ok: false, error: '대수를 올바르게 입력해주세요.' };
@@ -210,12 +205,11 @@ export async function setQuantityCheck(
   const { error } = await supabase.from(QUANTITY_CHECKS_TABLE).upsert(
     {
       location: trimmedLocation,
-      category,
       counted_count: count,
       checked_by: checkedBy.trim(),
       checked_at: new Date().toISOString(),
     },
-    { onConflict: 'location,category' },
+    { onConflict: 'location' },
   );
   if (error) {
     console.error('[inventoryStatus] setQuantityCheck 실패:', error);
