@@ -107,6 +107,17 @@ export default function DeliveryConfirmFormDocument({ form }: { form: DeliveryCo
           </tbody>
         </table>
       ))}
+
+      {form.rawText && (
+        <div style={{ marginTop: '16px', borderTop: '1px dashed #ccc', paddingTop: '10px' }}>
+          <div style={{ fontWeight: 700, fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+            원문(인식 전 붙여넣은 내용)
+          </div>
+          <div style={{ fontSize: '11.5px', color: '#444', whiteSpace: 'pre-wrap', background: '#f9f9f9', padding: '8px', borderRadius: '4px' }}>
+            {form.rawText}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

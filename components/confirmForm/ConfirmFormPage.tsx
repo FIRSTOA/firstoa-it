@@ -2,10 +2,16 @@
 
 import { useRef, useState } from 'react';
 import { lookupKnownAsset } from '@/app/actions';
-import { getDeliveryConfirmForm, ocrScanConfirmFormText, registerConfirmForm } from '@/app/confirmForm/actions';
+import {
+  getDeliveryConfirmForm,
+  listRecentConfirmFormEntries,
+  ocrScanConfirmFormText,
+  registerConfirmForm,
+} from '@/app/confirmForm/actions';
+import { deleteDispatch, updateDispatch } from '@/app/dispatch/actions';
 import { CONFIRM_FORM_TABS, type ConfirmFormTab } from '@/lib/confirmForm';
 import type { DeliveryConfirmForm } from '@/lib/deliveryConfirmForm';
-import type { DispatchEntry } from '@/lib/dispatch';
+import { DISPATCH_STATUSES, type DispatchEntry, type DispatchInput } from '@/lib/dispatch';
 import { resizeImageFile } from '@/lib/imageResize';
 import type { WithdrawalFormFields, WithdrawalFormItem } from '@/lib/ocr';
 import { scanWithdrawalFormImage } from '@/lib/ocrClient';
@@ -19,10 +25,19 @@ type EntryMode = 'simple' | 'delivery';
 const BLANK_FIELDS: WithdrawalFormFields = { companyName: '', date: '', requester: '', reason: '', items: [] };
 const BLANK_ITEM: WithdrawalFormItem = { category: CATEGORIES[0], model: '', serialNumber: '', assetId: '' };
 
-export default function ConfirmFormPage({ initialEntries: entries }: { initialEntries: DispatchEntry[] }) {
+const STATUS_FILTER_CHIPS: { label: string; value: 'all' | string }[] = [
+  { label: '전체', value: 'all' },
+  { label: '대기', value: '접수' },
+  { label: '준비중', value: '준비중' },
+  { label: '준비완료', value: '준비완료' },
+];
+
+export default function ConfirmFormPage({ initialEntries }: { initialEntries: DispatchEntry[] }) {
+  const [entries, setEntries] = useState(initialEntries);
   const [entryMode, setEntryMode] = useState<EntryMode>('simple');
   const [tab, setTab] = useState<ConfirmFormTab>('철수');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'pc' | string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [pastedText, setPastedText] = useState('');
   const [fields, setFields] = useState<WithdrawalFormFields>(BLANK_FIELDS);
@@ -37,6 +52,15 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
     setToast({ msg, show: true });
   }
 
+  function refetchHistory() {
+    listRecentConfirmFormEntries().then(setEntries);
+  }
+
+  function handleDeliveryRegistered(msg: string) {
+    showToast(msg);
+    refetchHistory();
+  }
+
   async function openDeliveryDetail(id: string) {
     const form = await getDeliveryConfirmForm(id);
     if (!form) {
@@ -44,6 +68,30 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
       return;
     }
     setDeliveryDetail(form);
+  }
+
+  // 등록내역 표에서 처리여부/시작/종료/처리자를 바로 수정 — 기존 출고/접수 대장의
+  // updateDispatch(app/dispatch/actions.ts)를 그대로 재사용합니다(새 액션 안 만듦).
+  function handleHistoryFieldUpdate(entry: DispatchEntry, patch: Partial<DispatchInput>) {
+    const { id, seq, ...base } = entry;
+    void seq;
+    const next = { ...base, ...patch };
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    updateDispatch(id, next).then((result) => {
+      if (!result.ok) showToast(result.error);
+    });
+  }
+
+  // 테스트하면서 생긴 건을 바로 지울 수 있게 — 기존 출고/접수 대장의 deleteDispatch 재사용.
+  function handleHistoryDelete(entry: DispatchEntry) {
+    if (!confirm(`"${entry.company || entry.item}" 건을 삭제할까요?`)) return;
+    setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+    deleteDispatch(entry.id).then((result) => {
+      if (!result.ok) {
+        showToast(result.error);
+        refetchHistory();
+      }
+    });
   }
 
   async function scanFile(file: File) {
@@ -157,7 +205,7 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
   async function handleRegister() {
     setRegistering(true);
     try {
-      const result = await registerConfirmForm(tab, fields);
+      const result = await registerConfirmForm(tab, fields, pastedText);
       if (!result.ok) {
         showToast(result.error);
         return;
@@ -168,6 +216,7 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
           : '등록했어요 — 출고 대장에 반영됐어요.',
       );
       resetAll();
+      refetchHistory();
     } finally {
       setRegistering(false);
     }
@@ -198,7 +247,7 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
           <div className="sub" style={{ marginBottom: '10px' }}>
             IT/복합기 납품 건을 원본 양식과 같은 항목으로 등록해요. 등록하면 출고/접수 대장에도 반영돼요.
           </div>
-          <DeliveryConfirmFormEditor onRegistered={showToast} />
+          <DeliveryConfirmFormEditor onRegistered={handleDeliveryRegistered} />
         </div>
       )}
 
@@ -383,7 +432,19 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
       )}
 
       <div className="panel" style={{ marginTop: '14px' }}>
-        <h2 style={{ fontSize: '15px', margin: '0 0 10px' }}>이 도구로 등록한 내역 (최근 100건)</h2>
+        <h2 style={{ fontSize: '15px', margin: '0 0 10px' }}>이 도구로 등록한 내역 ({entries.length}건)</h2>
+        <div className="chip-group" style={{ marginBottom: '8px' }}>
+          {STATUS_FILTER_CHIPS.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              className={`chip${statusFilter === s.value ? ' active' : ''}`}
+              onClick={() => setStatusFilter(s.value)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
         <div className="chip-group" style={{ marginBottom: '10px' }}>
           <button type="button" className={`chip${historyFilter === 'all' ? ' active' : ''}`} onClick={() => setHistoryFilter('all')}>
             전체
@@ -409,62 +470,73 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
             </button>
           ))}
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>구분</th>
-              <th>품목</th>
-              <th>모델명</th>
-              <th>자산번호</th>
-              <th>거래처</th>
-              <th>날짜</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {(() => {
-              const filtered = entries.filter((e) => {
-                if (historyFilter === 'all') return true;
-                if (historyFilter === 'pc') return PC_ITEMS.includes(e.item);
-                return e.item === historyFilter;
-              });
-              const seenFormIds = new Set<string>();
-              return filtered.map((e) => {
-                // 같은 정식 납품확인서에서 나온 유닛 행이 여러 개면, 그 그룹의 첫 행에만
-                // "상세보기" 버튼을 보여줍니다(묶여서 하나의 확인서니까).
-                const showDetailButton = !!e.deliveryFormId && !seenFormIds.has(e.deliveryFormId);
-                if (e.deliveryFormId) seenFormIds.add(e.deliveryFormId);
-                return (
-                  <tr key={e.id}>
-                    <td>{e.type}</td>
-                    <td>{e.item}</td>
-                    <td>{e.directSpec || '-'}</td>
-                    <td>{e.assetId || '-'}</td>
-                    <td>{e.company}</td>
-                    <td style={{ fontSize: '12px' }}>{e.deliveryDate || '-'}</td>
-                    <td>
-                      {showDetailButton && (
-                        <button type="button" className="chip" onClick={() => openDeliveryDetail(e.deliveryFormId!)}>
-                          상세보기
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              });
-            })()}
-            {entries.length === 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table>
+            <thead>
               <tr>
-                <td colSpan={7} className="empty-state">
-                  <div>📋</div>아직 등록한 내역이 없어요.
-                </td>
+                <th>접수일</th>
+                <th>접수시간</th>
+                <th>시작</th>
+                <th>종료</th>
+                <th>처리여부</th>
+                <th>접수자</th>
+                <th>처리자</th>
+                <th>구분</th>
+                <th>상호</th>
+                <th>연락처</th>
+                <th>품목</th>
+                <th>모델명</th>
+                <th>자산번호</th>
+                <th>시리얼번호</th>
+                <th>비고</th>
+                <th>납품/교체일</th>
+                <th />
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(() => {
+                const filtered = entries.filter((e) => {
+                  if (statusFilter !== 'all' && e.status !== statusFilter) return false;
+                  if (historyFilter === 'all') return true;
+                  if (historyFilter === 'pc') return PC_ITEMS.includes(e.item);
+                  return e.item === historyFilter;
+                });
+                const seenFormIds = new Set<string>();
+                return filtered.map((e) => {
+                  // 같은 정식 납품확인서에서 나온 유닛 행이 여러 개면, 그 그룹의 첫 행에만
+                  // "상세보기" 버튼을 보여줍니다(묶여서 하나의 확인서니까).
+                  const showDetailButton = !!e.deliveryFormId && !seenFormIds.has(e.deliveryFormId);
+                  if (e.deliveryFormId) seenFormIds.add(e.deliveryFormId);
+                  return (
+                    <ConfirmHistoryRow
+                      key={e.id}
+                      entry={e}
+                      showDetailButton={showDetailButton}
+                      onOpenDetail={() => openDeliveryDetail(e.deliveryFormId!)}
+                      onFieldUpdate={(patch) => handleHistoryFieldUpdate(e, patch)}
+                      onDelete={() => handleHistoryDelete(e)}
+                    />
+                  );
+                });
+              })()}
+              {entries.length === 0 && (
+                <tr>
+                  <td colSpan={17} className="empty-state">
+                    <div>📋</div>아직 등록한 내역이 없어요.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <DeliveryConfirmFormDetail form={deliveryDetail} onClose={() => setDeliveryDetail(null)} />
+      <DeliveryConfirmFormDetail
+        form={deliveryDetail}
+        onClose={() => setDeliveryDetail(null)}
+        onChanged={refetchHistory}
+        onToast={showToast}
+      />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
         <span>{toast.msg}</span>
@@ -473,5 +545,95 @@ export default function ConfirmFormPage({ initialEntries: entries }: { initialEn
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * 등록내역 표의 행 하나 — 처리여부/시작/종료/처리자를 그 자리에서 바로 고칠 수 있게
+ * (실재고조사/입고대장 등 이 앱 전반의 인라인 수정 패턴과 동일) 로컬 상태로 값을 들고
+ * 있다가, select는 바로, 텍스트/시간 입력은 blur 시 onFieldUpdate로 커밋합니다.
+ */
+function ConfirmHistoryRow({
+  entry,
+  showDetailButton,
+  onOpenDetail,
+  onFieldUpdate,
+  onDelete,
+}: {
+  entry: DispatchEntry;
+  showDetailButton: boolean;
+  onOpenDetail: () => void;
+  onFieldUpdate: (patch: Partial<DispatchInput>) => void;
+  onDelete: () => void;
+}) {
+  const [startTime, setStartTime] = useState(entry.startTime);
+  const [endTime, setEndTime] = useState(entry.endTime);
+  const [processor, setProcessor] = useState(entry.processor);
+
+  return (
+    <tr>
+      <td style={{ fontSize: '12px' }}>{entry.receivedDate || '-'}</td>
+      <td style={{ fontSize: '12px' }}>{entry.receivedTime || '-'}</td>
+      <td>
+        <input
+          type="time"
+          className="inline-cell-input"
+          value={startTime}
+          onChange={(e) => setStartTime(e.target.value)}
+          onBlur={() => onFieldUpdate({ startTime })}
+        />
+      </td>
+      <td>
+        <input
+          type="time"
+          className="inline-cell-input"
+          value={endTime}
+          onChange={(e) => setEndTime(e.target.value)}
+          onBlur={() => onFieldUpdate({ endTime })}
+        />
+      </td>
+      <td>
+        <select
+          className="inline-cell-input"
+          value={entry.status}
+          onChange={(e) => onFieldUpdate({ status: e.target.value })}
+        >
+          {DISPATCH_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s === '접수' ? '대기' : s}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td style={{ fontSize: '12px' }}>{entry.receiver || '-'}</td>
+      <td>
+        <input
+          className="inline-cell-input"
+          value={processor}
+          onChange={(e) => setProcessor(e.target.value)}
+          onBlur={() => onFieldUpdate({ processor })}
+          placeholder="처리자"
+        />
+      </td>
+      <td>{entry.type}</td>
+      <td>{entry.company}</td>
+      <td style={{ fontSize: '12px' }}>{entry.contact || '-'}</td>
+      <td>{entry.item}</td>
+      <td>{entry.directSpec || '-'}</td>
+      <td>{entry.assetId || '-'}</td>
+      <td>{entry.serialNumber || '-'}</td>
+      <td style={{ fontSize: '12px' }}>{entry.notes || entry.remarks || '-'}</td>
+      <td style={{ fontSize: '12px' }}>{entry.deliveryDate || '-'}</td>
+      <td style={{ display: 'flex', gap: '4px' }}>
+        {showDetailButton && (
+          <button type="button" className="chip" onClick={onOpenDetail}>
+            상세보기
+          </button>
+        )}
+        <button type="button" className="icon-btn danger" title="삭제" onClick={onDelete}>
+          🗑
+        </button>
+      </td>
+    </tr>
   );
 }

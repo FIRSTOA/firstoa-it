@@ -41,6 +41,7 @@ export type DeliveryConfirmForm = {
   deposit: string;
   paymentNotes: string;
   items: DeliveryFormItem[];
+  rawText: string;
   createdAt: string;
 };
 
@@ -62,6 +63,7 @@ export type DeliveryConfirmFormRow = {
   deposit: string;
   payment_notes: string;
   items: DeliveryFormItem[];
+  raw_text: string;
   created_at: string;
 };
 
@@ -84,6 +86,7 @@ export function rowToDeliveryConfirmForm(row: DeliveryConfirmFormRow): DeliveryC
     deposit: row.deposit,
     paymentNotes: row.payment_notes,
     items: Array.isArray(row.items) ? row.items : [],
+    rawText: row.raw_text,
     createdAt: row.created_at,
   };
 }
@@ -107,6 +110,7 @@ export function deliveryConfirmFormInputToRow(input: DeliveryConfirmFormInput) {
     deposit: input.deposit,
     payment_notes: input.paymentNotes,
     items: input.items,
+    raw_text: input.rawText,
   };
 }
 

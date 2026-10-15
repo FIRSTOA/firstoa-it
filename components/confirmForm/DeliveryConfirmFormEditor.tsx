@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { lookupKnownAsset } from '@/app/actions';
-import { registerDeliveryConfirmForm } from '@/app/confirmForm/actions';
+import { registerDeliveryConfirmForm, updateDeliveryConfirmForm } from '@/app/confirmForm/actions';
 import {
   blankDeliveryFormItem,
   DELIVERY_FORM_CATEGORIES,
   resizeUnits,
+  type DeliveryConfirmForm,
   type DeliveryConfirmFormInput,
   type DeliveryFormItem,
 } from '@/lib/deliveryConfirmForm';
@@ -27,12 +28,31 @@ const BLANK: DeliveryConfirmFormInput = {
   deposit: '',
   paymentNotes: '',
   items: [blankDeliveryFormItem()],
+  rawText: '',
 };
 
-export default function DeliveryConfirmFormEditor({ onRegistered }: { onRegistered: (msg: string) => void }) {
-  const [form, setForm] = useState<DeliveryConfirmFormInput>(BLANK);
+function toInput(form: DeliveryConfirmForm): DeliveryConfirmFormInput {
+  const { id, seq, createdAt, ...input } = form;
+  void id;
+  void seq;
+  void createdAt;
+  return input;
+}
+
+type Props = {
+  onRegistered: (msg: string) => void;
+  /** 넘기면 수정 모드 — 등록 대신 updateDeliveryConfirmForm을 호출합니다(자산번호 등 추후 보완용). */
+  editing?: DeliveryConfirmForm | null;
+};
+
+export default function DeliveryConfirmFormEditor({ onRegistered, editing }: Props) {
+  const [form, setForm] = useState<DeliveryConfirmFormInput>(() => (editing ? toInput(editing) : BLANK));
   const [saving, setSaving] = useState(false);
   const [lookupNote, setLookupNote] = useState('');
+
+  useEffect(() => {
+    if (editing) setForm(toInput(editing));
+  }, [editing]);
 
   function set<K extends keyof DeliveryConfirmFormInput>(key: K, value: DeliveryConfirmFormInput[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -107,6 +127,11 @@ export default function DeliveryConfirmFormEditor({ onRegistered }: { onRegister
   async function handleSave() {
     setSaving(true);
     try {
+      if (editing) {
+        const result = await updateDeliveryConfirmForm(editing.id, form);
+        onRegistered(result.ok ? '수정했어요 — 출고/접수 대장에도 다시 반영됐어요.' : result.error);
+        return;
+      }
       const result = await registerDeliveryConfirmForm(form);
       if (!result.ok) {
         onRegistered(result.error);
@@ -274,7 +299,7 @@ export default function DeliveryConfirmFormEditor({ onRegistered }: { onRegister
 
       <div className="modal-footer" style={{ borderTop: 'none' }}>
         <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? '등록 중…' : '정식 납품확인서로 등록'}
+          {saving ? '저장 중…' : editing ? '수정 저장' : '정식 납품확인서로 등록'}
         </button>
       </div>
     </div>

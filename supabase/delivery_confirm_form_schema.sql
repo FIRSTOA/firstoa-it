@@ -24,6 +24,7 @@ create table if not exists public.it_delivery_confirm_forms (
   deposit          text not null default '',    -- 보증금
   payment_notes    text not null default '',    -- 결제 특이사항
   items            jsonb not null default '[]'::jsonb,
+  raw_text         text not null default '',    -- 붙여넣은 원문(텍스트 인식 경로) — OCR이 놓친 내용도 원문으로 남겨둠
 
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()
@@ -44,3 +45,7 @@ alter table public.it_delivery_confirm_forms enable row level security;
 -- 일반 출고/접수 등록(이 테이블과 무관)은 그대로 null.
 alter table public.it_dispatch_log
   add column if not exists delivery_form_id uuid references public.it_delivery_confirm_forms(id);
+
+-- 이미 테이블을 만든 뒤 이 파일을 다시 실행하는 경우를 위한 방어적 마이그레이션.
+alter table public.it_delivery_confirm_forms
+  add column if not exists raw_text text not null default '';
