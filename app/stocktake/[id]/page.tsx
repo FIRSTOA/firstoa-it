@@ -5,6 +5,7 @@ import Shell from '@/components/Shell';
 import StocktakeSessionPage from '@/components/stocktake/StocktakeSessionPage';
 import { rowToStocktakeSession, toKstDateKey, type StocktakeSessionRow } from '@/lib/stocktake';
 import { createAdminClient, STOCKTAKE_TABLE } from '@/lib/supabase/server';
+import { looksLikeShelfLocation } from '@/lib/zoneStatus';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   if (error || !data) notFound();
 
   const session = rowToStocktakeSession(data as StocktakeSessionRow);
-  const locations = Array.from(new Set(assets.map((a) => a.location.trim()).filter(Boolean))).sort();
+  const locations = Array.from(new Set(assets.map((a) => a.location.trim()).filter(Boolean)))
+    .filter(looksLikeShelfLocation)
+    .sort();
 
   // "조사 종료" 직후 바로 다음 위치를 시작할 수 있게 — 오늘 이미 완료된 위치는
   // 목록 페이지(StocktakeListPage)와 동일하게 빼서 또 찾아 헤매지 않게 합니다.

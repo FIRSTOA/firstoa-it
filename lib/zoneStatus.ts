@@ -99,6 +99,19 @@ export function extractLocationCode(rawLocation: string): string {
   return codeMatch ? codeMatch[1].toUpperCase() : trimmed;
 }
 
+/**
+ * 진짜 선반 위치 코드처럼 생겼는지("A1"/"B2"/"2층 A1"/"G3 오버홀"처럼 영문+숫자로
+ * 시작하거나 "N층"으로 시작) 확인합니다. "반출"/"분실"/"수리중"/"폐기"/"판매"/
+ * "김정식프로문의" 같은 값은 선반 위치가 아니라 상태·메모성 텍스트라 실재고조사(선반에
+ * 실물이 있는지 확인하는 작업) 대상 위치 목록에서 걸러내는 데 씁니다.
+ */
+export function looksLikeShelfLocation(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  if (/^\d+층/.test(trimmed)) return true;
+  return /^[A-Za-z]{1,2}\d+/.test(trimmed);
+}
+
 export type ResolvedLocation = {
   /** 매트릭스 행으로 쓰는 표시값(층 이름 또는 "미분류 (코드)" 또는 수동 재지정값) */
   floor: string;
