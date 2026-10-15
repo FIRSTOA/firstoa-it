@@ -10,7 +10,7 @@ import {
   type StocktakeSession,
 } from '@/lib/stocktake';
 import { addStaffNameIfNew } from '@/app/actions';
-import { deleteStocktakeSession, startStocktake } from '@/app/stocktake/actions';
+import { deleteStocktakeSession, relocateMissingAsset, startStocktake } from '@/app/stocktake/actions';
 
 const STARTED_BY_KEY = 'firstoa_stocktake_started_by';
 const CUSTOM_OPTION = '__custom__';
@@ -35,7 +35,12 @@ export default function StocktakeListPage({
     sessions.some((s) => toKstDateKey(s.startedAt) === todayKey) ? todayKey : null,
   );
   const [pending, startTransition] = useTransition();
+  const [toast, setToast] = useState({ msg: '', show: false });
   const rememberedOnOpen = useRef(false);
+
+  function showToast(msg: string) {
+    setToast({ msg, show: true });
+  }
 
   const dateTabs = useMemo(() => {
     const keys = Array.from(new Set(sessions.map((s) => toKstDateKey(s.startedAt))));
@@ -152,6 +157,24 @@ export default function StocktakeListPage({
         </div>
       )}
 
+      {availableLocations.length > 0 && (
+        <div className="panel" style={{ marginBottom: '12px' }}>
+          <div style={{ fontWeight: 700, marginBottom: '8px' }}>
+            📍 오늘 남은 선반 위치 {availableLocations.length}곳
+          </div>
+          <div className="sub" style={{ marginBottom: '8px' }}>
+            여기까지 끝났으니, 나머지는 다른 분이나 내일 이어서 하시면 돼요.
+          </div>
+          <div className="chip-group">
+            {availableLocations.map((loc) => (
+              <span key={loc} className="chip">
+                {loc}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {missingItems.length > 0 && (
         <div className="panel" style={{ marginBottom: '12px', borderColor: 'var(--red-100)' }}>
           <div style={{ fontWeight: 700, color: 'var(--red-600)', marginBottom: '8px' }}>
@@ -159,30 +182,13 @@ export default function StocktakeListPage({
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {missingItems.map((item) => (
-              <button
+              <MissingAssetRow
                 key={`${item.sessionId}-${item.assetId}`}
-                type="button"
-                onClick={() => router.push(`/stocktake/${item.sessionId}`)}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  gap: '8px',
-                  padding: '6px 8px',
-                  background: 'none',
-                  border: 'none',
-                  borderBottom: '1px solid var(--ink-100)',
-                  cursor: 'pointer',
-                  fontSize: '12.5px',
-                  color: 'var(--ink-700)',
-                  textAlign: 'left',
-                }}
-              >
-                <span>
-                  <b>{item.location}</b> · <span className="asset-id">{item.assetId}</span> · {item.category} {item.brand}{' '}
-                  {item.model}
-                </span>
-                <span style={{ color: 'var(--ink-400)' }}>열기 →</span>
-              </button>
+                item={item}
+                locations={locations}
+                onOpenSession={() => router.push(`/stocktake/${item.sessionId}`)}
+                onToast={showToast}
+              />
             ))}
           </div>
         </div>
@@ -323,6 +329,99 @@ export default function StocktakeListPage({
           </div>
         </div>
       </div>
+
+      <div className={`toast${toast.show ? ' show' : ''}`}>
+        <span>{toast.msg}</span>
+        <button type="button" className="toast-close" onClick={() => setToast((t) => ({ ...t, show: false }))} aria-label="닫기">
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type MissingItem = {
+  assetId: string;
+  category: string;
+  model: string;
+  brand: string;
+  sessionId: string;
+  location: string;
+};
+
+function MissingAssetRow({
+  item,
+  locations,
+  onOpenSession,
+  onToast,
+}: {
+  item: MissingItem;
+  locations: string[];
+  onOpenSession: () => void;
+  onToast: (msg: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [newLocation, setNewLocation] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    if (!newLocation.trim()) {
+      onToast('위치를 선택해주세요.');
+      return;
+    }
+    setSaving(true);
+    const result = await relocateMissingAsset(item.sessionId, item.assetId, newLocation);
+    setSaving(false);
+    if (!result.ok) {
+      onToast(result.error);
+      return;
+    }
+    onToast(`${item.assetId} 위치를 "${newLocation}"(으)로 수정했어요.`);
+    setEditing(false);
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '6px 8px',
+        borderBottom: '1px solid var(--ink-100)',
+        fontSize: '12.5px',
+      }}
+    >
+      <button
+        type="button"
+        onClick={onOpenSession}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-700)', textAlign: 'left', flex: 1 }}
+      >
+        <b>{item.location}</b> · <span className="asset-id">{item.assetId}</span> · {item.category} {item.brand}{' '}
+        {item.model}
+      </button>
+      {editing ? (
+        <>
+          <select value={newLocation} onChange={(e) => setNewLocation(e.target.value)} style={{ fontSize: '12px' }}>
+            <option value="">새 위치 선택</option>
+            {locations.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <button type="button" className="chip" disabled={saving} onClick={handleSave}>
+            {saving ? '저장 중…' : '저장'}
+          </button>
+          <button type="button" className="chip" disabled={saving} onClick={() => setEditing(false)}>
+            취소
+          </button>
+        </>
+      ) : (
+        <button type="button" className="chip" onClick={() => setEditing(true)}>
+          ✎ 위치 수정
+        </button>
+      )}
     </div>
   );
 }

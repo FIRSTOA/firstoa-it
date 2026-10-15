@@ -383,6 +383,53 @@ export async function applyStocktakeReviewBatch(
   return { ok: true, successCount: confirmIds.size + newItems.length, failures };
 }
 
+/**
+ * 목록 페이지의 "미확인 자산" 패널에서, 그 자산을 실제로 찾았을 때(또는 원래 위치가
+ * 잘못 기재돼 있었을 때) 바로 위치를 고쳐 반영합니다 — 전산 재고(구글시트) 위치를 실제로
+ * 바꾸고, 그 자산이 미확인으로 남아있던 세션의 기록도 "확인됨"으로 정리합니다.
+ */
+export async function relocateMissingAsset(
+  sessionId: string,
+  assetId: string,
+  newLocation: string,
+): Promise<ActionResult> {
+  const trimmed = assetId.trim();
+  if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };
+  const trimmedLocation = newLocation.trim();
+  if (!trimmedLocation) return { ok: false, error: '위치를 입력해주세요.' };
+
+  const found = DATA_SOURCE === 'sheets' ? await getAssetFromSheets(trimmed).catch(() => null) : null;
+  if (!found) return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
+
+  const originalLocation = found.location || '-';
+  if (trimmedLocation !== found.location.trim()) {
+    const relocateResult = await updateAsset(found.assetId, { ...found, location: trimmedLocation });
+    if (!relocateResult.ok) {
+      return { ok: false, error: `위치 변경에 실패했어요: ${relocateResult.error}` };
+    }
+  }
+
+  const session = await loadSession(sessionId);
+  if (!session) return { ok: false, error: '조사 세션을 찾지 못했어요.' };
+
+  const now = new Date().toISOString();
+  const results = session.results.map((r) =>
+    r.assetId === trimmed
+      ? { ...r, status: '확인됨' as const, scannedAt: now, note: `위치 수정: ${originalLocation} → ${trimmedLocation}` }
+      : r,
+  );
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(STOCKTAKE_TABLE).update({ results }).eq('id', sessionId);
+  if (error) {
+    console.error('[stocktake] relocateMissingAsset 세션 반영 실패:', error);
+    return { ok: false, error: toMessage(error) };
+  }
+
+  revalidatePath(`/stocktake/${sessionId}`);
+  revalidatePath('/stocktake');
+  return { ok: true };
+}
+
 export async function deleteStocktakeSession(id: string): Promise<ActionResult> {
   const supabase = createAdminClient();
   const { error } = await supabase.from(STOCKTAKE_TABLE).delete().eq('id', id);
