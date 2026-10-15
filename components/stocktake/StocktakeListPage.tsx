@@ -42,6 +42,20 @@ export default function StocktakeListPage({
     return keys.sort((a, b) => b.localeCompare(a));
   }, [sessions]);
 
+  // 오늘 이미 "완료"된 위치는 새 조사 시작 드롭다운에서 빼서, 끝난 곳을 또 찾아 헤매지
+  // 않게 합니다(같은 위치를 또 조사하고 싶으면 목록에서 그 세션을 열어 계속 쓰면 됨).
+  const completedTodayLocations = useMemo(
+    () =>
+      new Set(
+        sessions.filter((s) => s.status === '완료' && toKstDateKey(s.startedAt) === todayKey).map((s) => s.location),
+      ),
+    [sessions, todayKey],
+  );
+  const availableLocations = useMemo(
+    () => locations.filter((loc) => !completedTodayLocations.has(loc)),
+    [locations, completedTodayLocations],
+  );
+
   const visibleSessions = dateFilter ? sessions.filter((s) => toKstDateKey(s.startedAt) === dateFilter) : sessions;
 
   // 선택된 날짜(기본: 오늘) 조사 세션들을 통틀어서 아직 "미확인"인 자산을 한눈에 모아 보여줍니다.
@@ -246,12 +260,17 @@ export default function StocktakeListPage({
               <label>위치 *</label>
               <select value={location} onChange={(e) => setLocation(e.target.value)}>
                 <option value="">위치 선택</option>
-                {locations.map((loc) => (
+                {availableLocations.map((loc) => (
                   <option key={loc} value={loc}>
                     {loc}
                   </option>
                 ))}
               </select>
+              {completedTodayLocations.size > 0 && (
+                <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
+                  오늘 완료된 위치 {completedTodayLocations.size}곳은 목록에서 뺐어요.
+                </div>
+              )}
             </div>
             <div className="form-field full">
               <label>담당자</label>

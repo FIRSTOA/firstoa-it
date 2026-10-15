@@ -252,28 +252,30 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
           {sum.unexpected > 0 && <span style={{ color: 'var(--red-600)' }}> · 목록외 발견 {sum.unexpected}</span>}
           {done && <span style={{ marginLeft: '8px' }} className="badge badge-상품화완료">완료</span>}
         </div>
-        {!done && (
-          <div className="actions">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleScanFiles}
-            />
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={!!scanProgress || pending}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              {scanProgress ? `인식 중… (${scanProgress.done}/${scanProgress.total})` : '📷 사진 올려서 스캔'}
-            </button>
-            <span style={{ fontSize: '11.5px', color: 'var(--ink-400)' }}>
-              먼저 카메라로 사진 다 찍어두고, 갤러리에서 여러 장 골라 올리면 한꺼번에 인식해요
-            </span>
-            {confirmingComplete ? (
+        <div className="actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleScanFiles}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={!!scanProgress || pending}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {scanProgress ? `인식 중… (${scanProgress.done}/${scanProgress.total})` : '📷 사진 올려서 스캔'}
+          </button>
+          <span style={{ fontSize: '11.5px', color: 'var(--ink-400)' }}>
+            {done
+              ? '완료된 조사도 오타 등 수정이 필요하면 계속 스캔/체크할 수 있어요'
+              : '먼저 카메라로 사진 다 찍어두고, 갤러리에서 여러 장 골라 올리면 한꺼번에 인식해요'}
+          </span>
+          {!done &&
+            (confirmingComplete ? (
               <>
                 <span style={{ fontSize: '12.5px', color: 'var(--ink-500)' }}>정말 종료할까요?</span>
                 <button type="button" className="btn btn-primary" disabled={pending} onClick={handleComplete}>
@@ -287,9 +289,8 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
               <button type="button" className="btn btn-primary" disabled={pending} onClick={() => setConfirmingComplete(true)}>
                 조사 종료
               </button>
-            )}
-          </div>
-        )}
+            ))}
+        </div>
       </div>
 
       {reviewItems.length > 0 && (
@@ -366,7 +367,7 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
         </div>
       )}
 
-      {!done && selected.size > 0 && (
+      {selected.size > 0 && (
         <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
           <span style={{ fontSize: '13px', fontWeight: 700 }}>{selected.size}건 선택됨</span>
           <button type="button" className="btn btn-ghost" disabled={pending} onClick={handleBulkConfirm}>
@@ -382,38 +383,34 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
         <table>
           <thead>
             <tr>
-              {!done && (
-                <th style={{ width: '32px' }}>
-                  <input
-                    type="checkbox"
-                    checked={session.results.length > 0 && session.results.every((r) => selected.has(r.assetId))}
-                    onChange={toggleSelectAll}
-                    aria-label="전체 선택"
-                  />
-                </th>
-              )}
+              <th style={{ width: '32px' }}>
+                <input
+                  type="checkbox"
+                  checked={session.results.length > 0 && session.results.every((r) => selected.has(r.assetId))}
+                  onChange={toggleSelectAll}
+                  aria-label="전체 선택"
+                />
+              </th>
               <th>자산번호</th>
               <th>품목</th>
               <th className="hide-mobile">브랜드</th>
               <th>모델명</th>
               <th>상태</th>
-              <th className="hide-mobile">비고</th>
-              {!done && <th style={{ width: '90px' }} />}
+              <th>비고</th>
+              <th style={{ width: '90px' }} />
             </tr>
           </thead>
           <tbody>
             {session.results.map((r) => (
               <tr key={r.assetId}>
-                {!done && (
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(r.assetId)}
-                      onChange={() => toggleSelect(r.assetId)}
-                      aria-label={`${r.assetId} 선택`}
-                    />
-                  </td>
-                )}
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(r.assetId)}
+                    onChange={() => toggleSelect(r.assetId)}
+                    aria-label={`${r.assetId} 선택`}
+                  />
+                </td>
                 <td>
                   <span className="asset-id">{r.assetId}</span>
                 </td>
@@ -433,19 +430,17 @@ export default function StocktakeSessionPage({ session }: { session: StocktakeSe
                     {STATUS_LABEL[r.status]}
                   </span>
                 </td>
-                <td className="hide-mobile" style={{ fontSize: '12px', color: 'var(--ink-500)' }}>{r.note || '-'}</td>
-                {!done && (
-                  <td>
-                    <button type="button" className="chip" disabled={pending} onClick={() => toggleItem(r.assetId, r.status)}>
-                      {r.status === '확인됨' ? '취소' : '확인'}
-                    </button>
-                  </td>
-                )}
+                <td style={{ fontSize: '12px', color: 'var(--ink-500)' }}>{r.note || '-'}</td>
+                <td>
+                  <button type="button" className="chip" disabled={pending} onClick={() => toggleItem(r.assetId, r.status)}>
+                    {r.status === '확인됨' ? '취소' : '확인'}
+                  </button>
+                </td>
               </tr>
             ))}
             {session.results.length === 0 && (
               <tr>
-                <td colSpan={done ? 6 : 8} className="empty-state">
+                <td colSpan={8} className="empty-state">
                   <div>📋</div>이 위치에 전산상 등록된 자산이 없어요.
                 </td>
               </tr>
