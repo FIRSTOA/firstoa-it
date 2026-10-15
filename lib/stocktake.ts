@@ -55,15 +55,20 @@ export function rowToStocktakeSession(row: StocktakeSessionRow): StocktakeSessio
 
 /** 그 위치에 있는 자산들로 조사 세션의 초기 results를 만듭니다. */
 export function buildInitialResults(assetsAtLocation: Asset[]): StocktakeItem[] {
-  return assetsAtLocation.map((a) => ({
-    assetId: a.assetId,
-    category: a.category,
-    model: a.model,
-    brand: a.brand,
-    status: '미확인',
-    scannedAt: null,
-    note: '',
-  }));
+  return assetsAtLocation
+    // 기타주변기기 중 공유기/케이블류처럼 자산번호 없이 수량으로만 관리되는 소모품은 개별
+    // 실재고 확인 대상이 아닙니다 — 자산번호가 없어서 영원히 스캔/확인될 수 없으니 넣으면
+    // 끝까지 "미확인"(분실 의심)으로만 남습니다.
+    .filter((a) => a.assetId.trim())
+    .map((a) => ({
+      assetId: a.assetId,
+      category: a.category,
+      model: a.model,
+      brand: a.brand,
+      status: '미확인',
+      scannedAt: null,
+      note: '',
+    }));
 }
 
 /**
