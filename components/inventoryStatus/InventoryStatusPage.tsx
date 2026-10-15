@@ -45,6 +45,7 @@ export default function InventoryStatusPage({
   const [locations, setLocations] = useState(zoneLocations);
   const [floorMap, setFloorMap] = useState(locationFloorMap);
   const [selected, setSelected] = useState<{ location: string; category: string } | null>(null);
+  const [showAllMappings, setShowAllMappings] = useState(false);
   const [toast, setToast] = useState({ msg: '', show: false });
 
   function showToast(msg: string) {
@@ -202,6 +203,39 @@ export default function InventoryStatusPage({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {floorMap.length > 0 && (
+        <div className="panel" style={{ marginBottom: '12px' }}>
+          <button
+            type="button"
+            className="chip"
+            onClick={() => setShowAllMappings((v) => !v)}
+            style={{ marginBottom: showAllMappings ? '10px' : 0 }}
+          >
+            {showAllMappings ? '▲' : '▼'} 매핑된 위치 코드 전체 보기/수정 ({floorMap.length}개)
+          </button>
+          {showAllMappings && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {[...floorMap]
+                .sort((a, b) => a.code.localeCompare(b.code, 'ko'))
+                .map(({ code, floor }) => (
+                  <div key={code} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                    <span className="asset-id" style={{ width: '90px' }}>
+                      {code}
+                    </span>
+                    <select value={floor} onChange={(e) => handleSetFloor(code, e.target.value)}>
+                      {locations.map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
 
