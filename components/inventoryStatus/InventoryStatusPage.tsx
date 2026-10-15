@@ -82,7 +82,8 @@ export default function InventoryStatusPage({
   }, [matrix.cells]);
 
   async function handleSetFloor(code: string, floor: string) {
-    setFloorMap((prev) => [...prev.filter((m) => m.code !== code), { code, floor }]);
+    // 빈 값(미지정으로 되돌리기)이면 로컬 목록에서 아예 빼서 "미분류 (코드)"로 되돌아가게 함.
+    setFloorMap((prev) => (floor.trim() ? [...prev.filter((m) => m.code !== code), { code, floor }] : prev.filter((m) => m.code !== code)));
     if (floor.trim() && !locations.includes(floor.trim())) {
       setLocations((prev) => [...prev, floor.trim()].sort((a, b) => a.localeCompare(b, 'ko')));
     }
@@ -234,6 +235,7 @@ export default function InventoryStatusPage({
                       {code}
                     </span>
                     <select value={floor} onChange={(e) => handleSetFloor(code, e.target.value)}>
+                      <option value="">— 미지정으로 되돌리기 —</option>
                       {locations.map((l) => (
                         <option key={l} value={l}>
                           {l}
