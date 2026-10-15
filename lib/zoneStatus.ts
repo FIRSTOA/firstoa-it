@@ -366,8 +366,9 @@ export type CategoryBreakdownGroup = {
 /**
  * 품목 → 세부구분코드별 수량 집계(참고: first-as-search의 SKU별 재고 현황판과 비슷한
  * 구조). 층/선반 위치 매핑 없이, 품목별로 "구분코드" 한 단계만 내려가서 재고상태별 대수를
- * 보여줍니다. 세부구분코드는 노트북/데스크탑이면 gubunCode(예: "I5고설데"), 기타주변기기면
- * subItem(나스/마우스 등), 그 외(모니터/빔프로젝트) 또는 값이 없으면 모델명으로 묶습니다.
+ * 보여줍니다. 세부구분코드는 노트북/데스크탑이면 gubunCode(예: "I5고설데"), 모니터면
+ * 화면크기(인치), 기타주변기기면 subItem(나스/마우스 등), 그 외(빔프로젝트) 또는 값이
+ * 없으면 모델명으로 묶습니다.
  */
 export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[] {
   type Bucket = { total: number; byStatus: Record<string, number> };
@@ -376,7 +377,13 @@ export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[
   for (const asset of assets) {
     if (asset.status === '임대중') continue;
     if (!asset.assetId.trim()) continue;
-    const detailCode = asset.gubunCode.trim() || asset.subItem.trim() || asset.model.trim() || '(미상)';
+    const screen = asset.screen.trim();
+    const detailCode =
+      asset.category === '모니터'
+        ? screen && screen !== '-'
+          ? screen
+          : '(미상)'
+        : asset.gubunCode.trim() || asset.subItem.trim() || asset.model.trim() || '(미상)';
 
     const byDetail = byCategory.get(asset.category) ?? new Map<string, Bucket>();
     byCategory.set(asset.category, byDetail);
