@@ -2,8 +2,11 @@
 
 import { revalidatePath } from 'next/cache';
 import {
+  rowToLocationFloorMap,
   rowToZoneStatus,
   rowToZoneVerification,
+  type LocationFloorMap,
+  type LocationFloorMapRow,
   type ZoneStatus,
   type ZoneStatusRow,
   type ZoneVerification,
@@ -11,6 +14,7 @@ import {
 } from '@/lib/zoneStatus';
 import {
   createAdminClient,
+  LOCATION_FLOOR_MAP_TABLE,
   ZONE_LOCATIONS_TABLE,
   ZONE_STATUS_TABLE,
   ZONE_VERIFICATIONS_TABLE,
@@ -35,6 +39,33 @@ export async function addZoneLocationIfNew(name: string): Promise<void> {
   const supabase = createAdminClient();
   const { error } = await supabase.from(ZONE_LOCATIONS_TABLE).upsert({ name: trimmed }, { onConflict: 'name' });
   if (error) console.error('[inventoryStatus] addZoneLocationIfNew 실패:', error);
+}
+
+export async function listLocationFloorMap(): Promise<LocationFloorMap[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.from(LOCATION_FLOOR_MAP_TABLE).select('*');
+  if (error) {
+    console.error('[inventoryStatus] listLocationFloorMap 실패:', error);
+    return [];
+  }
+  return ((data ?? []) as LocationFloorMapRow[]).map(rowToLocationFloorMap);
+}
+
+/** 위치 코드(A1/B1/K2 등) 하나를 층에 매핑합니다 — 이 코드를 쓰는 모든 자산이 한꺼번에 해결됩니다. */
+export async function setLocationFloor(code: string, floor: string): Promise<ActionResult> {
+  const trimmedCode = code.trim();
+  if (!trimmedCode) return { ok: false, error: '코드가 비어있어요.' };
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from(LOCATION_FLOOR_MAP_TABLE)
+    .upsert({ code: trimmedCode, floor: floor.trim() }, { onConflict: 'code' });
+  if (error) {
+    console.error('[inventoryStatus] setLocationFloor 실패:', error);
+    return { ok: false, error: `저장에 실패했어요: ${error.message}` };
+  }
+  if (floor.trim()) await addZoneLocationIfNew(floor);
+  revalidatePath('/inventory-status');
+  return { ok: true };
 }
 
 export async function listZoneStatuses(): Promise<ZoneStatus[]> {

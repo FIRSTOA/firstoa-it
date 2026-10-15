@@ -1,8 +1,15 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { markZoneVerified, setZoneVerifier, updateZoneStatus } from '@/app/inventoryStatus/actions';
-import { CONDITION_STATUSES, buildZoneMatrix, findCell, type ZoneStatus, type ZoneVerification } from '@/lib/zoneStatus';
+import { markZoneVerified, setLocationFloor, setZoneVerifier, updateZoneStatus } from '@/app/inventoryStatus/actions';
+import {
+  buildZoneMatrix,
+  CONDITION_STATUSES,
+  findCell,
+  type LocationFloorMap,
+  type ZoneStatus,
+  type ZoneVerification,
+} from '@/lib/zoneStatus';
 import type { Asset } from '@/lib/types';
 
 const CUSTOM_OPTION = '__custom__';
@@ -13,6 +20,7 @@ type Props = {
   zoneVerifications: ZoneVerification[];
   zoneLocations: string[];
   staffNames: string[];
+  locationFloorMap: LocationFloorMap[];
 };
 
 function verifierBadgeStyle(v: ZoneVerification | undefined, currentCount: number): { label: string; cls: string } {
@@ -24,10 +32,18 @@ function verifierBadgeStyle(v: ZoneVerification | undefined, currentCount: numbe
   return { label: `✅ ${v.verifierName} 검증완료`, cls: 'badge-상품화완료' };
 }
 
-export default function InventoryStatusPage({ assets, zoneStatuses, zoneVerifications, zoneLocations, staffNames }: Props) {
+export default function InventoryStatusPage({
+  assets,
+  zoneStatuses,
+  zoneVerifications,
+  zoneLocations,
+  staffNames,
+  locationFloorMap,
+}: Props) {
   const [statuses, setStatuses] = useState(zoneStatuses);
   const [verifications, setVerifications] = useState(zoneVerifications);
   const [locations, setLocations] = useState(zoneLocations);
+  const [floorMap, setFloorMap] = useState(locationFloorMap);
   const [selected, setSelected] = useState<{ location: string; category: string } | null>(null);
   const [toast, setToast] = useState({ msg: '', show: false });
 
@@ -36,19 +52,34 @@ export default function InventoryStatusPage({ assets, zoneStatuses, zoneVerifica
   }
 
   const zoneByAssetId = useMemo(() => new Map(statuses.map((s) => [s.assetId, s])), [statuses]);
-  const matrix = useMemo(() => buildZoneMatrix(assets, zoneByAssetId), [assets, zoneByAssetId]);
+  const floorByCode = useMemo(() => new Map(floorMap.map((m) => [m.code, m.floor])), [floorMap]);
+  const matrix = useMemo(
+    () => buildZoneMatrix(assets, zoneByAssetId, floorByCode),
+    [assets, zoneByAssetId, floorByCode],
+  );
   const verificationByKey = useMemo(
     () => new Map(verifications.map((v) => [`${v.location}\u0000${v.category}`, v])),
     [verifications],
   );
 
-  // 태깅 진행률 — "위치 미지정"이 아닌 자산이 전체 가용 자산 중 몇 건인지(= 아직 조사 안 된
-  // 건수를 한눈에 보려는 목적).
+  // 태깅(=위치 해결) 진행률 — "(위치 미지정)"/"미분류 (코드)"로 안 묶인 자산이 전체 가용
+  // 자산 중 몇 건인지. 코드 하나를 매핑하면 그 코드를 쓰는 자산 전부가 한꺼번에 해결됩니다.
   const taggingProgress = useMemo(() => {
-    const available = assets.filter((a) => a.status !== '임대중');
-    const tagged = available.filter((a) => zoneByAssetId.get(a.assetId)?.location.trim());
-    return { tagged: tagged.length, total: available.length };
-  }, [assets, zoneByAssetId]);
+    const total = matrix.cells.reduce((s, c) => s + c.total, 0);
+    const unresolved = matrix.cells
+      .filter((c) => c.location === '(위치 미지정)' || c.location.startsWith('미분류'))
+      .reduce((s, c) => s + c.total, 0);
+    return { tagged: total - unresolved, total };
+  }, [matrix.cells]);
+
+  async function handleSetFloor(code: string, floor: string) {
+    setFloorMap((prev) => [...prev.filter((m) => m.code !== code), { code, floor }]);
+    if (floor.trim() && !locations.includes(floor.trim())) {
+      setLocations((prev) => [...prev, floor.trim()].sort((a, b) => a.localeCompare(b, 'ko')));
+    }
+    const result = await setLocationFloor(code, floor);
+    if (!result.ok) showToast(result.error);
+  }
 
   // 위치별 검증 진행률 — 그 위치에 걸친 품목(셀) 중 몇 개가 검증완료인지(한 셀이라도 안
   // 됐으면 그 위치는 "검증 진행중"으로 보입니다).
@@ -135,6 +166,45 @@ export default function InventoryStatusPage({ assets, zoneStatuses, zoneVerifica
 
   return (
     <div className="app">
+      {matrix.unmappedCodes.length > 0 && (
+        <div className="panel" style={{ marginBottom: '12px', borderColor: 'var(--red-100)' }}>
+          <div style={{ fontWeight: 700, color: 'var(--red-600)', marginBottom: '4px' }}>
+            ⚠️ 층 매핑이 안 된 위치 코드 {matrix.unmappedCodes.length}개
+          </div>
+          <div className="sub" style={{ marginBottom: '10px' }}>
+            코드 하나당 한 번만 층을 지정하면, 그 코드를 쓰는 자산 전부가 한꺼번에 집계에 반영돼요.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {matrix.unmappedCodes.map(({ code, count }) => (
+              <div key={code} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                <span className="asset-id" style={{ width: '90px' }}>
+                  {code}
+                </span>
+                <span style={{ color: 'var(--ink-500)', width: '70px' }}>{count}대</span>
+                <select defaultValue="" onChange={(e) => e.target.value && handleSetFloor(code, e.target.value)}>
+                  <option value="">층 선택</option>
+                  {locations.map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  placeholder="또는 새 층 이름 입력 후 Enter"
+                  style={{ fontSize: '12.5px' }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                      handleSetFloor(code, e.currentTarget.value.trim());
+                      e.currentTarget.value = '';
+                    }
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="panel" style={{ marginBottom: '12px' }}>
         <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>
           회사 총 가용 재고: {grandTotal}대 (렌탈 중 제외)
@@ -255,7 +325,10 @@ export default function InventoryStatusPage({ assets, zoneStatuses, zoneVerifica
               </div>
             </div>
 
-            <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>자산 목록 (여기서 바로 재태깅 가능)</div>
+            <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+              자산 목록 (위치는 기존 재고 데이터에서 자동으로 가져와요 — 특정 자산만 예외로
+              다른 위치에 두려면 여기서 수동으로 바꿀 수 있어요)
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '320px', overflowY: 'auto' }}>
               {selectedCell.assetIds.map((assetId) => {
                 const asset = assets.find((a) => a.assetId === assetId);

@@ -27,6 +27,15 @@ insert into public.it_zone_locations (name) values
   ('외부위탁-LG서비스센터'), ('직원불출'), ('회의실용')
 on conflict (name) do nothing;
 
+-- 실제 운영 위치 코드(A1/B1/K2 등 — 기존 Asset.location 필드에 이미 쓰고 있는 코드)를
+-- 층/구역으로 묶기 위한 작은 매핑표. 자산 769건을 하나하나 태깅할 필요 없이, 코드 20~30개만
+-- 층에 매핑해두면 전체 자산의 위치가 자동으로 집계됩니다.
+create table if not exists public.it_location_floor_map (
+  code       text primary key,
+  floor      text not null default '',
+  created_at timestamptz not null default now()
+);
+
 -- 위치×품목 조합별 검증자 지정 + 검증 상태
 create table if not exists public.it_zone_verifications (
   location       text not null,
@@ -47,3 +56,4 @@ create trigger it_zone_status_set_updated_at
 alter table public.it_zone_status enable row level security;
 alter table public.it_zone_locations enable row level security;
 alter table public.it_zone_verifications enable row level security;
+alter table public.it_location_floor_map enable row level security;
