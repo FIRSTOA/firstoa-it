@@ -13,6 +13,7 @@ import {
 import type { DataSource } from '@/lib/dataSource';
 import { filterAssets, INTERNAL_STOCK_STATUSES, toggleInternalStock, toggleMultiValue } from '@/lib/filters';
 import type { InquiryResult } from '@/lib/inventoryInquiry';
+import type { StocktakeConfirmation } from '@/lib/stocktake';
 import { useFilterState } from '@/lib/useFilterState';
 import type { Asset } from '@/lib/types';
 import ActiveFilters from './ActiveFilters';
@@ -38,14 +39,19 @@ const CATEGORY_DASHBOARD_TITLES: Record<string, string> = {
   기타주변기기: '기타주변기기 현황',
 };
 
-type Props = { items: Asset[]; dataSource: DataSource; spreadsheetUrl: string | null };
+type Props = {
+  items: Asset[];
+  dataSource: DataSource;
+  spreadsheetUrl: string | null;
+  stocktakeConfirmations: Record<string, StocktakeConfirmation>;
+};
 
 /**
  * `items` 는 서버 컴포넌트가 Supabase 에서 읽어 넘겨줍니다.
  * 쓰기 작업은 Server Action → revalidatePath('/') 로 이 prop 이 갱신되므로
  * 목록을 별도 state 로 복제하지 않습니다.
  */
-export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Props) {
+export default function InventoryPage({ items, dataSource, spreadsheetUrl, stocktakeConfirmations }: Props) {
   const { filters, searchTerm, debouncedSearchTerm, setSearchTerm, setFilter, setCategory, resetAll } =
     useFilterState();
   const [modalOpen, setModalOpen] = useState(false);
@@ -375,6 +381,8 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl }: Pro
         onCancelReservation={handleCancelReservation}
         onViewDetail={setDetailAsset}
         onRequestRepair={handleRequestRepair}
+        stocktakeConfirmations={stocktakeConfirmations}
+        onToast={showToast}
       />
 
       <AssetDetailModal

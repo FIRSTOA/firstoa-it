@@ -112,6 +112,28 @@ export function isLikelyAssetId(value: string): boolean {
   return /^[A-Za-z]{1,3}\d{3,6}$/.test(value.trim());
 }
 
+export type StocktakeConfirmation = { scannedAt: string; location: string; sessionId: string };
+
+/**
+ * IT재고 리스트에 "실재고체크완료" 배지를 달기 위한 조회표 — 모든 조사 세션의 결과를
+ * 훑어서, 자산번호별로 실제로 눈으로 확인된(확인됨 또는 목록외발견 — 둘 다 그 자리에서
+ * 실물을 봤다는 뜻) 가장 최근 시각만 남깁니다. 매일 조사하므로 "최근 1건"이면 충분합니다.
+ */
+export function buildLatestConfirmationMap(sessions: StocktakeSession[]): Record<string, StocktakeConfirmation> {
+  const map: Record<string, StocktakeConfirmation> = {};
+  for (const session of sessions) {
+    for (const item of session.results) {
+      if (item.status !== '확인됨' && item.status !== '목록외발견') continue;
+      if (!item.scannedAt) continue;
+      const existing = map[item.assetId];
+      if (!existing || item.scannedAt > existing.scannedAt) {
+        map[item.assetId] = { scannedAt: item.scannedAt, location: session.location, sessionId: session.id };
+      }
+    }
+  }
+  return map;
+}
+
 export function stocktakeSummary(results: StocktakeItem[]) {
   const confirmed = results.filter((r) => r.status === '확인됨').length;
   const missing = results.filter((r) => r.status === '미확인').length;

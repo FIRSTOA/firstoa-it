@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { parseHistoryEntries } from '@/lib/inventory/history';
+import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import type { Asset } from '@/lib/types';
 
 const SPEC_TAG_CLASS: Record<string, string> = {
@@ -68,6 +69,8 @@ type Props = {
   onCancelReservation: (item: Asset) => void;
   onViewDetail: (item: Asset) => void;
   onRequestRepair: (item: Asset) => void;
+  stocktakeConfirmations: Record<string, StocktakeConfirmation>;
+  onToast: (msg: string) => void;
 };
 
 function selectionKey(item: Asset): string {
@@ -86,6 +89,8 @@ export default function InventoryTable({
   onCancelReservation,
   onViewDetail,
   onRequestRepair,
+  stocktakeConfirmations,
+  onToast,
 }: Props) {
   const allSelected = items.length > 0 && items.every((it) => selectedKeys.has(selectionKey(it)));
   return (
@@ -139,6 +144,20 @@ export default function InventoryTable({
               <td>
                 <span className={`badge badge-${item.status}`}>{item.status}</span>
                 {item.malicious && <span className="badge badge-악성">악성</span>}
+                {stocktakeConfirmations[item.assetId] && (
+                  <button
+                    type="button"
+                    className="badge badge-상품화완료"
+                    style={{ cursor: 'pointer', border: 'none', marginLeft: '4px' }}
+                    onClick={() => {
+                      const c = stocktakeConfirmations[item.assetId];
+                      onToast(`실재고체크완료 — ${formatKstDateTime(c.scannedAt)} (${c.location})`);
+                    }}
+                    title="클릭하면 언제 확인됐는지 보여요"
+                  >
+                    ✅ 실재고체크완료
+                  </button>
+                )}
               </td>
               <td>
                 <HistoryCell history={item.history} />
