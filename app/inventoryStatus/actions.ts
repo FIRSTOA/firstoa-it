@@ -3,10 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import {
   rowToLocationFloorMap,
+  rowToQuantityCheck,
   rowToZoneStatus,
   rowToZoneVerification,
   type LocationFloorMap,
   type LocationFloorMapRow,
+  type QuantityCheck,
+  type QuantityCheckRow,
   type ZoneStatus,
   type ZoneStatusRow,
   type ZoneVerification,
@@ -15,6 +18,7 @@ import {
 import {
   createAdminClient,
   LOCATION_FLOOR_MAP_TABLE,
+  QUANTITY_CHECKS_TABLE,
   ZONE_LOCATIONS_TABLE,
   ZONE_STATUS_TABLE,
   ZONE_VERIFICATIONS_TABLE,
@@ -175,6 +179,46 @@ export async function markZoneVerified(location: string, category: string, count
   );
   if (error) {
     console.error('[inventoryStatus] markZoneVerified 실패:', error);
+    return { ok: false, error: `저장에 실패했어요: ${error.message}` };
+  }
+  revalidatePath('/inventory-status');
+  return { ok: true };
+}
+
+export async function listQuantityChecks(): Promise<QuantityCheck[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.from(QUANTITY_CHECKS_TABLE).select('*');
+  if (error) {
+    console.error('[inventoryStatus] listQuantityChecks 실패:', error);
+    return [];
+  }
+  return ((data ?? []) as QuantityCheckRow[]).map(rowToQuantityCheck);
+}
+
+/** 자산번호 매칭 없이, 선반 위치를 보고 센 대수만 입력해서 시스템 수량과 비교합니다(1차 숫자 체크). */
+export async function setQuantityCheck(
+  location: string,
+  category: string,
+  count: number,
+  checkedBy: string,
+): Promise<ActionResult> {
+  const trimmedLocation = location.trim();
+  if (!trimmedLocation) return { ok: false, error: '위치가 비어있어요.' };
+  if (!Number.isFinite(count) || count < 0) return { ok: false, error: '대수를 올바르게 입력해주세요.' };
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(QUANTITY_CHECKS_TABLE).upsert(
+    {
+      location: trimmedLocation,
+      category,
+      counted_count: count,
+      checked_by: checkedBy.trim(),
+      checked_at: new Date().toISOString(),
+    },
+    { onConflict: 'location,category' },
+  );
+  if (error) {
+    console.error('[inventoryStatus] setQuantityCheck 실패:', error);
     return { ok: false, error: `저장에 실패했어요: ${error.message}` };
   }
   revalidatePath('/inventory-status');

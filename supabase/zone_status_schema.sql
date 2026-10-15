@@ -47,6 +47,17 @@ create table if not exists public.it_zone_verifications (
   primary key (location, category)
 );
 
+-- 위치별 "숫자만" 체크 — 자산번호 단위 실재고조사(2차 검증)와 별개로, 선반 위치를 돌며
+-- 대수만 세서 전산 수량과 맞는지 빠르게 확인하는 1차 체크용 (자산번호 매칭 없음)
+create table if not exists public.it_quantity_checks (
+  location       text not null,
+  category       text not null,
+  counted_count  integer not null,
+  checked_by     text not null default '',
+  checked_at     timestamptz not null default now(),
+  primary key (location, category)
+);
+
 drop trigger if exists it_zone_status_set_updated_at on public.it_zone_status;
 create trigger it_zone_status_set_updated_at
   before update on public.it_zone_status
@@ -57,3 +68,4 @@ alter table public.it_zone_status enable row level security;
 alter table public.it_zone_locations enable row level security;
 alter table public.it_zone_verifications enable row level security;
 alter table public.it_location_floor_map enable row level security;
+alter table public.it_quantity_checks enable row level security;

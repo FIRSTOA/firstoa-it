@@ -1,6 +1,7 @@
 import { listStaffNames } from '@/app/actions';
 import {
   listLocationFloorMap,
+  listQuantityChecks,
   listZoneLocations,
   listZoneStatuses,
   listZoneVerifications,
@@ -11,6 +12,7 @@ import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
 import { loadStocktakeConfirmations } from '@/lib/inventory/stocktakeConfirmations';
 import { isSupabaseConfigured } from '@/lib/supabase/server';
+import { looksLikeShelfLocation } from '@/lib/zoneStatus';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,16 +25,29 @@ export default async function Page() {
     );
   }
 
-  const [assets, zoneStatuses, zoneVerifications, zoneLocations, staffNames, locationFloorMap, stocktakeConfirmations] =
-    await Promise.all([
-      listAllAssetsUnified().catch(() => []),
-      listZoneStatuses(),
-      listZoneVerifications(),
-      listZoneLocations(),
-      listStaffNames(),
-      listLocationFloorMap(),
-      loadStocktakeConfirmations(),
-    ]);
+  const [
+    assets,
+    zoneStatuses,
+    zoneVerifications,
+    zoneLocations,
+    staffNames,
+    locationFloorMap,
+    stocktakeConfirmations,
+    quantityChecks,
+  ] = await Promise.all([
+    listAllAssetsUnified().catch(() => []),
+    listZoneStatuses(),
+    listZoneVerifications(),
+    listZoneLocations(),
+    listStaffNames(),
+    listLocationFloorMap(),
+    loadStocktakeConfirmations(),
+    listQuantityChecks(),
+  ]);
+
+  const shelfLocations = Array.from(new Set(assets.map((a) => a.location.trim()).filter(Boolean)))
+    .filter(looksLikeShelfLocation)
+    .sort();
 
   return (
     <Shell
@@ -48,6 +63,8 @@ export default async function Page() {
         staffNames={staffNames}
         locationFloorMap={locationFloorMap}
         stocktakeConfirmations={stocktakeConfirmations}
+        quantityChecks={quantityChecks}
+        shelfLocations={shelfLocations}
       />
     </Shell>
   );

@@ -209,6 +209,89 @@ export function findCell(cells: ZoneMatrixCell[], location: string, category: st
   return cells.find((c) => c.location === location && c.category === category) ?? null;
 }
 
+export type QuantityCheck = {
+  location: string;
+  category: string;
+  countedCount: number;
+  checkedBy: string;
+  checkedAt: string;
+};
+
+export type QuantityCheckRow = {
+  location: string;
+  category: string;
+  counted_count: number;
+  checked_by: string;
+  checked_at: string;
+};
+
+export function rowToQuantityCheck(row: QuantityCheckRow): QuantityCheck {
+  return {
+    location: row.location,
+    category: row.category,
+    countedCount: row.counted_count,
+    checkedBy: row.checked_by,
+    checkedAt: row.checked_at,
+  };
+}
+
+export type QuantityCheckTableRow = {
+  location: string;
+  systemCount: number;
+  countedCount: number | null;
+  checkedBy: string;
+  checkedAt: string | null;
+  mismatch: boolean;
+};
+
+/**
+ * "숫자만 맞는지" 체크 — 실재고조사(자산번호 단위 스캔)와 별개로, 누가 선반을 보고 대수만
+ * 세서 입력한 값(QuantityCheck)과 시스템 수량을 비교합니다. 아직 아무도 입력 안 한 위치는
+ * countedCount: null로 돌려주고(화면에서 "미확인"으로 소란스럽게 보여줄지는 호출부 판단),
+ * 입력된 것만 일치/불일치로 판정됩니다.
+ */
+export function buildQuantityCheckTables(
+  assets: Asset[],
+  checks: QuantityCheck[],
+): { category: string; rows: QuantityCheckTableRow[]; total: { system: number; counted: number } }[] {
+  const checkByKey = new Map(checks.map((c) => [`${c.location}\u0000${c.category}`, c]));
+  const byCategory = new Map<string, Map<string, number>>();
+
+  for (const asset of assets) {
+    if (asset.status === '임대중') continue;
+    if (!asset.assetId.trim()) continue;
+    const location = asset.location.trim();
+    if (!location) continue;
+
+    const byLocation = byCategory.get(asset.category) ?? new Map<string, number>();
+    byCategory.set(asset.category, byLocation);
+    byLocation.set(location, (byLocation.get(location) ?? 0) + 1);
+  }
+
+  return [...byCategory.entries()]
+    .map(([category, byLocation]) => {
+      const rows = [...byLocation.entries()]
+        .map(([location, systemCount]) => {
+          const check = checkByKey.get(`${location}\u0000${category}`);
+          return {
+            location,
+            systemCount,
+            countedCount: check ? check.countedCount : null,
+            checkedBy: check?.checkedBy ?? '',
+            checkedAt: check?.checkedAt ?? null,
+            mismatch: check ? check.countedCount !== systemCount : false,
+          };
+        })
+        .sort((a, b) => a.location.localeCompare(b.location, 'ko'));
+      const total = rows.reduce(
+        (acc, r) => ({ system: acc.system + r.systemCount, counted: acc.counted + (r.countedCount ?? 0) }),
+        { system: 0, counted: 0 },
+      );
+      return { category, rows, total };
+    })
+    .sort((a, b) => a.category.localeCompare(b.category, 'ko'));
+}
+
 export type LocationCheckRow = {
   location: string; // 실재고조사와 똑같이 쓰는 원문 위치값(예: "A1", "G3 오버홀") — 코드로 안 줄임
   systemCount: number; // 지금 시스템(구글시트) 기준 그 위치·품목의 대수

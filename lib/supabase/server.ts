@@ -44,3 +44,4 @@ export const ZONE_STATUS_TABLE = 'it_zone_status';
 export const ZONE_LOCATIONS_TABLE = 'it_zone_locations';
 export const ZONE_VERIFICATIONS_TABLE = 'it_zone_verifications';
 export const LOCATION_FLOOR_MAP_TABLE = 'it_location_floor_map';
+export const QUANTITY_CHECKS_TABLE = 'it_quantity_checks';

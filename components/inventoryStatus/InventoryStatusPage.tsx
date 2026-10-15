@@ -1,14 +1,22 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { markZoneVerified, setLocationFloor, setZoneVerifier, updateZoneStatus } from '@/app/inventoryStatus/actions';
+import {
+  markZoneVerified,
+  setLocationFloor,
+  setQuantityCheck,
+  setZoneVerifier,
+  updateZoneStatus,
+} from '@/app/inventoryStatus/actions';
 import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import {
   buildLocationCheckTables,
+  buildQuantityCheckTables,
   buildZoneMatrix,
   CONDITION_STATUSES,
   findCell,
   type LocationFloorMap,
+  type QuantityCheck,
   type ZoneStatus,
   type ZoneVerification,
 } from '@/lib/zoneStatus';
@@ -24,6 +32,8 @@ type Props = {
   zoneLocations: string[];
   staffNames: string[];
   locationFloorMap: LocationFloorMap[];
+  quantityChecks: QuantityCheck[];
+  shelfLocations: string[];
 };
 
 function verifierBadgeStyle(v: ZoneVerification | undefined, currentCount: number): { label: string; cls: string } {
@@ -43,11 +53,14 @@ export default function InventoryStatusPage({
   staffNames,
   locationFloorMap,
   stocktakeConfirmations,
+  quantityChecks,
+  shelfLocations,
 }: Props) {
   const [statuses, setStatuses] = useState(zoneStatuses);
   const [verifications, setVerifications] = useState(zoneVerifications);
   const [locations, setLocations] = useState(zoneLocations);
   const [floorMap, setFloorMap] = useState(locationFloorMap);
+  const [checks, setChecks] = useState(quantityChecks);
   const [selected, setSelected] = useState<{ location: string; category: string } | null>(null);
   const [showAllMappings, setShowAllMappings] = useState(false);
   const [toast, setToast] = useState({ msg: '', show: false });
@@ -62,6 +75,7 @@ export default function InventoryStatusPage({
     () => buildLocationCheckTables(assets, stocktakeConfirmations),
     [assets, stocktakeConfirmations],
   );
+  const quantityCheckTables = useMemo(() => buildQuantityCheckTables(assets, checks), [assets, checks]);
   const matrix = useMemo(
     () => buildZoneMatrix(assets, zoneByAssetId, floorByCode),
     [assets, zoneByAssetId, floorByCode],
@@ -167,6 +181,16 @@ export default function InventoryStatusPage({
     });
     const result = await markZoneVerified(location, category, count);
     showToast(result.ok ? '검증 완료로 표시했어요.' : result.error);
+  }
+
+  async function handleSetQuantityCheck(location: string, category: string, count: number, checkedBy: string) {
+    setChecks((prev) => {
+      const next = prev.filter((c) => !(c.location === location && c.category === category));
+      next.push({ location, category, countedCount: count, checkedBy, checkedAt: new Date().toISOString() });
+      return next;
+    });
+    const result = await setQuantityCheck(location, category, count, checkedBy);
+    showToast(result.ok ? `${location} · ${category} ${count}대로 기록했어요.` : result.error);
   }
 
   const selectedCell = selected ? findCell(matrix.cells, selected.location, selected.category) : null;
@@ -328,60 +352,74 @@ export default function InventoryStatusPage({
       </div>
 
       <div className="panel" style={{ marginBottom: '12px' }}>
-        <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>1차 수량 체크</div>
+        <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>2차 검증 — 실재고조사 비교</div>
         <div className="sub" style={{ marginBottom: '10px' }}>
-          위치별 시스템 수량과 실재고조사(2차 검증)로 실제 확인된 수량을 비교해요. 숫자가
-          다르면 빨갛게 표시돼요 — 실재고조사를 아직 안 했거나 위치가 바뀌었을 수 있어요.
+          위치별 시스템 수량과 실재고조사(자산번호 단위 스캔)로 실제 확인된 수량을 비교해요.
+          실재고조사를 아직 안 한 위치는 표시 안 해요 — 일치/불일치만 보여줘요.
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
-          {checkTables.map(({ category, rows, total }) => (
-            <div key={category} style={{ minWidth: '320px', flex: '1 1 320px' }}>
-              <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>{category}</div>
-              <table style={{ fontSize: '12.5px' }}>
-                <thead>
-                  <tr>
-                    <th>위치</th>
-                    <th>{category}</th>
-                    <th>실재고체크</th>
-                    <th>업데이트</th>
-                    <th>담당자</th>
-                    <th>비고</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.location} style={r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined}>
-                      <td>{r.location}</td>
-                      <td>{r.systemCount}</td>
-                      <td>{r.confirmedCount}</td>
-                      <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
-                        {r.lastScannedAt ? formatKstDateTime(r.lastScannedAt) : '-'}
-                      </td>
-                      <td>{r.verifiedBy || '-'}</td>
-                      <td style={{ fontWeight: 700, color: r.mismatch ? 'var(--red-600)' : 'var(--green-600)' }}>
-                        {r.confirmedCount === 0 && r.lastScannedAt === null ? '미확인' : r.mismatch ? '불일치' : '일치'}
-                      </td>
+          {checkTables.map(({ category, rows: allRows, total }) => {
+            const rows = allRows.filter((r) => !(r.confirmedCount === 0 && r.lastScannedAt === null));
+            if (rows.length === 0) return null;
+            return (
+              <div key={category} style={{ minWidth: '320px', flex: '1 1 320px' }}>
+                <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>{category}</div>
+                <table style={{ fontSize: '12.5px' }}>
+                  <thead>
+                    <tr>
+                      <th>위치</th>
+                      <th>{category}</th>
+                      <th>실재고체크</th>
+                      <th>업데이트</th>
+                      <th>담당자</th>
+                      <th>비고</th>
                     </tr>
-                  ))}
-                  <tr>
-                    <td style={{ fontWeight: 700 }}>총계</td>
-                    <td style={{ fontWeight: 700 }}>{total.system}</td>
-                    <td style={{ fontWeight: 700 }}>{total.confirmed}</td>
-                    <td />
-                    <td />
-                    <td />
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          ))}
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.location} style={r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined}>
+                        <td>{r.location}</td>
+                        <td>{r.systemCount}</td>
+                        <td>{r.confirmedCount}</td>
+                        <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
+                          {r.lastScannedAt ? formatKstDateTime(r.lastScannedAt) : '-'}
+                        </td>
+                        <td>{r.verifiedBy || '-'}</td>
+                        <td style={{ fontWeight: 700, color: r.mismatch ? 'var(--red-600)' : 'var(--green-600)' }}>
+                          {r.mismatch ? '불일치' : '일치'}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td style={{ fontWeight: 700 }}>총계</td>
+                      <td style={{ fontWeight: 700 }}>{total.system}</td>
+                      <td style={{ fontWeight: 700 }}>{total.confirmed}</td>
+                      <td />
+                      <td />
+                      <td />
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
         </div>
-        {checkTables.length === 0 && (
+        {checkTables.every(
+          ({ rows }) => rows.filter((r) => !(r.confirmedCount === 0 && r.lastScannedAt === null)).length === 0,
+        ) && (
           <div className="empty-state">
-            <div>📋</div>위치가 입력된 가용 자산이 없어요.
+            <div>📋</div>아직 실재고조사로 확인된 위치가 없어요.
           </div>
         )}
       </div>
+
+      <QuantityCheckPanel
+        tables={quantityCheckTables}
+        locations={shelfLocations}
+        categories={matrix.categories}
+        staffNames={staffNames}
+        onSave={handleSetQuantityCheck}
+      />
 
       {selected && selectedCell && (
         <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
@@ -530,6 +568,139 @@ function AssetTagRow({
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function QuantityCheckPanel({
+  tables,
+  locations,
+  categories,
+  staffNames,
+  onSave,
+}: {
+  tables: { category: string; rows: { location: string; systemCount: number; countedCount: number | null; checkedBy: string; checkedAt: string | null; mismatch: boolean }[]; total: { system: number; counted: number } }[];
+  locations: string[];
+  categories: string[];
+  staffNames: string[];
+  onSave: (location: string, category: string, count: number, checkedBy: string) => void;
+}) {
+  const [location, setLocation] = useState('');
+  const [category, setCategory] = useState('');
+  const [count, setCount] = useState('');
+  const [checkedBy, setCheckedBy] = useState('');
+
+  function handleSubmit() {
+    const n = Number(count);
+    if (!location.trim() || !category.trim() || !Number.isFinite(n) || count.trim() === '') return;
+    onSave(location.trim(), category, n, checkedBy);
+    setCount('');
+  }
+
+  const checkedTables = tables
+    .map((t) => {
+      const rows = t.rows.filter((r) => r.countedCount !== null);
+      const total = rows.reduce(
+        (acc, r) => ({ system: acc.system + r.systemCount, counted: acc.counted + (r.countedCount ?? 0) }),
+        { system: 0, counted: 0 },
+      );
+      return { ...t, rows, total };
+    })
+    .filter((t) => t.rows.length > 0);
+
+  return (
+    <div className="panel" style={{ marginBottom: '12px' }}>
+      <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>1차 수량 체크 — 자산번호 없이 대수만</div>
+      <div className="sub" style={{ marginBottom: '10px' }}>
+        실재고조사(자산번호 스캔)와 달리, 선반을 보고 눈으로 센 대수만 입력해서 시스템 수량과
+        비교해요. 아직 안 센 위치는 안 보여요 — 입력한 것만 일치/불일치로 떠요.
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px', alignItems: 'center' }}>
+        <select value={location} onChange={(e) => setLocation(e.target.value)}>
+          <option value="">위치 선택</option>
+          {locations.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="">품목 선택</option>
+          {categories.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          min="0"
+          placeholder="센 대수"
+          value={count}
+          onChange={(e) => setCount(e.target.value)}
+          style={{ width: '90px' }}
+        />
+        <select value={checkedBy} onChange={(e) => setCheckedBy(e.target.value)}>
+          <option value="">담당자 선택</option>
+          {staffNames.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn btn-primary" onClick={handleSubmit}>
+          기록
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
+        {checkedTables.map(({ category: cat, rows, total }) => (
+          <div key={cat} style={{ minWidth: '320px', flex: '1 1 320px' }}>
+            <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>{cat}</div>
+            <table style={{ fontSize: '12.5px' }}>
+              <thead>
+                <tr>
+                  <th>위치</th>
+                  <th>{cat}</th>
+                  <th>센 대수</th>
+                  <th>업데이트</th>
+                  <th>담당자</th>
+                  <th>비고</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.location} style={r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined}>
+                    <td>{r.location}</td>
+                    <td>{r.systemCount}</td>
+                    <td>{r.countedCount}</td>
+                    <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
+                      {r.checkedAt ? formatKstDateTime(r.checkedAt) : '-'}
+                    </td>
+                    <td>{r.checkedBy || '-'}</td>
+                    <td style={{ fontWeight: 700, color: r.mismatch ? 'var(--red-600)' : 'var(--green-600)' }}>
+                      {r.mismatch ? '불일치' : '일치'}
+                    </td>
+                  </tr>
+                ))}
+                <tr>
+                  <td style={{ fontWeight: 700 }}>총계</td>
+                  <td style={{ fontWeight: 700 }}>{total.system}</td>
+                  <td style={{ fontWeight: 700 }}>{total.counted}</td>
+                  <td />
+                  <td />
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+      {checkedTables.length === 0 && (
+        <div className="empty-state">
+          <div>📋</div>아직 기록한 수량 체크가 없어요.
+        </div>
+      )}
     </div>
   );
 }

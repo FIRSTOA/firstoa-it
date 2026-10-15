@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONIOENCODING=utf-8 python -c ' *)",
+      "Bash(node -e \"console.log\\(require\\('googleapis/package.json'\\).version\\)\")",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(pkill -f \"next-server\")",
+      "Bash(node --check scripts/backfill-asset-history.js)",
+      "Bash(node -e ' *)",
+      "Bash(npm run *)",
+      "Bash(grep -iE \"BEGIN PRIVATE KEY|service_role.*eyJ|api[_-]?key\\\\s*=\\\\s*['\\\\\"a-zA-Z0-9]{20,}\")",
+      "Bash(gcloud --version)",
+      "PowerShell(& \"C:\\\\Users\\\\D6106\\\\AppData\\\\Local\\\\Google\\\\Cloud SDK\\\\google-cloud-sdk\\\\bin\\\\gcloud.cmd\" --version)",
+      "Bash(python -c ' *)",
+      "Bash(python \"C:\\\\Users\\\\D6106\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-D6106-firstoa-it-firstoa-it\\\\c4de67fe-bf28-4d77-b7b4-b0eb6e0020f0\\\\scratchpad\\\\fill_env.py\")",
+      "Bash(rm -f .env.local.check)",
+      "Bash(git check-ignore *)",
+      "Bash(node --env-file=.env.local -e ' *)",
+      "Bash(node --env-file=.env.local scripts/_inspect-sheets.js)",
+      "Bash(vercel --prod)",
+      "Bash(curl -s -o /tmp/prod_check.html -w \"HTTP %{http_code}\\\\n\" https://firstoa-it.vercel.app/)",
+      "Bash(node --env-file=.env.local scripts/_check-perm.js)",
+      "Bash(curl -s -o /tmp/dash_check.html -w \"HTTP %{http_code}\\\\n\" http://localhost:3003/)",
+      "Bash(awk '{s+=$1} END {print s}')",
+      "Bash(rm -f /tmp/dash_check.html /tmp/dev3.log)",
+      "Bash(curl -s \"http://localhost:3006/\")",
+      "Bash(timeout 100 node scripts/_verify-reserve.js)",
+      "Bash(curl -s \"https://firstoa-it.vercel.app/\")"
+    ]
+  }
+}
