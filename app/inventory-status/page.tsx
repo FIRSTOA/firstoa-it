@@ -1,5 +1,5 @@
 import { listStaffNames } from '@/app/actions';
-import { listQuantityChecks, listZoneVerifications } from '@/app/inventoryStatus/actions';
+import { listQuantityChecks } from '@/app/inventoryStatus/actions';
 import { listAllAssetsUnified } from '@/app/stocktake/actions';
 import InventoryStatusPage from '@/components/inventoryStatus/InventoryStatusPage';
 import SetupGuide from '@/components/SetupGuide';
@@ -19,9 +19,8 @@ export default async function Page() {
     );
   }
 
-  const [assets, zoneVerifications, staffNames, stocktakeConfirmations, quantityChecks] = await Promise.all([
+  const [assets, staffNames, stocktakeConfirmations, quantityChecks] = await Promise.all([
     listAllAssetsUnified().catch(() => []),
-    listZoneVerifications(),
     listStaffNames(),
     loadStocktakeConfirmations(),
     listQuantityChecks(),
@@ -39,7 +38,6 @@ export default async function Page() {
     >
       <InventoryStatusPage
         assets={assets}
-        zoneVerifications={zoneVerifications}
         staffNames={staffNames}
         stocktakeConfirmations={stocktakeConfirmations}
         quantityChecks={quantityChecks}

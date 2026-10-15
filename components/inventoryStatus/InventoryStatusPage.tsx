@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { markZoneVerified, setQuantityCheck, setZoneVerifier } from '@/app/inventoryStatus/actions';
+import { setQuantityCheck } from '@/app/inventoryStatus/actions';
 import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import {
   BREAKDOWN_STATUSES,
@@ -10,37 +10,24 @@ import {
   buildLocationQuantitySummary,
   type LocationQuantityRow,
   type QuantityCheck,
-  type ZoneVerification,
 } from '@/lib/zoneStatus';
 import type { Asset } from '@/lib/types';
 
 type Props = {
   assets: Asset[];
-  zoneVerifications: ZoneVerification[];
   stocktakeConfirmations: Record<string, StocktakeConfirmation>;
   staffNames: string[];
   quantityChecks: QuantityCheck[];
   shelfLocations: string[];
 };
 
-function verifierBadgeStyle(v: ZoneVerification | undefined, currentCount: number): { label: string; cls: string } {
-  if (!v || !v.verifierName) return { label: '검증자 미지정', cls: 'badge-기타' };
-  if (!v.verified) return { label: `${v.verifierName} 확인대기`, cls: 'badge-상품화준비중' };
-  if (v.verifiedCount !== null && v.verifiedCount !== currentCount) {
-    return { label: `⚠️ 검증후 변경됨 (${v.verifierName})`, cls: 'badge-악성' };
-  }
-  return { label: `✅ ${v.verifierName} 검증완료`, cls: 'badge-상품화완료' };
-}
-
 export default function InventoryStatusPage({
   assets,
-  zoneVerifications,
   staffNames,
   stocktakeConfirmations,
   quantityChecks,
   shelfLocations,
 }: Props) {
-  const [verifications, setVerifications] = useState(zoneVerifications);
   const [checks, setChecks] = useState(quantityChecks);
   const [toast, setToast] = useState({ msg: '', show: false });
 
@@ -54,52 +41,7 @@ export default function InventoryStatusPage({
   );
   const locationQuantityRows = useMemo(() => buildLocationQuantitySummary(assets, checks), [assets, checks]);
   const breakdown = useMemo(() => buildCategoryBreakdown(assets), [assets]);
-  // 검증자 지정은 원래 위치×품목 조합에 썼던 it_zone_verifications 테이블을 그대로 재사용 —
-  // 이제 "위치" 대신 품목(category)×구분코드(detailCode)로 키를 씁니다(스키마는 그대로 범용
-  // 텍스트 두 칸이라 이름만 다르게 쓰는 것뿐).
-  const verificationByKey = useMemo(
-    () => new Map(verifications.map((v) => [`${v.location}\u0000${v.category}`, v])),
-    [verifications],
-  );
   const grandTotal = breakdown.reduce((sum, g) => sum + g.total, 0);
-
-  async function handleSetVerifier(category: string, detailCode: string, verifierName: string) {
-    setVerifications((prev) => {
-      const key = `${category}\u0000${detailCode}`;
-      const existing = prev.find((v) => `${v.location}\u0000${v.category}` === key);
-      const next = prev.filter((v) => `${v.location}\u0000${v.category}` !== key);
-      next.push({
-        location: category,
-        category: detailCode,
-        verifierName,
-        verified: existing?.verified ?? false,
-        verifiedAt: existing?.verifiedAt ?? null,
-        verifiedCount: existing?.verifiedCount ?? null,
-      });
-      return next;
-    });
-    const result = await setZoneVerifier(category, detailCode, verifierName);
-    if (!result.ok) showToast(result.error);
-  }
-
-  async function handleMarkVerified(category: string, detailCode: string, count: number) {
-    setVerifications((prev) => {
-      const key = `${category}\u0000${detailCode}`;
-      const existing = prev.find((v) => `${v.location}\u0000${v.category}` === key);
-      const next = prev.filter((v) => `${v.location}\u0000${v.category}` !== key);
-      next.push({
-        location: category,
-        category: detailCode,
-        verifierName: existing?.verifierName ?? '',
-        verified: true,
-        verifiedAt: new Date().toISOString(),
-        verifiedCount: count,
-      });
-      return next;
-    });
-    const result = await markZoneVerified(category, detailCode, count);
-    showToast(result.ok ? '검증 완료로 표시했어요.' : result.error);
-  }
 
   async function handleSetQuantityCheck(location: string, count: number, checkedBy: string) {
     setChecks((prev) => {
@@ -136,55 +78,18 @@ export default function InventoryStatusPage({
                       {BREAKDOWN_STATUSES.map((s) => (
                         <th key={s}>{s}</th>
                       ))}
-                      <th>검증자</th>
-                      <th>검증</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => {
-                      const v = verificationByKey.get(`${category}\u0000${r.detailCode}`);
-                      const badge = verifierBadgeStyle(v, r.total);
-                      return (
-                        <tr key={r.detailCode}>
-                          <td style={{ fontWeight: 700 }}>{r.detailCode}</td>
-                          <td style={{ fontWeight: 700 }}>{r.total}</td>
-                          {BREAKDOWN_STATUSES.map((s) => (
-                            <td key={s}>{r.byStatus[s] ?? '-'}</td>
-                          ))}
-                          <td>
-                            <select
-                              value={v?.verifierName ?? ''}
-                              onChange={(e) => handleSetVerifier(category, r.detailCode, e.target.value)}
-                              style={{ fontSize: '11.5px' }}
-                            >
-                              <option value="">선택</option>
-                              {staffNames.map((n) => (
-                                <option key={n} value={n}>
-                                  {n}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <span className={`badge ${badge.cls}`} style={{ fontSize: '10.5px' }}>
-                                {badge.label}
-                              </span>
-                              {v?.verifierName && (
-                                <button
-                                  type="button"
-                                  className="chip"
-                                  style={{ fontSize: '10.5px', padding: '2px 6px' }}
-                                  onClick={() => handleMarkVerified(category, r.detailCode, r.total)}
-                                >
-                                  확인완료
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {rows.map((r) => (
+                      <tr key={r.detailCode}>
+                        <td style={{ fontWeight: 700 }}>{r.detailCode}</td>
+                        <td style={{ fontWeight: 700 }}>{r.total}</td>
+                        {BREAKDOWN_STATUSES.map((s) => (
+                          <td key={s}>{r.byStatus[s] ?? '-'}</td>
+                        ))}
+                      </tr>
+                    ))}
                     <tr>
                       <td style={{ fontWeight: 700 }}>총계</td>
                       <td style={{ fontWeight: 700 }}>{total}</td>
@@ -193,8 +98,6 @@ export default function InventoryStatusPage({
                           {totalByStatus[s] ?? '-'}
                         </td>
                       ))}
-                      <td />
-                      <td />
                     </tr>
                   </tbody>
                 </table>
