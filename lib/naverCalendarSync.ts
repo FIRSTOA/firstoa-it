@@ -31,7 +31,9 @@ function todayPlus(days: number): string {
 
 type SyncStateRow = { href: string; etag: string; uid: string; calendar_id: string };
 
-export async function syncNaverCalendars(): Promise<{ ok: true; results: Record<string, unknown> } | { ok: false; error: string } | { ok: true; skipped: true }> {
+export async function syncNaverCalendars(
+  forceFull = false,
+): Promise<{ ok: true; results: Record<string, unknown> } | { ok: false; error: string } | { ok: true; skipped: true }> {
   if (!isNaverCalDavConfigured() || !isSupabaseConfigured()) {
     return { ok: true, skipped: true };
   }
@@ -54,7 +56,9 @@ export async function syncNaverCalendars(): Promise<{ ok: true; results: Record<
   for (const cal of (calendars ?? []) as { id: string; name: string; ctag: string }[]) {
     try {
       const newCtag = await fetchCtag(cal.id);
-      if (newCtag && newCtag === cal.ctag) {
+      // ctag가 "완료 체크만 토글" 같은 속성 전용 변경에는 안 바뀔 수도 있어서(서버 구현에
+      // 따라 다름), forceFull(하루 1번 cron)일 땐 ctag가 같아도 항상 전체 REPORT까지 돕니다.
+      if (!forceFull && newCtag && newCtag === cal.ctag) {
         results[cal.id] = { skipped: true, reason: 'ctag unchanged' };
         continue;
       }

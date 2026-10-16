@@ -16,6 +16,20 @@ export function parseEventKind(title: string): string | null {
   return CALENDAR_EVENT_KINDS.find((k) => title.includes(k)) ?? null;
 }
 
+/** 제목에 "IT"가 독립 토큰으로 들어있는지(예: "★IT/위탁납품(일반)/...") — 네이버 캘린더 하나에
+ * 여러 부서 일정이 섞여 있어서, 제목 기준으로 IT 관련 일정만 따로 걸러볼 때 씁니다. */
+export function isITEvent(title: string): boolean {
+  return /\bIT\b/.test(title);
+}
+
+export type CalendarEventItem = {
+  category: string;
+  model: string;
+  quantity: number;
+  assetId: string;
+  note: string;
+};
+
 export type CalendarEvent = {
   id: string;
   title: string;
@@ -25,6 +39,8 @@ export type CalendarEvent = {
   description: string;
   status: string;
   author: string;
+  important: boolean;
+  items: CalendarEventItem[];
   naverUid: string | null;
   source: string;
   calendarId: string | null; // 연결된 네이버 캘린더 ID (Phase 2, 없으면 동기화 안 됨)
@@ -39,6 +55,8 @@ export type CalendarEventRow = {
   description: string;
   status: string;
   author: string;
+  important: boolean;
+  items: CalendarEventItem[];
   naver_uid: string | null;
   source: string;
   calendar_id: string | null;
@@ -54,6 +72,8 @@ export function rowToCalendarEvent(row: CalendarEventRow): CalendarEvent {
     description: row.description,
     status: row.status,
     author: row.author,
+    important: row.important,
+    items: row.items ?? [],
     naverUid: row.naver_uid,
     source: row.source,
     calendarId: row.calendar_id,
@@ -71,6 +91,8 @@ export function calendarEventInputToRow(input: CalendarEventInput) {
     description: input.description,
     status: input.status,
     author: input.author,
+    important: input.important,
+    items: input.items,
     calendar_id: input.calendarId,
   };
 }

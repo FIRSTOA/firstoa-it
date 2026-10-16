@@ -1,10 +1,33 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CALENDAR_STATUSES, type CalendarEvent, type CalendarEventInput, type NaverCalendarConnection } from '@/lib/calendar';
+import { lookupKnownAsset } from '@/app/actions';
+import {
+  CALENDAR_STATUSES,
+  type CalendarEvent,
+  type CalendarEventInput,
+  type CalendarEventItem,
+  type NaverCalendarConnection,
+} from '@/lib/calendar';
+import { CATEGORIES } from '@/lib/types';
 
 function blankInput(date: string, calendarId: string | null): CalendarEventInput {
-  return { title: '', date, time: '', location: '', description: '', status: '진행중', author: '', calendarId };
+  return {
+    title: '',
+    date,
+    time: '',
+    location: '',
+    description: '',
+    status: '진행중',
+    author: '',
+    important: false,
+    items: [],
+    calendarId,
+  };
+}
+
+function blankItem(): CalendarEventItem {
+  return { category: CATEGORIES[0], model: '', quantity: 1, assetId: '', note: '' };
 }
 
 type Props = {
@@ -33,6 +56,8 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
         description: editing.description,
         status: editing.status,
         author: editing.author,
+        important: editing.important,
+        items: editing.items,
         calendarId: editing.calendarId,
       });
       setAllDay(!editing.time);
@@ -100,6 +125,12 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
             <input value={form.author} onChange={(e) => set('author', e.target.value)} />
           </div>
           <div className="form-field full">
+            <label className="toggle" style={{ fontWeight: 600 }}>
+              <input type="checkbox" checked={form.important} onChange={(e) => set('important', e.target.checked)} />
+              ★ 중요
+            </label>
+          </div>
+          <div className="form-field full">
             <label>네이버 캘린더</label>
             <select
               value={form.calendarId ?? ''}
@@ -116,6 +147,26 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
           <div className="form-field full">
             <label>장소</label>
             <input value={form.location} onChange={(e) => set('location', e.target.value)} />
+          </div>
+          <div className="form-field full">
+            <label>품목</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {form.items.map((item, idx) => (
+                <ItemRow
+                  key={idx}
+                  item={item}
+                  onChange={(next) => {
+                    const items = [...form.items];
+                    items[idx] = next;
+                    set('items', items);
+                  }}
+                  onRemove={() => set('items', form.items.filter((_, i) => i !== idx))}
+                />
+              ))}
+              <button type="button" className="chip" style={{ alignSelf: 'flex-start' }} onClick={() => set('items', [...form.items, blankItem()])}>
+                ＋ 라인 추가
+              </button>
+            </div>
           </div>
           <div className="form-field full">
             <label>설명</label>
@@ -155,6 +206,73 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ItemRow({
+  item,
+  onChange,
+  onRemove,
+}: {
+  item: CalendarEventItem;
+  onChange: (next: CalendarEventItem) => void;
+  onRemove: () => void;
+}) {
+  const [looking, setLooking] = useState(false);
+
+  async function handleAssetBlur() {
+    const assetId = item.assetId.trim();
+    if (!assetId) return;
+    setLooking(true);
+    const result = await lookupKnownAsset(assetId);
+    setLooking(false);
+    if (!result.found) return;
+    onChange({
+      ...item,
+      category: item.category || result.category,
+      model: item.model || result.model,
+    });
+  }
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 60px 110px 1fr 28px', gap: '6px', alignItems: 'center' }}>
+      <select value={item.category} onChange={(e) => onChange({ ...item, category: e.target.value })} style={{ fontSize: '12.5px' }}>
+        {CATEGORIES.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+      <input
+        value={item.model}
+        onChange={(e) => onChange({ ...item, model: e.target.value })}
+        placeholder="품목명"
+        style={{ fontSize: '12.5px' }}
+      />
+      <input
+        type="number"
+        min="1"
+        value={item.quantity}
+        onChange={(e) => onChange({ ...item, quantity: Number(e.target.value) || 1 })}
+        style={{ fontSize: '12.5px' }}
+      />
+      <input
+        value={item.assetId}
+        onChange={(e) => onChange({ ...item, assetId: e.target.value })}
+        onBlur={handleAssetBlur}
+        placeholder={looking ? '조회 중…' : '자산번호'}
+        style={{ fontSize: '12.5px' }}
+      />
+      <input
+        value={item.note}
+        onChange={(e) => onChange({ ...item, note: e.target.value })}
+        placeholder="비고"
+        style={{ fontSize: '12.5px' }}
+      />
+      <button type="button" className="icon-btn danger" onClick={onRemove} title="라인 삭제">
+        ×
+      </button>
     </div>
   );
 }

@@ -37,3 +37,9 @@ create trigger it_calendar_events_set_updated_at
 
 -- 다른 대장들과 동일한 보안 모델: RLS 켜고 정책은 만들지 않음 → service_role 서버 코드만 접근
 alter table public.it_calendar_events enable row level security;
+
+-- 중요(⭐) 표시 + 일정별 품목(자산번호) 라인 — 둘 다 앱(Supabase) 전용, 네이버 CalDAV 쪽엔
+-- 안 보냅니다(완료 체크만 X-NAVER-COMPLETED로 계속 동기화).
+alter table public.it_calendar_events
+  add column if not exists important boolean not null default false,
+  add column if not exists items jsonb not null default '[]'::jsonb;

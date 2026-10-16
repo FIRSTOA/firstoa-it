@@ -5,6 +5,7 @@ import { createEvent, deleteEvent, listConnectedCalendars, listEventsInRange, up
 import {
   CALENDAR_EVENT_KINDS,
   groupEventsByDate,
+  isITEvent,
   monthGridRange,
   parseEventKind,
   toYmd,
@@ -13,6 +14,8 @@ import {
   type NaverCalendarConnection,
 } from '@/lib/calendar';
 import CalendarConnectionsModal from './CalendarConnectionsModal';
+import DayEventList from './DayEventList';
+import DayEventsModal from './DayEventsModal';
 import EventModal from './EventModal';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -39,12 +42,15 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
   const [defaultDate, setDefaultDate] = useState<string>(todayYmd());
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
-  const [viewMode, setViewMode] = useState<'month' | 'list'>('month');
+  const [viewMode, setViewMode] = useState<'month' | 'list' | 'day'>('month');
   const [searchTerm, setSearchTerm] = useState('');
   const [calendarFilter, setCalendarFilter] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'전체' | '진행중' | '완료'>('전체');
   const [kindFilter, setKindFilter] = useState<string | null>(null);
+  const [itFilter, setItFilter] = useState(false);
+  const [importantFilter, setImportantFilter] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(todayYmd());
+  const [dayPopupOpen, setDayPopupOpen] = useState(false);
 
   function refetchConnectedCalendars() {
     startTransition(async () => {
@@ -98,11 +104,13 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
       if (calendarFilter && e.calendarId !== calendarFilter) return false;
       if (statusFilter !== '전체' && e.status !== statusFilter) return false;
       if (kindFilter && parseEventKind(e.title) !== kindFilter) return false;
+      if (itFilter && !isITEvent(e.title)) return false;
+      if (importantFilter && !e.important) return false;
       if (!term) return true;
       const hay = `${e.title} ${e.location} ${e.description} ${e.author}`.toLowerCase();
       return hay.includes(term);
     });
-  }, [events, searchTerm, calendarFilter, statusFilter, kindFilter]);
+  }, [events, searchTerm, calendarFilter, statusFilter, kindFilter, itFilter, importantFilter]);
 
   const statusCounts = useMemo(() => {
     const base = events.filter((e) => !calendarFilter || e.calendarId === calendarFilter);
@@ -148,6 +156,24 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
     setMonth(d.getMonth() + 1);
   }
 
+  // "일간" 탭 날짜 이동 — 월 경계를 넘으면 year/month도 같이 갱신해서 기존 "월 바뀌면 다시
+  // 조회" useEffect를 그대로 재사용합니다(새 fetch 경로를 따로 안 만듦).
+  function goDay(offset: number) {
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const next = new Date(y, m - 1, d + offset);
+    const ymd = toYmd(next);
+    setSelectedDate(ymd);
+    if (next.getFullYear() !== year || next.getMonth() + 1 !== month) {
+      setYear(next.getFullYear());
+      setMonth(next.getMonth() + 1);
+    }
+  }
+
+  function openDateCell(ymd: string) {
+    setSelectedDate(ymd);
+    setDayPopupOpen(true);
+  }
+
   function openCreate(date: string) {
     setEditing(null);
     setDefaultDate(date);
@@ -187,6 +213,8 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
         description: ev.description,
         status: nextStatus,
         author: ev.author,
+        important: ev.important,
+        items: ev.items,
         calendarId: ev.calendarId,
       });
       if (!result.ok) {
@@ -245,6 +273,17 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
           </button>
           <button type="button" className={`chip${viewMode === 'list' ? ' active' : ''}`} onClick={() => setViewMode('list')}>
             목록
+          </button>
+          <button type="button" className={`chip${viewMode === 'day' ? ' active' : ''}`} onClick={() => setViewMode('day')}>
+            일간
+          </button>
+        </div>
+        <div className="chip-group">
+          <button type="button" className={`chip${itFilter ? ' active' : ''}`} onClick={() => setItFilter((v) => !v)}>
+            💻 IT
+          </button>
+          <button type="button" className={`chip${importantFilter ? ' active' : ''}`} onClick={() => setImportantFilter((v) => !v)}>
+            ⭐ 중요
           </button>
         </div>
         <div className="chip-group">
@@ -328,7 +367,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                     </td>
                     <td>{ev.date}</td>
                     <td>{ev.time || '종일'}</td>
-                    <td>{ev.title}</td>
+                    <td>{ev.important && '⭐ '}{ev.title}</td>
                     <td>{ev.location || '-'}</td>
                     <td>
                       <span className={`badge ${ev.status === '완료' ? 'badge-상품화완료' : 'badge-상품화준비중'}`}>
@@ -349,7 +388,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : viewMode === 'month' ? (
       <div className="panel calendar-panel">
         <div className="calendar-weekday-row">
           {WEEKDAYS.map((w, i) => (
@@ -369,7 +408,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
               <div
                 key={ymd}
                 className={`calendar-day${inMonth ? '' : ' outside'}${ymd === today ? ' today' : ''}${ymd === selectedDate ? ' selected' : ''}`}
-                onClick={() => setSelectedDate(ymd)}
+                onClick={() => openDateCell(ymd)}
                 onDoubleClick={() => openCreate(ymd)}
               >
                 <div className="calendar-day-number">{d.getDate()}</div>
@@ -385,7 +424,8 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                       }}
                       title={ev.title}
                     >
-                      {ev.time && <span className="calendar-event-time">{ev.time}</span>} {ev.title}
+                      {ev.time && <span className="calendar-event-time">{ev.time}</span>} {ev.important && '⭐ '}
+                      {ev.title}
                     </button>
                   ))}
                   {extra > 0 && (
@@ -394,7 +434,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                       className="calendar-event-more"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSelectedDate(ymd);
+                        openDateCell(ymd);
                       }}
                     >
                       +{extra}개 더
@@ -406,45 +446,53 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
           })}
         </div>
       </div>
-      )}
+      ) : null}
 
-      {viewMode === 'month' && (
+      {viewMode === 'day' && (
         <div className="panel" style={{ marginTop: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <div style={{ fontWeight: 700, fontSize: '14px' }}>
-              {selectedDateLabel} · {selectedDayEvents.length}건
+            <div className="actions">
+              <button type="button" className="btn btn-ghost" onClick={() => goDay(-1)} aria-label="전날">
+                ‹
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => setSelectedDate(todayYmd())}>
+                오늘
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => goDay(1)} aria-label="다음날">
+                ›
+              </button>
+              <div style={{ fontWeight: 700, fontSize: '15px', marginLeft: '6px' }}>
+                {selectedDateLabel} · {selectedDayEvents.length}건
+              </div>
             </div>
-            <button type="button" className="btn btn-ghost" onClick={() => openCreate(selectedDate)}>
+            <button type="button" className="btn btn-primary" onClick={() => openCreate(selectedDate)}>
               ＋ 이 날에 추가
             </button>
           </div>
-          {selectedDayEvents.length === 0 ? (
-            <div className="detail-empty">이 날 일정이 없어요 — 날짜 칸을 두 번 누르거나 [이 날에 추가]를 눌러주세요.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {selectedDayEvents.map((ev) => (
-                <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <input
-                    type="checkbox"
-                    checked={ev.status === '완료'}
-                    onChange={() => handleToggleStatus(ev)}
-                    title="완료 체크"
-                  />
-                  <button
-                    type="button"
-                    className={`calendar-event-chip${ev.status === '완료' ? ' done' : ''}`}
-                    style={{ flex: 1, textAlign: 'left' }}
-                    onClick={() => openEdit(ev)}
-                  >
-                    {ev.time && <span className="calendar-event-time">{ev.time}</span>} {ev.title}
-                    {ev.location && <span style={{ color: 'var(--ink-400)' }}> · {ev.location}</span>}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <DayEventList
+            events={selectedDayEvents}
+            onToggleStatus={handleToggleStatus}
+            onEdit={openEdit}
+            emptyMessage="이 날 일정이 없어요 — [이 날에 추가]를 눌러주세요."
+          />
         </div>
       )}
+
+      <DayEventsModal
+        open={dayPopupOpen}
+        dateLabel={selectedDateLabel}
+        events={selectedDayEvents}
+        onClose={() => setDayPopupOpen(false)}
+        onToggleStatus={handleToggleStatus}
+        onEdit={(ev) => {
+          setDayPopupOpen(false);
+          openEdit(ev);
+        }}
+        onAddNew={() => {
+          setDayPopupOpen(false);
+          openCreate(selectedDate);
+        }}
+      />
 
       <EventModal
         open={modalOpen}
