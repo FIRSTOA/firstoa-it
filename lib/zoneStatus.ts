@@ -103,16 +103,18 @@ export function extractLocationCode(rawLocation: string): string {
 }
 
 /**
- * 진짜 선반 위치 코드처럼 생겼는지("A1"/"B2"/"2층 A1"/"G3 오버홀"처럼 영문+숫자로
- * 시작하거나 "N층"으로 시작) 확인합니다. "반출"/"분실"/"수리중"/"폐기"/"판매"/
- * "김정식프로문의" 같은 값은 선반 위치가 아니라 상태·메모성 텍스트라 실재고조사(선반에
- * 실물이 있는지 확인하는 작업) 대상 위치 목록에서 걸러내는 데 씁니다.
+ * 진짜 선반 위치 코드처럼 생겼는지("A1"/"B2"/"G3 오버홀"처럼 영문+숫자로 시작) 확인합니다.
+ * "반출"/"분실"/"수리중"/"폐기"/"판매"/"김정식프로문의" 같은 값은 선반 위치가 아니라
+ * 상태·메모성 텍스트라 걸러냅니다. "N층"으로 시작하는 값("2층 A1" 등)과 "K"로 시작하는
+ * 코드(K1/K2 등)는 실제로 재고파악(실재고조사)을 하지 않는 위치라 둘 다 제외합니다.
  */
 export function looksLikeShelfLocation(raw: string): boolean {
   const trimmed = raw.trim();
   if (!trimmed) return false;
-  if (/^\d+층/.test(trimmed)) return true;
-  return /^[A-Za-z]{1,2}\d+/.test(trimmed);
+  if (/^\d+층/.test(trimmed)) return false;
+  const match = trimmed.match(/^([A-Za-z]{1,2})\d+/);
+  if (!match) return false;
+  return !match[1].toUpperCase().startsWith('K');
 }
 
 export type ResolvedLocation = {
