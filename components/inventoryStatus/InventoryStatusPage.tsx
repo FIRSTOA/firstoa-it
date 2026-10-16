@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
+import { addStaffNameIfNew } from '@/app/actions';
 import { setQuantityCheck } from '@/app/inventoryStatus/actions';
 import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import {
@@ -8,10 +9,13 @@ import {
   buildCategoryBreakdown,
   buildLocationCheckTables,
   buildLocationQuantitySummary,
+  looksLikeShelfLocation,
   type LocationQuantityRow,
   type QuantityCheck,
 } from '@/lib/zoneStatus';
 import type { Asset } from '@/lib/types';
+
+const CUSTOM_OPTION = '__custom__';
 
 type Props = {
   assets: Asset[];
@@ -49,6 +53,10 @@ export default function InventoryStatusPage({
       next.push({ location, countedCount: count, checkedBy, checkedAt: new Date().toISOString() });
       return next;
     });
+    const trimmedName = checkedBy.trim();
+    if (trimmedName && !staffNames.includes(trimmedName)) {
+      addStaffNameIfNew(trimmedName).catch(() => {});
+    }
     const result = await setQuantityCheck(location, count, checkedBy);
     showToast(result.ok ? `${location} ${count}대로 기록했어요.` : result.error);
   }
@@ -191,6 +199,91 @@ export default function InventoryStatusPage({
   );
 }
 
+function QuantityCheckRows({
+  rows,
+  expanded,
+  onToggle,
+}: {
+  rows: LocationQuantityRow[];
+  expanded: string | null;
+  onToggle: (location: string) => void;
+}) {
+  const total = rows.reduce(
+    (acc, r) => ({ system: acc.system + r.systemCount, counted: acc.counted + (r.countedCount ?? 0) }),
+    { system: 0, counted: 0 },
+  );
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ fontSize: '12.5px' }}>
+        <thead>
+          <tr>
+            <th>위치</th>
+            <th>전산 수량</th>
+            <th>실사수량</th>
+            <th>업데이트</th>
+            <th>담당자</th>
+            <th>비고</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <Fragment key={r.location}>
+              <tr
+                style={{
+                  cursor: 'pointer',
+                  ...(r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined),
+                }}
+                onClick={() => onToggle(r.location)}
+              >
+                <td style={{ fontWeight: 700 }}>
+                  {expanded === r.location ? '▼' : '▶'} {r.location}
+                </td>
+                <td>{r.systemCount}</td>
+                <td>{r.countedCount ?? '-'}</td>
+                <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
+                  {r.checkedAt ? formatKstDateTime(r.checkedAt) : '-'}
+                </td>
+                <td>{r.checkedBy || '-'}</td>
+                <td
+                  style={{
+                    fontWeight: 700,
+                    color: r.countedCount === null ? 'var(--ink-500)' : r.mismatch ? 'var(--red-600)' : 'var(--green-600)',
+                  }}
+                >
+                  {r.countedCount === null ? '-' : r.mismatch ? '불일치' : '일치'}
+                </td>
+              </tr>
+              {expanded === r.location && (
+                <tr>
+                  <td colSpan={6} style={{ background: 'var(--ink-50)' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 4px' }}>
+                      {r.assetIds.map((a) => (
+                        <span key={a.assetId} className="chip" style={{ fontSize: '11.5px' }}>
+                          <span className="asset-id">{a.assetId}</span> {a.category} {a.model}
+                        </span>
+                      ))}
+                      {r.assetIds.length === 0 && <span className="sub">자산이 없어요.</span>}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+          <tr>
+            <td style={{ fontWeight: 700 }}>총계</td>
+            <td style={{ fontWeight: 700 }}>{total.system}</td>
+            <td style={{ fontWeight: 700 }}>{total.counted}</td>
+            <td />
+            <td />
+            <td />
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function QuantityCheckPanel({
   rows,
   locations,
@@ -205,7 +298,9 @@ function QuantityCheckPanel({
   const [location, setLocation] = useState('');
   const [count, setCount] = useState('');
   const [checkedBy, setCheckedBy] = useState('');
+  const [customMode, setCustomMode] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [showExcluded, setShowExcluded] = useState(false);
 
   function handleSubmit() {
     const n = Number(count);
@@ -214,10 +309,14 @@ function QuantityCheckPanel({
     setCount('');
   }
 
-  const total = rows.reduce(
-    (acc, r) => ({ system: acc.system + r.systemCount, counted: acc.counted + (r.countedCount ?? 0) }),
-    { system: 0, counted: 0 },
-  );
+  function toggleExpanded(loc: string) {
+    setExpanded((prev) => (prev === loc ? null : loc));
+  }
+
+  // 선반 위치가 아닌 값(파손/판매/분실/반출/폐기/직송-.../김정식프로문의/K열/PM 등 상태·메모성
+  // 텍스트)은 애초에 실재고 체크 대상이 아니라서 "실재고체크안함" 탭으로 따로 모아 후순위로 둡니다.
+  const shelfRows = rows.filter((r) => looksLikeShelfLocation(r.location));
+  const excludedRows = rows.filter((r) => !looksLikeShelfLocation(r.location));
 
   return (
     <div className="panel" style={{ marginBottom: '12px' }}>
@@ -243,89 +342,63 @@ function QuantityCheckPanel({
           onChange={(e) => setCount(e.target.value)}
           style={{ width: '90px' }}
         />
-        <select value={checkedBy} onChange={(e) => setCheckedBy(e.target.value)}>
-          <option value="">담당자 선택</option>
-          {staffNames.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+        {customMode || staffNames.length === 0 ? (
+          <input value={checkedBy} onChange={(e) => setCheckedBy(e.target.value)} placeholder="담당자 이름 입력" style={{ width: '110px' }} />
+        ) : (
+          <select
+            value={staffNames.includes(checkedBy) ? checkedBy : ''}
+            onChange={(e) => {
+              if (e.target.value === CUSTOM_OPTION) {
+                setCustomMode(true);
+                setCheckedBy('');
+              } else {
+                setCheckedBy(e.target.value);
+              }
+            }}
+          >
+            <option value="">담당자 선택</option>
+            {staffNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+            <option value={CUSTOM_OPTION}>➕ 새 이름 입력</option>
+          </select>
+        )}
+        {customMode && staffNames.length > 0 && (
+          <button
+            type="button"
+            className="chip"
+            onClick={() => {
+              setCustomMode(false);
+              setCheckedBy('');
+            }}
+          >
+            목록에서 선택
+          </button>
+        )}
         <button type="button" className="btn btn-primary" onClick={handleSubmit}>
           기록
         </button>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ fontSize: '12.5px' }}>
-          <thead>
-            <tr>
-              <th>위치</th>
-              <th>전산 수량</th>
-              <th>실사수량</th>
-              <th>업데이트</th>
-              <th>담당자</th>
-              <th>비고</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <Fragment key={r.location}>
-                <tr
-                  style={{
-                    cursor: 'pointer',
-                    ...(r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined),
-                  }}
-                  onClick={() => setExpanded((prev) => (prev === r.location ? null : r.location))}
-                >
-                  <td style={{ fontWeight: 700 }}>
-                    {expanded === r.location ? '▼' : '▶'} {r.location}
-                  </td>
-                  <td>{r.systemCount}</td>
-                  <td>{r.countedCount ?? '-'}</td>
-                  <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
-                    {r.checkedAt ? formatKstDateTime(r.checkedAt) : '-'}
-                  </td>
-                  <td>{r.checkedBy || '-'}</td>
-                  <td
-                    style={{
-                      fontWeight: 700,
-                      color: r.countedCount === null ? 'var(--ink-500)' : r.mismatch ? 'var(--red-600)' : 'var(--green-600)',
-                    }}
-                  >
-                    {r.countedCount === null ? '-' : r.mismatch ? '불일치' : '일치'}
-                  </td>
-                </tr>
-                {expanded === r.location && (
-                  <tr>
-                    <td colSpan={6} style={{ background: 'var(--ink-50)' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 4px' }}>
-                        {r.assetIds.map((a) => (
-                          <span key={a.assetId} className="chip" style={{ fontSize: '11.5px' }}>
-                            <span className="asset-id">{a.assetId}</span> {a.category} {a.model}
-                          </span>
-                        ))}
-                        {r.assetIds.length === 0 && <span className="sub">자산이 없어요.</span>}
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-            <tr>
-              <td style={{ fontWeight: 700 }}>총계</td>
-              <td style={{ fontWeight: 700 }}>{total.system}</td>
-              <td style={{ fontWeight: 700 }}>{total.counted}</td>
-              <td />
-              <td />
-              <td />
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      {rows.length === 0 && (
+      <QuantityCheckRows rows={shelfRows} expanded={expanded} onToggle={toggleExpanded} />
+      {shelfRows.length === 0 && (
         <div className="empty-state">
           <div>📋</div>위치가 입력된 가용 자산이 없어요.
+        </div>
+      )}
+
+      {excludedRows.length > 0 && (
+        <div style={{ marginTop: '14px' }}>
+          <button type="button" className="chip" onClick={() => setShowExcluded((v) => !v)}>
+            {showExcluded ? '▲' : '▶'} 실재고체크안함 ({excludedRows.length}개)
+          </button>
+          {showExcluded && (
+            <div style={{ marginTop: '8px' }}>
+              <QuantityCheckRows rows={excludedRows} expanded={expanded} onToggle={toggleExpanded} />
+            </div>
+          )}
         </div>
       )}
     </div>
