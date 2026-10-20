@@ -117,6 +117,35 @@ export function looksLikeShelfLocation(raw: string): boolean {
   return !match[1].toUpperCase().startsWith('K');
 }
 
+export type StockCheckOverride = {
+  location: string;
+  excluded: boolean;
+  updatedBy: string;
+  updatedAt: string;
+};
+
+export type StockCheckOverrideRow = {
+  location: string;
+  excluded: boolean;
+  updated_by: string;
+  updated_at: string;
+};
+
+export function rowToStockCheckOverride(row: StockCheckOverrideRow): StockCheckOverride {
+  return { location: row.location, excluded: row.excluded, updatedBy: row.updated_by, updatedAt: row.updated_at };
+}
+
+/**
+ * "1차 수량 체크" 대상 여부 — 기본값은 looksLikeShelfLocation(선반 코드처럼 생겼는지)지만,
+ * it_stock_check_overrides에 그 위치의 예외가 있으면 그걸 그대로 따릅니다(기본 분류를
+ * 양쪽 방향으로 수동으로 뒤집을 수 있게).
+ */
+export function isStockCheckExcluded(location: string, overrideByLocation: Map<string, boolean>): boolean {
+  const override = overrideByLocation.get(location);
+  if (override !== undefined) return override;
+  return !looksLikeShelfLocation(location);
+}
+
 export type ResolvedLocation = {
   /** 매트릭스 행으로 쓰는 표시값(층 이름 또는 "미분류 (코드)" 또는 수동 재지정값) */
   floor: string;

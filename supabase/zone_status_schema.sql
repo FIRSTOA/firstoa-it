@@ -58,6 +58,16 @@ create table public.it_quantity_checks (
   checked_at     timestamptz not null default now()
 );
 
+-- 1차 수량 체크 — 위치가 "실재고체크 대상"인지는 기본적으로 looksLikeShelfLocation(선반
+-- 코드처럼 생겼는지)로 자동 분류되는데, 예외를 수동으로 뒤집을 수 있게 하는 작은 override
+-- 표입니다. 여기 들어간 위치만 기본 분류와 반대로 적용됩니다.
+create table if not exists public.it_stock_check_overrides (
+  location   text primary key,
+  excluded   boolean not null,
+  updated_by text not null default '',
+  updated_at timestamptz not null default now()
+);
+
 drop trigger if exists it_zone_status_set_updated_at on public.it_zone_status;
 create trigger it_zone_status_set_updated_at
   before update on public.it_zone_status
@@ -69,3 +79,4 @@ alter table public.it_zone_locations enable row level security;
 alter table public.it_zone_verifications enable row level security;
 alter table public.it_location_floor_map enable row level security;
 alter table public.it_quantity_checks enable row level security;
+alter table public.it_stock_check_overrides enable row level security;

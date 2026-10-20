@@ -1,12 +1,11 @@
 import { listStaffNames } from '@/app/actions';
-import { listQuantityChecks } from '@/app/inventoryStatus/actions';
+import { listQuantityChecks, listStockCheckOverrides } from '@/app/inventoryStatus/actions';
 import { listAllAssetsUnified } from '@/app/stocktake/actions';
 import InventoryStatusPage from '@/components/inventoryStatus/InventoryStatusPage';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
 import { loadStocktakeConfirmations } from '@/lib/inventory/stocktakeConfirmations';
 import { isSupabaseConfigured } from '@/lib/supabase/server';
-import { looksLikeShelfLocation } from '@/lib/zoneStatus';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,16 +18,13 @@ export default async function Page() {
     );
   }
 
-  const [assets, staffNames, stocktakeConfirmations, quantityChecks] = await Promise.all([
+  const [assets, staffNames, stocktakeConfirmations, quantityChecks, stockCheckOverrides] = await Promise.all([
     listAllAssetsUnified().catch(() => []),
     listStaffNames(),
     loadStocktakeConfirmations(),
     listQuantityChecks(),
+    listStockCheckOverrides(),
   ]);
-
-  const shelfLocations = Array.from(new Set(assets.map((a) => a.location.trim()).filter(Boolean)))
-    .filter(looksLikeShelfLocation)
-    .sort();
 
   return (
     <Shell
@@ -41,7 +37,7 @@ export default async function Page() {
         staffNames={staffNames}
         stocktakeConfirmations={stocktakeConfirmations}
         quantityChecks={quantityChecks}
-        shelfLocations={shelfLocations}
+        stockCheckOverrides={stockCheckOverrides}
       />
     </Shell>
   );

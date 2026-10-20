@@ -4,12 +4,15 @@ import { revalidatePath } from 'next/cache';
 import {
   rowToLocationFloorMap,
   rowToQuantityCheck,
+  rowToStockCheckOverride,
   rowToZoneStatus,
   rowToZoneVerification,
   type LocationFloorMap,
   type LocationFloorMapRow,
   type QuantityCheck,
   type QuantityCheckRow,
+  type StockCheckOverride,
+  type StockCheckOverrideRow,
   type ZoneStatus,
   type ZoneStatusRow,
   type ZoneVerification,
@@ -19,6 +22,7 @@ import {
   createAdminClient,
   LOCATION_FLOOR_MAP_TABLE,
   QUANTITY_CHECKS_TABLE,
+  STOCK_CHECK_OVERRIDES_TABLE,
   ZONE_LOCATIONS_TABLE,
   ZONE_STATUS_TABLE,
   ZONE_VERIFICATIONS_TABLE,
@@ -213,6 +217,39 @@ export async function setQuantityCheck(location: string, count: number, checkedB
   );
   if (error) {
     console.error('[inventoryStatus] setQuantityCheck 실패:', error);
+    return { ok: false, error: `저장에 실패했어요: ${error.message}` };
+  }
+  revalidatePath('/inventory-status');
+  return { ok: true };
+}
+
+export async function listStockCheckOverrides(): Promise<StockCheckOverride[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.from(STOCK_CHECK_OVERRIDES_TABLE).select('*');
+  if (error) {
+    console.error('[inventoryStatus] listStockCheckOverrides 실패:', error);
+    return [];
+  }
+  return ((data ?? []) as StockCheckOverrideRow[]).map(rowToStockCheckOverride);
+}
+
+/** 위치의 "1차 수량 체크 대상" 기본 분류(looksLikeShelfLocation)를 수동으로 뒤집습니다. */
+export async function setStockCheckOverride(location: string, excluded: boolean, updatedBy = ''): Promise<ActionResult> {
+  const trimmedLocation = location.trim();
+  if (!trimmedLocation) return { ok: false, error: '위치가 비어있어요.' };
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(STOCK_CHECK_OVERRIDES_TABLE).upsert(
+    {
+      location: trimmedLocation,
+      excluded,
+      updated_by: updatedBy.trim(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'location' },
+  );
+  if (error) {
+    console.error('[inventoryStatus] setStockCheckOverride 실패:', error);
     return { ok: false, error: `저장에 실패했어요: ${error.message}` };
   }
   revalidatePath('/inventory-status');

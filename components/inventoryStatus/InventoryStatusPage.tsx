@@ -2,16 +2,17 @@
 
 import { Fragment, useMemo, useState } from 'react';
 import { addStaffNameIfNew } from '@/app/actions';
-import { setQuantityCheck } from '@/app/inventoryStatus/actions';
+import { setQuantityCheck, setStockCheckOverride } from '@/app/inventoryStatus/actions';
 import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import {
   BREAKDOWN_STATUSES,
   buildCategoryBreakdown,
   buildLocationCheckTables,
   buildLocationQuantitySummary,
-  looksLikeShelfLocation,
+  isStockCheckExcluded,
   type LocationQuantityRow,
   type QuantityCheck,
+  type StockCheckOverride,
 } from '@/lib/zoneStatus';
 import type { Asset } from '@/lib/types';
 
@@ -22,7 +23,7 @@ type Props = {
   stocktakeConfirmations: Record<string, StocktakeConfirmation>;
   staffNames: string[];
   quantityChecks: QuantityCheck[];
-  shelfLocations: string[];
+  stockCheckOverrides: StockCheckOverride[];
 };
 
 export default function InventoryStatusPage({
@@ -30,9 +31,10 @@ export default function InventoryStatusPage({
   staffNames,
   stocktakeConfirmations,
   quantityChecks,
-  shelfLocations,
+  stockCheckOverrides,
 }: Props) {
   const [checks, setChecks] = useState(quantityChecks);
+  const [overrides, setOverrides] = useState(stockCheckOverrides);
   const [toast, setToast] = useState({ msg: '', show: false });
 
   function showToast(msg: string) {
@@ -44,6 +46,7 @@ export default function InventoryStatusPage({
     [assets, stocktakeConfirmations],
   );
   const locationQuantityRows = useMemo(() => buildLocationQuantitySummary(assets, checks), [assets, checks]);
+  const overrideByLocation = useMemo(() => new Map(overrides.map((o) => [o.location, o.excluded])), [overrides]);
   const breakdown = useMemo(() => buildCategoryBreakdown(assets), [assets]);
   const grandTotal = breakdown.reduce((sum, g) => sum + g.total, 0);
 
@@ -59,6 +62,15 @@ export default function InventoryStatusPage({
     }
     const result = await setQuantityCheck(location, count, checkedBy);
     showToast(result.ok ? `${location} ${count}대로 기록했어요.` : result.error);
+  }
+
+  async function handleToggleExcluded(location: string, excluded: boolean) {
+    setOverrides((prev) => [
+      ...prev.filter((o) => o.location !== location),
+      { location, excluded, updatedBy: '', updatedAt: new Date().toISOString() },
+    ]);
+    const result = await setStockCheckOverride(location, excluded);
+    showToast(result.ok ? `${location} — ${excluded ? '체크 안 함으로 옮겼어요.' : '체크 대상으로 옮겼어요.'}` : result.error);
   }
 
   return (
@@ -184,9 +196,10 @@ export default function InventoryStatusPage({
 
       <QuantityCheckPanel
         rows={locationQuantityRows}
-        locations={shelfLocations}
+        overrideByLocation={overrideByLocation}
         staffNames={staffNames}
         onSave={handleSetQuantityCheck}
+        onToggleExcluded={handleToggleExcluded}
       />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
@@ -199,14 +212,49 @@ export default function InventoryStatusPage({
   );
 }
 
+function CountCell({ countedCount, onSave }: { countedCount: number | null; onSave: (count: number) => void }) {
+  const [value, setValue] = useState(countedCount === null ? '' : String(countedCount));
+
+  function commit() {
+    const n = Number(value);
+    if (value.trim() === '' || !Number.isFinite(n) || n < 0) {
+      setValue(countedCount === null ? '' : String(countedCount));
+      return;
+    }
+    if (n !== countedCount) onSave(n);
+  }
+
+  return (
+    <input
+      type="number"
+      min="0"
+      value={value}
+      placeholder="입력"
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }}
+      style={{ width: '70px' }}
+    />
+  );
+}
+
 function QuantityCheckRows({
   rows,
   expanded,
   onToggle,
+  excludedSection,
+  onSaveCount,
+  onToggleExcluded,
 }: {
   rows: LocationQuantityRow[];
   expanded: string | null;
   onToggle: (location: string) => void;
+  excludedSection: boolean;
+  onSaveCount: (location: string, count: number) => void;
+  onToggleExcluded: (location: string, excluded: boolean) => void;
 }) {
   const total = rows.reduce(
     (acc, r) => ({ system: acc.system + r.systemCount, counted: acc.counted + (r.countedCount ?? 0) }),
@@ -224,23 +272,20 @@ function QuantityCheckRows({
             <th>업데이트</th>
             <th>담당자</th>
             <th>비고</th>
+            <th>분류</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <Fragment key={r.location}>
-              <tr
-                style={{
-                  cursor: 'pointer',
-                  ...(r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined),
-                }}
-                onClick={() => onToggle(r.location)}
-              >
-                <td style={{ fontWeight: 700 }}>
+              <tr style={r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined}>
+                <td style={{ fontWeight: 700, cursor: 'pointer' }} onClick={() => onToggle(r.location)}>
                   {expanded === r.location ? '▼' : '▶'} {r.location}
                 </td>
                 <td>{r.systemCount}</td>
-                <td>{r.countedCount ?? '-'}</td>
+                <td>
+                  <CountCell countedCount={r.countedCount} onSave={(count) => onSaveCount(r.location, count)} />
+                </td>
                 <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
                   {r.checkedAt ? formatKstDateTime(r.checkedAt) : '-'}
                 </td>
@@ -253,10 +298,20 @@ function QuantityCheckRows({
                 >
                   {r.countedCount === null ? '-' : r.mismatch ? '불일치' : '일치'}
                 </td>
+                <td>
+                  <button
+                    type="button"
+                    className="chip"
+                    style={{ fontSize: '10.5px', padding: '1px 6px' }}
+                    onClick={() => onToggleExcluded(r.location, !excludedSection)}
+                  >
+                    {excludedSection ? '체크대상으로' : '체크안함으로'}
+                  </button>
+                </td>
               </tr>
               {expanded === r.location && (
                 <tr>
-                  <td colSpan={6} style={{ background: 'var(--ink-50)' }}>
+                  <td colSpan={7} style={{ background: 'var(--ink-50)' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 4px' }}>
                       {r.assetIds.map((a) => (
                         <span key={a.assetId} className="chip" style={{ fontSize: '11.5px' }}>
@@ -277,6 +332,7 @@ function QuantityCheckRows({
             <td />
             <td />
             <td />
+            <td />
           </tr>
         </tbody>
       </table>
@@ -286,62 +342,44 @@ function QuantityCheckRows({
 
 function QuantityCheckPanel({
   rows,
-  locations,
+  overrideByLocation,
   staffNames,
   onSave,
+  onToggleExcluded,
 }: {
   rows: LocationQuantityRow[];
-  locations: string[];
+  overrideByLocation: Map<string, boolean>;
   staffNames: string[];
   onSave: (location: string, count: number, checkedBy: string) => void;
+  onToggleExcluded: (location: string, excluded: boolean) => void;
 }) {
-  const [location, setLocation] = useState('');
-  const [count, setCount] = useState('');
   const [checkedBy, setCheckedBy] = useState('');
   const [customMode, setCustomMode] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showExcluded, setShowExcluded] = useState(false);
-
-  function handleSubmit() {
-    const n = Number(count);
-    if (!location.trim() || !Number.isFinite(n) || count.trim() === '') return;
-    onSave(location.trim(), n, checkedBy);
-    setCount('');
-  }
 
   function toggleExpanded(loc: string) {
     setExpanded((prev) => (prev === loc ? null : loc));
   }
 
   // 선반 위치가 아닌 값(파손/판매/분실/반출/폐기/직송-.../김정식프로문의/K열/PM 등 상태·메모성
-  // 텍스트)은 애초에 실재고 체크 대상이 아니라서 "실재고체크안함" 탭으로 따로 모아 후순위로 둡니다.
-  const shelfRows = rows.filter((r) => looksLikeShelfLocation(r.location));
-  const excludedRows = rows.filter((r) => !looksLikeShelfLocation(r.location));
+  // 텍스트)은 기본적으로 실재고 체크 대상이 아니지만, overrideByLocation에 예외가 있으면
+  // 양쪽 방향으로 수동으로 뒤집을 수 있습니다("분류" 버튼).
+  const shelfRows = rows.filter((r) => !isStockCheckExcluded(r.location, overrideByLocation));
+  const excludedRows = rows.filter((r) => isStockCheckExcluded(r.location, overrideByLocation));
 
   return (
     <div className="panel" style={{ marginBottom: '12px' }}>
       <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>1차 수량 체크 — 자산번호 없이 대수만</div>
       <div className="sub" style={{ marginBottom: '10px' }}>
         품목 구분 없이 위치 하나당 전산 수량과 실사수량(선반을 보고 눈으로 센 대수)만
-        비교해요. 위치를 누르면 그 위치에 어떤 자산번호가 있는지 펼쳐볼 수 있어요.
+        비교해요. 전산 수량 오른쪽 실사수량 칸에 직접 입력하면 바로 기록돼요. "분류" 버튼으로
+        그 위치를 실재고체크 대상/안 함으로 옮길 수 있어요.
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px', alignItems: 'center' }}>
-        <select value={location} onChange={(e) => setLocation(e.target.value)}>
-          <option value="">위치 선택</option>
-          {locations.map((l) => (
-            <option key={l} value={l}>
-              {l}
-            </option>
-          ))}
-        </select>
-        <input
-          type="number"
-          min="0"
-          placeholder="실사수량"
-          value={count}
-          onChange={(e) => setCount(e.target.value)}
-          style={{ width: '90px' }}
-        />
+        <span className="sub" style={{ fontSize: '12.5px' }}>
+          지금 체크하는 사람:
+        </span>
         {customMode || staffNames.length === 0 ? (
           <input value={checkedBy} onChange={(e) => setCheckedBy(e.target.value)} placeholder="담당자 이름 입력" style={{ width: '110px' }} />
         ) : (
@@ -377,12 +415,16 @@ function QuantityCheckPanel({
             목록에서 선택
           </button>
         )}
-        <button type="button" className="btn btn-primary" onClick={handleSubmit}>
-          기록
-        </button>
       </div>
 
-      <QuantityCheckRows rows={shelfRows} expanded={expanded} onToggle={toggleExpanded} />
+      <QuantityCheckRows
+        rows={shelfRows}
+        expanded={expanded}
+        onToggle={toggleExpanded}
+        excludedSection={false}
+        onSaveCount={(location, count) => onSave(location, count, checkedBy)}
+        onToggleExcluded={onToggleExcluded}
+      />
       {shelfRows.length === 0 && (
         <div className="empty-state">
           <div>📋</div>위치가 입력된 가용 자산이 없어요.
@@ -396,7 +438,14 @@ function QuantityCheckPanel({
           </button>
           {showExcluded && (
             <div style={{ marginTop: '8px' }}>
-              <QuantityCheckRows rows={excludedRows} expanded={expanded} onToggle={toggleExpanded} />
+              <QuantityCheckRows
+                rows={excludedRows}
+                expanded={expanded}
+                onToggle={toggleExpanded}
+                excludedSection={true}
+                onSaveCount={(location, count) => onSave(location, count, checkedBy)}
+                onToggleExcluded={onToggleExcluded}
+              />
             </div>
           )}
         </div>
