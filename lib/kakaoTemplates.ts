@@ -16,6 +16,7 @@ export type PurchaseMessageData = {
   unitPrice: number;
   currentStock: string;
   safetyStock: string;
+  reason: string;
 };
 
 function fmtWon(n: number): string {
@@ -36,6 +37,7 @@ export function buildApprovalRequestText(d: PurchaseMessageData): string {
     `총합금액: ${fmtWon(total)}`,
     `현재고수량: ${d.currentStock}`,
     `안전재고수량: ${d.safetyStock}`,
+    `구매사유: ${d.reason}`,
     `단기비교:  ${d.priceCompared}`,
     `입고예정일  ${d.expectedDate}`,
     '승인후 입고방 전달완료',
@@ -77,6 +79,7 @@ export type PurchaseMessageLine = {
   unitPrice: number;
   currentStock: string;
   safetyStock: string;
+  reason: string;
 };
 
 /**
@@ -97,6 +100,7 @@ export function buildApprovalRequestTextMulti(h: PurchaseMessageHeader, lines: P
       `   금액: ${fmtWon(total)}`,
       `   현재고수량: ${l.currentStock}`,
       `   안전재고수량: ${l.safetyStock}`,
+      `   구매사유: ${l.reason}`,
     ].join('\n');
   });
 

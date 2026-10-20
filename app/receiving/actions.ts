@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { createAsset, updateAsset } from '@/app/actions';
 import { DATA_SOURCE } from '@/lib/dataSource';
 import { getAssetFromSheets } from '@/lib/inventory/sheets';
+import { isKakaoBotConfigured, KAKAO_ROOM_PURCHASE_APPROVAL, queueKakaoBotMessage } from '@/lib/kakaoBot';
 import {
   missingRequiredFields,
   receivingInputToRow,
@@ -301,4 +302,20 @@ export async function completeReceiving(id: string): Promise<ActionResult> {
 
   revalidatePath('/receiving');
   return { ok: true };
+}
+
+/** 구매입력 "매입승인요청" 문구를 "신)매입 승인방"에 자동으로 올립니다(이미지는 지원 안 함 — 텍스트만). */
+export async function sendPurchaseApprovalToKakaoBot(text: string): Promise<ActionResult> {
+  if (!isKakaoBotConfigured()) {
+    return { ok: false, error: '카톡봇 연동이 아직 설정되지 않았어요 — 관리자에게 문의하세요.' };
+  }
+  if (!text.trim()) return { ok: false, error: '보낼 내용이 비어있어요.' };
+
+  try {
+    await queueKakaoBotMessage(KAKAO_ROOM_PURCHASE_APPROVAL, text);
+    return { ok: true };
+  } catch (err) {
+    console.error('[receiving] sendPurchaseApprovalToKakaoBot 실패:', err);
+    return { ok: false, error: err instanceof Error ? err.message : '전송에 실패했어요.' };
+  }
 }

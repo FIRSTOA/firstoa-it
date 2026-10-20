@@ -13,6 +13,7 @@ export type PurchaseLineItem = {
   currentStock: string;
   safetyStock: string;
   purchaseUrl: string;
+  reason: string;
 };
 
 const BLANK_LINE: PurchaseLineItem = {
@@ -23,7 +24,11 @@ const BLANK_LINE: PurchaseLineItem = {
   currentStock: '',
   safetyStock: '',
   purchaseUrl: '',
+  reason: '',
 };
+
+// 자주 쓰는 구매사유 — 눌러서 빠르게 채우고, 그대로 자유롭게 고쳐 쓸 수 있습니다.
+const REASON_PRESETS = ['기존장비 불량', '재고 부족', '신규 배치', '교체용'] as const;
 
 const PRICE_COMPARED_OPTIONS = ['해당사항없음', '2곳이상 체크'] as const;
 
@@ -104,7 +109,7 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
         purchaseUrl: line.purchaseUrl.trim(),
         expectedDate,
         manager: manager.trim(),
-        notes: `구매입력 전표 (일자: ${date})`,
+        notes: `구매입력 전표 (일자: ${date}${line.reason.trim() ? ` / 사유: ${line.reason.trim()}` : ''})`,
         serialNumber: '',
         location: '',
       };
@@ -191,6 +196,7 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
                 <th style={{ width: '120px' }}>합계</th>
                 <th style={{ width: '90px' }}>현재고</th>
                 <th style={{ width: '90px' }}>안전재고</th>
+                <th style={{ width: '160px' }}>구매사유</th>
                 <th style={{ width: '160px' }}>구매URL</th>
                 <th style={{ width: '40px' }} />
               </tr>
@@ -250,6 +256,27 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
                       onChange={(e) => updateLine(i, { safetyStock: e.target.value })}
                       style={{ width: '100%' }}
                     />
+                  </td>
+                  <td>
+                    <input
+                      value={line.reason}
+                      onChange={(e) => updateLine(i, { reason: e.target.value })}
+                      placeholder="예: 기존장비 불량"
+                      style={{ width: '100%', marginBottom: '3px' }}
+                    />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                      {REASON_PRESETS.map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          className="chip"
+                          style={{ fontSize: '10px', padding: '1px 5px' }}
+                          onClick={() => updateLine(i, { reason: r })}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
                   </td>
                   <td>
                     <input

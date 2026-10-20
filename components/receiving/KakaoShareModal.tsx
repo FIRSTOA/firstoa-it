@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { sendPurchaseApprovalToKakaoBot } from '@/app/receiving/actions';
 import {
   buildApprovalRequestTextMulti,
   buildOrderRequestTextMulti,
@@ -9,6 +10,8 @@ import {
 import type { PurchaseLineItem } from './PurchaseEntryModal';
 
 type Template = 'approval' | 'order';
+
+const KAKAO_ROOM_LABEL = '신)매입 승인방';
 
 type Props = {
   open: boolean;
@@ -45,6 +48,7 @@ export default function KakaoShareModal({
   const [text, setText] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [notice, setNotice] = useState('');
+  const [botSending, setBotSending] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -72,6 +76,7 @@ export default function KakaoShareModal({
       unitPrice: l.unitPrice,
       currentStock: l.currentStock,
       safetyStock: l.safetyStock,
+      reason: l.reason,
     }));
     setText(
       template === 'approval' ? buildApprovalRequestTextMulti(header, items) : buildOrderRequestTextMulti(header, items),
@@ -130,11 +135,28 @@ export default function KakaoShareModal({
     }
   }
 
+  function handlePasteImage(e: React.ClipboardEvent<HTMLDivElement>) {
+    const item = Array.from(e.clipboardData.items).find((it) => it.type.startsWith('image/'));
+    if (!item) return;
+    const file = item.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    setImageFile(file);
+    setNotice('붙여넣은 이미지를 첨부했어요.');
+  }
+
+  async function handleBotSend() {
+    setBotSending(true);
+    const result = await sendPurchaseApprovalToKakaoBot(text);
+    setBotSending(false);
+    setNotice(result.ok ? `"${KAKAO_ROOM_LABEL}" 방으로 보냈어요.` : result.error);
+  }
+
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ width: '520px' }}>
+      <div className="modal" style={{ width: '520px' }} onPaste={handlePasteImage}>
         <h2>📤 카톡으로 보내기</h2>
-        <div className="sub">양식을 골라 내용을 확인하고 복사하거나 공유해요.</div>
+        <div className="sub">양식을 골라 내용을 확인하고 복사하거나 공유해요. 이미지는 Ctrl+V로 붙여넣을 수도 있어요.</div>
 
         <div style={{ display: 'flex', gap: '8px', margin: '12px 0' }}>
           <button
@@ -205,10 +227,15 @@ export default function KakaoShareModal({
         />
 
         <div className="form-field" style={{ marginTop: '10px' }}>
-          <label>이미지 첨부(선택)</label>
+          <label>이미지 첨부(선택 — 파일 선택 또는 이 창 안에서 Ctrl+V)</label>
           <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] ?? null)} />
           {imageFile && (
-            <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>{imageFile.name}</div>
+            <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
+              {imageFile.name}{' '}
+              <button type="button" className="chip" style={{ fontSize: '10.5px', padding: '1px 6px' }} onClick={() => setImageFile(null)}>
+                제거
+              </button>
+            </div>
           )}
         </div>
 
@@ -223,8 +250,11 @@ export default function KakaoShareModal({
           <button type="button" className="btn btn-ghost" onClick={handleCopy} disabled={!text}>
             복사하기
           </button>
-          <button type="button" className="btn btn-primary" onClick={handleShare} disabled={!text}>
+          <button type="button" className="btn btn-ghost" onClick={handleShare} disabled={!text}>
             공유하기
+          </button>
+          <button type="button" className="btn btn-primary" onClick={handleBotSend} disabled={!text || botSending}>
+            {botSending ? '전송 중…' : `🤖 "${KAKAO_ROOM_LABEL}"로 전송`}
           </button>
         </div>
       </div>
