@@ -185,12 +185,12 @@ export default function PurchaseEntryModal({ open, pending, onClose, onSave }: P
         </div>
 
         <div style={{ marginTop: '14px', overflowX: 'auto' }}>
-          <table>
+          <table style={{ minWidth: '1240px' }}>
             <thead>
               <tr>
                 <th style={{ width: '40px' }}>No</th>
                 <th style={{ width: '120px' }}>품목</th>
-                <th>품목명</th>
+                <th style={{ width: '200px' }}>품목명</th>
                 <th style={{ width: '80px' }}>수량</th>
                 <th style={{ width: '110px' }}>단가</th>
                 <th style={{ width: '120px' }}>합계</th>
