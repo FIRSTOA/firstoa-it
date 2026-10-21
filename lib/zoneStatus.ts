@@ -9,8 +9,8 @@ import { STATUSES, type Asset } from './types';
 export const CONDITION_STATUSES = ['수리대기', '수리완료', '단순오버홀', '가용'] as const;
 export type ConditionStatus = (typeof CONDITION_STATUSES)[number];
 
-/** 품목별 집계 열로 쓰는 재고상태 — 임대중은 애초에 재고현황판 범위(가용 자산만)에서 빼므로 제외. */
-export const BREAKDOWN_STATUSES = STATUSES.filter((s) => s !== '임대중');
+/** 품목별 집계 열로 쓰는 재고상태 — 임대중도 포함한 전체 상태 7개(STATUSES와 동일). */
+export const BREAKDOWN_STATUSES = STATUSES;
 
 export type ZoneStatus = {
   assetId: string;
@@ -399,14 +399,14 @@ export type CategoryBreakdownGroup = {
  * 구조). 층/선반 위치 매핑 없이, 품목별로 "구분코드" 한 단계만 내려가서 재고상태별 대수를
  * 보여줍니다. 세부구분코드는 노트북/데스크탑이면 gubunCode(예: "I5고설데"), 모니터면
  * 화면크기(인치), 기타주변기기면 subItem(나스/마우스 등), 그 외(빔프로젝트) 또는 값이
- * 없으면 모델명으로 묶습니다.
+ * 없으면 모델명으로 묶습니다. 임대중 자산도 포함합니다 — "총재고"가 실제 보유 대수와
+ * 맞아야 하고, 몇 대가 임대 나가 있는지도 한눈에 보여야 하기 때문입니다.
  */
 export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[] {
   type Bucket = { total: number; byStatus: Record<string, number> };
   const byCategory = new Map<string, Map<string, Bucket>>();
 
   for (const asset of assets) {
-    if (asset.status === '임대중') continue;
     if (!asset.assetId.trim()) continue;
     const screen = asset.screen.trim();
     const detailCode =

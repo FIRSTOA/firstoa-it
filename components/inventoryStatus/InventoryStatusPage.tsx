@@ -14,7 +14,8 @@ import {
   type QuantityCheck,
   type StockCheckOverride,
 } from '@/lib/zoneStatus';
-import type { Asset } from '@/lib/types';
+import { STATUSES, type Asset } from '@/lib/types';
+import { DonutChart, StackedBar, StatusLegend, statusColor } from './charts';
 
 const CUSTOM_OPTION = '__custom__';
 
@@ -76,16 +77,48 @@ export default function InventoryStatusPage({
   return (
     <div className="app">
       <div className="panel" style={{ marginBottom: '12px' }}>
-        <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>
-          회사 총 가용 재고: {grandTotal}대 (렌탈 중 제외)
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
+          <div style={{ fontWeight: 700, fontSize: '14px' }}>회사 총 재고: {grandTotal}대</div>
+          <StatusLegend />
         </div>
-        <div className="sub" style={{ marginBottom: '10px' }}>
-          품목별로 구분코드(또는 모델명)별 대수와 재고상태를 보여줘요. 선반 위치는 지하/2층
-          밖에 없어서 층별 집계는 따로 안 해요.
+        <div className="sub" style={{ marginBottom: '14px' }}>
+          품목별로 구분코드(또는 모델명)별 대수와 재고상태를 보여줘요(임대중 포함). 선반 위치는
+          지하/2층 밖에 없어서 층별 집계는 따로 안 해요.
         </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '18px' }}>
+          {breakdown.map(({ category, total, totalByStatus }) => (
+            <div
+              key={category}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '10px 14px',
+                border: '1px solid var(--ink-100)',
+                borderRadius: '12px',
+                minWidth: '220px',
+                flex: '1 1 220px',
+              }}
+            >
+              <DonutChart segments={STATUSES.map((s) => ({ label: s, value: totalByStatus[s] ?? 0, color: statusColor(s) }))} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '13px' }}>{category}</div>
+                <div style={{ fontSize: '11.5px', color: 'var(--ink-500)', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                  {STATUSES.filter((s) => (totalByStatus[s] ?? 0) > 0).map((s) => (
+                    <span key={s}>
+                      <span style={{ color: statusColor(s), fontWeight: 700 }}>●</span> {s} {totalByStatus[s]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
           {breakdown.map(({ category, rows, total, totalByStatus }) => (
-            <div key={category} style={{ minWidth: '420px', flex: '1 1 420px' }}>
+            <div key={category} style={{ minWidth: '460px', flex: '1 1 460px' }}>
               <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
                 {category} ({total}대)
               </div>
@@ -98,6 +131,7 @@ export default function InventoryStatusPage({
                       {BREAKDOWN_STATUSES.map((s) => (
                         <th key={s}>{s}</th>
                       ))}
+                      <th>비율</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -108,6 +142,12 @@ export default function InventoryStatusPage({
                         {BREAKDOWN_STATUSES.map((s) => (
                           <td key={s}>{r.byStatus[s] ?? '-'}</td>
                         ))}
+                        <td>
+                          <StackedBar
+                            segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: r.byStatus[s] ?? 0, color: statusColor(s) }))}
+                            total={r.total}
+                          />
+                        </td>
                       </tr>
                     ))}
                     <tr>
@@ -118,6 +158,12 @@ export default function InventoryStatusPage({
                           {totalByStatus[s] ?? '-'}
                         </td>
                       ))}
+                      <td>
+                        <StackedBar
+                          segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: totalByStatus[s] ?? 0, color: statusColor(s) }))}
+                          total={total}
+                        />
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -127,7 +173,7 @@ export default function InventoryStatusPage({
         </div>
         {breakdown.length === 0 && (
           <div className="empty-state">
-            <div>📊</div>가용 자산이 없어요.
+            <div>📊</div>자산이 없어요.
           </div>
         )}
       </div>
