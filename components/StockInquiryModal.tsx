@@ -48,6 +48,7 @@ export default function StockInquiryModal({ open, items, onClose, onApplyFilter 
   }
 
   function conditionLabel(r: InquiryResult): string {
+    if (r.gubunCode) return r.gubunCode;
     const parts: string[] = [];
     if (r.cpuType) parts.push(r.cpuType);
     if (r.spec) parts.push(r.spec);

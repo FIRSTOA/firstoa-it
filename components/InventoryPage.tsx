@@ -239,8 +239,11 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl, stock
   function handleApplyInquiryFilter(result: InquiryResult) {
     setCategory(result.category ? [result.category] : []);
     setFilter('status', [...INTERNAL_STOCK_STATUSES]); // 재고 문의는 내부재고(상품화준비중+상품화완료)만 봐야 함
-    setFilter('cpuType', result.cpuType ? [result.cpuType] : []);
-    setFilter('spec', result.spec ? [result.spec] : []);
+    setFilter('gubunCode', result.gubunCode ? [result.gubunCode] : []);
+    // gubunCode가 있으면 이미 CPU+사양을 정확히 담고 있어서 cpuType/spec을 따로 더 거는 건
+    // 중복이자, 되려 && 조건이 겹쳐 화면에 아무것도 안 뜨는 원인이 될 수 있어 비워둡니다.
+    setFilter('cpuType', !result.gubunCode && result.cpuType ? [result.cpuType] : []);
+    setFilter('spec', !result.gubunCode && result.spec ? [result.spec] : []);
     setSearchTerm(result.screenInch !== null ? String(result.screenInch) : '');
     setInquiryOpen(false);
   }

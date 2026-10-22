@@ -15,6 +15,7 @@ export type InquiryLine = {
   category: string; // '' = 인식 못함
   cpuType: string; // '' = 조건 없음 (I5/I7/I9/I3/U5/U7/A5/A7/A9/M1/M2/M3)
   spec: string; // '' = 조건 없음 (사무용/설계용/저사양)
+  gubunCode: string; // '' = 조건 없음 — "I5일설데" 같은 세부 구분코드(아래 참고)
   screenInch: number | null; // 모니터류 화면크기 요청(인치)
   quantity: number;
 };
@@ -37,6 +38,20 @@ function detectCategory(line: string): string {
 function detectCpuType(line: string): string {
   const m = line.match(/\b(I[3579]|U[3579]|A[3579]|M[123])\b/i);
   return m ? m[1].toUpperCase() : '';
+}
+
+/**
+ * "I5 일설데 7대"처럼, 사내에서 품목명 대신 쓰는 세부 구분코드 약어(고사/일사/고설/일설 +
+ * 데/노)를 인식합니다. 이 약어는 Asset.gubunCode에 CPU종류와 붙어서(예: "I5일설데") 이미
+ * 실제 데이터에 그대로 쓰이고 있어서, "데스크탑"/"노트북" 같은 단어가 문의 문구에 아예
+ * 없어도 품목(category)과 정확한 구분코드까지 한 번에 알아낼 수 있습니다.
+ */
+const GUBUN_SUFFIX_RE = /(고사|일사|고설|일설)(데|노)/;
+
+function detectGubunSuffix(line: string): { category: string; suffix: string } | null {
+  const m = line.match(GUBUN_SUFFIX_RE);
+  if (!m) return null;
+  return { category: m[2] === '데' ? '데스크탑' : '노트북', suffix: m[0] };
 }
 
 function detectSpec(line: string): string {
@@ -68,11 +83,16 @@ export function parseInquiryText(text: string): InquiryLine[] {
     if (line.startsWith('-') || line.startsWith('•') || line.startsWith('📌')) continue; // 헤더 필드 줄
     const quantity = detectQuantity(line);
     if (quantity === null) continue;
+    const cpuType = detectCpuType(line);
+    const gubun = detectGubunSuffix(line);
+    // gubunCode 실제 데이터 형식(예: "I5일설데")은 항상 CPU종류가 코드 앞에 바로 붙어있어서,
+    // CPU를 못 찾으면 정확한 구분코드까지는 못 만들고 품목만 가져갑니다.
     results.push({
       raw: line,
-      category: detectCategory(line),
-      cpuType: detectCpuType(line),
+      category: detectCategory(line) || gubun?.category || '',
+      cpuType,
       spec: detectSpec(line),
+      gubunCode: gubun && cpuType ? `${cpuType}${gubun.suffix}` : '',
       screenInch: detectScreenInch(line),
       quantity,
     });
@@ -84,6 +104,10 @@ export function parseInquiryText(text: string): InquiryLine[] {
 export function countAvailable(items: Asset[], line: InquiryLine): number {
   return items.filter((it) => {
     if (!INTERNAL_STOCK_STATUSES.includes(it.status)) return false;
+    // gubunCode가 있으면(예: "I5일설데") 그걸로 바로 정확히 거르고, cpuType/spec은 따로 더
+    // 안 겹쳐 봅니다 — gubunCode 자체가 이미 CPU+사양을 합친 값이라 이중 체크하면 오히려
+    // (gubunCode가 없는 다른 품목 자산까지 cpuType만으로 걸러져 넓게 잡히는) 혼선만 생김.
+    if (line.gubunCode) return it.gubunCode === line.gubunCode;
     if (line.category && it.category !== line.category) return false;
     if (line.cpuType && it.cpuType !== line.cpuType) return false;
     if (line.spec && it.spec !== line.spec) return false;
