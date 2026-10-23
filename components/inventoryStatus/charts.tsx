@@ -48,6 +48,11 @@ export function DonutChart({ segments, size = 108, strokeWidth = 16 }: { segment
           .map((s) => {
             const frac = s.value / total;
             const dash = frac * circumference;
+            // 주의: SVG 안이라도 <title> JSX 엘리먼트는 쓰지 않습니다 — React 19의 자동
+            // 문서 메타데이터 처리가 <title> 태그를 발견 위치와 무관하게 <head>로 끌어올리려
+            // 하면서 서버 렌더 결과를 비워버려(hydration mismatch, 콘솔에 에러 418) 실제로
+            // 겪었던 문제입니다. 대신 aria-label로만 접근성 정보를 둡니다(네이티브 마우스
+            // 오버 툴팁은 없지만, 정확한 수치는 범례/표에 이미 나와 있음).
             const el = (
               <circle
                 key={s.label}
@@ -60,11 +65,8 @@ export function DonutChart({ segments, size = 108, strokeWidth = 16 }: { segment
                 strokeDasharray={`${dash} ${circumference - dash}`}
                 strokeDashoffset={-offset}
                 transform={`rotate(-90 ${size / 2} ${size / 2})`}
-              >
-                <title>
-                  {s.label}: {s.value}대
-                </title>
-              </circle>
+                aria-label={`${s.label}: ${s.value}대`}
+              />
             );
             offset += dash;
             return el;
