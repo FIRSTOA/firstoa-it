@@ -5,6 +5,9 @@
 -- 여러 번 실행해도 안전합니다 (if not exists).
 -- 1행 = 1대 기준입니다 — 여러 대를 구매할 땐 등록 화면에서 수량만큼 행을 여러 개
 -- 만듭니다(수량 자체는 저장하지 않음).
+--
+-- calendar_event_id 컬럼이 it_calendar_events를 참조하므로, calendar_schema.sql을 먼저
+-- (또는 같이) 실행해야 합니다.
 -- ==================================================================
 
 create table if not exists public.it_receiving_log (
@@ -44,6 +47,9 @@ create table if not exists public.it_receiving_log (
 alter table public.it_receiving_log add column if not exists purchase_price text not null default '';
 alter table public.it_receiving_log add column if not exists quantity integer not null default 1;
 alter table public.it_receiving_log add column if not exists purchase_url text not null default ''; -- 쿠팡 등 온라인 구매 링크
+-- 수리입고예정 등록 시 자동으로 만든 통합캘린더 일정("IT접수/익일통합/...") 연결 — 입고완료
+-- 처리 시 이 일정을 완료로 표시하는 데 씁니다.
+alter table public.it_receiving_log add column if not exists calendar_event_id uuid references public.it_calendar_events(id) on delete set null;
 
 create index if not exists it_receiving_log_created_at_idx on public.it_receiving_log (created_at desc, seq desc);
 create index if not exists it_receiving_log_status_idx     on public.it_receiving_log (status);

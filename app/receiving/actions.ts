@@ -13,6 +13,7 @@ import {
   type ReceivingInput,
   type ReceivingRow,
 } from '@/lib/receiving';
+import { markRepairCalendarEventComplete, scheduleRepairCalendarEvent } from '@/lib/repairCalendar';
 import { rowToAsset, type Asset, type AssetRow } from '@/lib/types';
 import { ASSETS_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
 
@@ -59,10 +60,17 @@ export async function createReceiving(entry: ReceivingInput, quantity: number): 
 
   if (entry.category === '기타주변기기') {
     const qty = Math.min(Math.max(Math.trunc(quantity) || 1, 1), 999999);
-    const { error } = await supabase.from(RECEIVING_TABLE).insert({ ...receivingInputToRow(entry), quantity: qty });
+    const { data, error } = await supabase
+      .from(RECEIVING_TABLE)
+      .insert({ ...receivingInputToRow(entry), quantity: qty })
+      .select('id')
+      .single();
     if (error) {
       console.error('[receiving] createReceiving(소모성) 실패:', error);
       return { ok: false, error: toMessage(error) };
+    }
+    if (entry.kind === '수리입고예정' && data) {
+      await scheduleRepairCalendarEvent((data as { id: string }).id, entry);
     }
     revalidatePath('/receiving');
     return { ok: true };
@@ -70,10 +78,15 @@ export async function createReceiving(entry: ReceivingInput, quantity: number): 
 
   const count = Math.min(Math.max(Math.trunc(quantity) || 1, 1), 50);
   const rows = Array.from({ length: count }, () => receivingInputToRow(entry));
-  const { error } = await supabase.from(RECEIVING_TABLE).insert(rows);
+  const { data, error } = await supabase.from(RECEIVING_TABLE).insert(rows).select('id');
   if (error) {
     console.error('[receiving] createReceiving 실패:', error);
     return { ok: false, error: toMessage(error) };
+  }
+  if (entry.kind === '수리입고예정' && data) {
+    for (const row of data as { id: string }[]) {
+      await scheduleRepairCalendarEvent(row.id, entry);
+    }
   }
 
   revalidatePath('/receiving');
@@ -298,6 +311,10 @@ export async function completeReceiving(id: string): Promise<ActionResult> {
   if (updateError) {
     console.error('[receiving] completeReceiving 상태 업데이트 실패:', updateError);
     return { ok: false, error: toMessage(updateError) };
+  }
+
+  if (entry.calendarEventId) {
+    await markRepairCalendarEventComplete(entry.calendarEventId);
   }
 
   revalidatePath('/receiving');

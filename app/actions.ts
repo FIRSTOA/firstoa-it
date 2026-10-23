@@ -11,6 +11,7 @@ import {
   updateAssetInSheet,
 } from '@/lib/inventory/sheets';
 import { lookupRentalByAssetId } from '@/lib/rentals/server';
+import { scheduleRepairCalendarEvent } from '@/lib/repairCalendar';
 import {
   ASSET_MOVEMENTS_TABLE,
   ASSETS_TABLE,
@@ -177,31 +178,45 @@ export async function requestRepair(asset: Asset, repairVendor: string): Promise
   if (!updateResult.ok) return updateResult;
 
   const supabase = createAdminClient();
-  const { error } = await supabase.from(RECEIVING_TABLE).insert({
-    kind: '수리입고예정',
-    status: '입고대기',
-    category: asset.category,
-    brand: asset.brand,
-    model: asset.model,
-    cpu: asset.cpu,
-    spec: asset.spec,
-    ram: asset.ram,
-    storage: asset.storage,
-    screen: asset.screen,
-    vendor,
-    purchase_price: '',
-    expected_date: null,
-    manager: '',
-    notes: `수리 발주 — 기존 위치: ${asset.location || '-'}`,
-    asset_id: asset.assetId,
-    serial_number: asset.serialNo,
-    location: '',
-    quantity: 1,
-  });
+  const notes = `수리 발주 — 기존 위치: ${asset.location || '-'}`;
+  const { data, error } = await supabase
+    .from(RECEIVING_TABLE)
+    .insert({
+      kind: '수리입고예정',
+      status: '입고대기',
+      category: asset.category,
+      brand: asset.brand,
+      model: asset.model,
+      cpu: asset.cpu,
+      spec: asset.spec,
+      ram: asset.ram,
+      storage: asset.storage,
+      screen: asset.screen,
+      vendor,
+      purchase_price: '',
+      expected_date: null,
+      manager: '',
+      notes,
+      asset_id: asset.assetId,
+      serial_number: asset.serialNo,
+      location: '',
+      quantity: 1,
+    })
+    .select('id')
+    .single();
   if (error) {
     console.error('[actions] requestRepair 입고 대장 생성 실패:', error);
     return { ok: false, error: `재고는 수리중으로 바뀌었지만 입고 대장 등록에 실패했어요: ${error.message}` };
   }
+
+  await scheduleRepairCalendarEvent((data as { id: string }).id, {
+    category: asset.category,
+    model: asset.model,
+    assetId: asset.assetId,
+    vendor,
+    manager: '',
+    notes,
+  });
 
   revalidatePath('/receiving');
   return { ok: true };

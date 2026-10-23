@@ -35,6 +35,7 @@ export type ReceivingEntry = {
   quantity: number;
   completedAt: string | null;
   createdAt: string;
+  calendarEventId: string | null;
 };
 
 export type ReceivingRow = {
@@ -62,6 +63,7 @@ export type ReceivingRow = {
   quantity: number;
   completed_at: string | null;
   created_at: string;
+  calendar_event_id: string | null;
 };
 
 export function rowToReceiving(row: ReceivingRow): ReceivingEntry {
@@ -90,10 +92,11 @@ export function rowToReceiving(row: ReceivingRow): ReceivingEntry {
     quantity: row.quantity ?? 1,
     completedAt: row.completed_at,
     createdAt: row.created_at,
+    calendarEventId: row.calendar_event_id ?? null,
   };
 }
 
-export type ReceivingInput = Omit<ReceivingEntry, 'id' | 'seq' | 'completedAt' | 'createdAt'>;
+export type ReceivingInput = Omit<ReceivingEntry, 'id' | 'seq' | 'completedAt' | 'createdAt' | 'calendarEventId'>;
 
 export function receivingInputToRow(entry: ReceivingInput) {
   return {

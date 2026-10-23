@@ -66,7 +66,7 @@ export async function listEventsInRange(startDate: string, endDate: string): Pro
   return ((data ?? []) as CalendarEventRow[]).map(rowToCalendarEvent);
 }
 
-export async function createEvent(input: CalendarEventInput): Promise<ActionResult> {
+export async function createEvent(input: CalendarEventInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const invalid = validate(input);
   if (invalid) return { ok: false, error: invalid };
 
@@ -96,7 +96,7 @@ export async function createEvent(input: CalendarEventInput): Promise<ActionResu
   }
 
   revalidatePath('/calendar');
-  return { ok: true };
+  return { ok: true, id };
 }
 
 export async function updateEvent(id: string, input: CalendarEventInput): Promise<ActionResult> {
