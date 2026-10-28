@@ -3,11 +3,13 @@
 import { useMemo, useState, useTransition } from 'react';
 import { createSale, createSalesBatch, deleteSale, updateSale } from '@/app/sales/actions';
 import { filterSaleEntries, type SaleEntry, type SaleInput } from '@/lib/sales';
+import type { Asset } from '@/lib/types';
 import PasteImportModal from './PasteImportModal';
 import SalesModal from './SalesModal';
 import SalesTable from './SalesTable';
+import SoldAssetsPanel from './SoldAssetsPanel';
 
-export default function SalesPage({ entries }: { entries: SaleEntry[] }) {
+export default function SalesPage({ entries, soldFromInventory }: { entries: SaleEntry[]; soldFromInventory: Asset[] }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
@@ -175,6 +177,8 @@ export default function SalesPage({ entries }: { entries: SaleEntry[] }) {
         onClose={() => setPasteModalOpen(false)}
         onImport={handlePasteImport}
       />
+
+      <SoldAssetsPanel assets={soldFromInventory} />
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
         <span>{toast.msg}</span>

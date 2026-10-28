@@ -1,6 +1,7 @@
 import SalesPage from '@/components/sales/SalesPage';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
+import { listAllAssetsUnified } from '@/app/stocktake/actions';
 import { rowToSale, type SaleRow } from '@/lib/sales';
 import { createAdminClient, isSupabaseConfigured, SALES_TABLE } from '@/lib/supabase/server';
 
@@ -31,10 +32,12 @@ export default async function Page() {
   }
 
   const entries = ((data ?? []) as SaleRow[]).map(rowToSale);
+  const allAssets = await listAllAssetsUnified().catch(() => []);
+  const soldFromInventory = allAssets.filter((a) => a.status === '판매');
 
   return (
     <Shell activeMenu="판매리스트" title="💰 판매 리스트" note="IT재고와 별도로 관리하는 판매 기록">
-      <SalesPage entries={entries} />
+      <SalesPage entries={entries} soldFromInventory={soldFromInventory} />
     </Shell>
   );
 }
