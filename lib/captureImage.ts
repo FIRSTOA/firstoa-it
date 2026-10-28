@@ -28,7 +28,13 @@ export async function copyElementAsImage(
 
   try {
     if (typeof window !== 'undefined' && navigator.clipboard && 'write' in navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      // navigator.clipboard.write()가 에러도 안 던지고 그냥 영영 안 끝나는 경우가 실제로
+      // 있어서(권한/포커스 상태에 따라), 응답 없이 멈추지 않도록 타임아웃을 둡니다 — 네이버
+      // CalDAV 호출에 넣은 것과 같은 안전장치입니다.
+      await Promise.race([
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('clipboard write timeout')), 4000)),
+      ]);
       return { ok: true, downloaded: false };
     }
   } catch (err) {
