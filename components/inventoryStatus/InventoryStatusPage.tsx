@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { setSafetyStock } from '@/app/inventoryStatus/actions';
+import { copyElementAsImage } from '@/lib/captureImage';
 import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import {
   AVAILABLE_BREAKDOWN_STATUSES,
@@ -30,6 +31,9 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
   const [safety, setSafety] = useState(safetyStock);
   const [drilldown, setDrilldown] = useState<Drilldown>(null);
   const [toast, setToast] = useState({ msg: '', show: false });
+  const [capturing, setCapturing] = useState<string | null>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const verificationRef = useRef<HTMLDivElement>(null);
 
   const checkTables = useMemo(
     () => buildLocationCheckTables(assets, stocktakeConfirmations),
@@ -61,48 +65,71 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
     return assetList.filter((a) => (AVAILABLE_BREAKDOWN_STATUSES as readonly string[]).includes(a.status));
   }
 
+  async function handleCopyImage(key: string, ref: React.RefObject<HTMLDivElement | null>, name: string) {
+    if (!ref.current || capturing) return;
+    setCapturing(key);
+    const result = await copyElementAsImage(ref.current, name);
+    setCapturing(null);
+    if (!result.ok) {
+      showToast(result.error);
+    } else {
+      showToast(result.downloaded ? '이미지를 다운로드했어요 (클립보드 복사를 지원 안 하는 브라우저예요).' : '이미지를 복사했어요 — 카톡에 붙여넣어 주세요.');
+    }
+  }
+
   return (
     <div className="app">
       <div className="panel" style={{ marginBottom: '12px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
-          <div style={{ fontWeight: 700, fontSize: '14px' }}>회사 총 재고: {grandTotal}대</div>
-          <StatusLegend />
-        </div>
-        <div className="sub" style={{ marginBottom: '14px' }}>
-          품목별로 구분코드(또는 모델명)별 대수와 재고상태를 보여줘요(임대중 포함). 가용재고는
-          상품화준비중·상품화완료·수리중 합계예요. 안전재고를 입력하면 부족재고가 자동으로
-          계산돼요. 숫자를 누르면 해당 자산번호/스펙을 볼 수 있어요.
-        </div>
+        <div ref={summaryRef} style={{ background: '#fff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
+            <div style={{ fontWeight: 700, fontSize: '14px' }}>회사 총 재고: {grandTotal}대</div>
+            <StatusLegend />
+          </div>
+          <div className="sub" style={{ marginBottom: '14px' }}>
+            품목별로 구분코드(또는 모델명)별 대수와 재고상태를 보여줘요(임대중 포함). 가용재고는
+            상품화준비중·상품화완료·수리중 합계예요. 안전재고를 입력하면 부족재고가 자동으로
+            계산돼요. 숫자를 누르면 해당 자산번호/스펙을 볼 수 있어요.
+          </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '18px' }}>
-          {breakdown.map(({ category, total, totalByStatus }) => (
-            <div
-              key={category}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '10px 14px',
-                border: '1px solid var(--ink-100)',
-                borderRadius: '12px',
-                minWidth: '220px',
-                flex: '1 1 220px',
-              }}
-            >
-              <DonutChart segments={STATUSES.map((s) => ({ label: s, value: totalByStatus[s] ?? 0, color: statusColor(s) }))} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '13px' }}>{category}</div>
-                <div style={{ fontSize: '11.5px', color: 'var(--ink-500)', display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                  {STATUSES.filter((s) => (totalByStatus[s] ?? 0) > 0).map((s) => (
-                    <span key={s}>
-                      <span style={{ color: statusColor(s), fontWeight: 700 }}>●</span> {s} {totalByStatus[s]}
-                    </span>
-                  ))}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '10px' }}>
+            {breakdown.map(({ category, total, totalByStatus }) => (
+              <div
+                key={category}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 14px',
+                  border: '1px solid var(--ink-100)',
+                  borderRadius: '12px',
+                  minWidth: '220px',
+                  flex: '1 1 220px',
+                }}
+              >
+                <DonutChart segments={STATUSES.map((s) => ({ label: s, value: totalByStatus[s] ?? 0, color: statusColor(s) }))} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '13px' }}>{category}</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--ink-500)', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                    {STATUSES.filter((s) => (totalByStatus[s] ?? 0) > 0).map((s) => (
+                      <span key={s}>
+                        <span style={{ color: statusColor(s), fontWeight: 700 }}>●</span> {s} {totalByStatus[s]}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
+        <button
+          type="button"
+          className="btn btn-ghost no-capture"
+          style={{ marginBottom: '18px' }}
+          disabled={capturing === 'summary'}
+          onClick={() => handleCopyImage('summary', summaryRef, '회사총재고')}
+        >
+          {capturing === 'summary' ? '캡처 중…' : '📋 이미지 복사 (카톡 보고용)'}
+        </button>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
           {breakdown.map(({ category, rows, total, totalByStatus }) => {
@@ -117,12 +144,12 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
             }
 
             return (
-              <div key={category} style={{ minWidth: '620px', flex: '1 1 620px' }}>
+              <div key={category} style={{ minWidth: '760px', flex: '1 1 760px' }}>
                 <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
                   {category} ({total}대)
                 </div>
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ fontSize: '12.5px' }}>
+                  <table style={{ fontSize: '12.5px', whiteSpace: 'nowrap' }}>
                     <thead>
                       <tr>
                         <th>구분코드</th>
@@ -251,8 +278,18 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
         )}
       </div>
 
-      <div className="panel" style={{ marginBottom: '12px' }}>
-        <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>2차 검증 — 실재고조사 비교</div>
+      <div className="panel" style={{ marginBottom: '12px' }} ref={verificationRef}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
+          <div style={{ fontWeight: 700, fontSize: '14px' }}>2차 검증 — 실재고조사 비교</div>
+          <button
+            type="button"
+            className="btn btn-ghost no-capture"
+            disabled={capturing === 'verification'}
+            onClick={() => handleCopyImage('verification', verificationRef, '2차검증')}
+          >
+            {capturing === 'verification' ? '캡처 중…' : '📋 이미지 복사 (카톡 보고용)'}
+          </button>
+        </div>
         <div className="sub" style={{ marginBottom: '10px' }}>
           위치별 시스템 수량과 실재고조사(자산번호 단위 스캔)로 실제 확인된 수량을 비교해요.
           실재고조사를 아직 안 한 위치는 표시 안 해요 — 일치/불일치만 보여줘요.
