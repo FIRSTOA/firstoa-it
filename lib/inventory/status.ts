@@ -27,17 +27,20 @@ export function parseLocationStatus_(
   if (v === '임대중') return { status: '임대중' };
 
   if (isMonitorLike_(category)) {
-    if (bigoRaw && /파손|스크래치|스크레치|기스/.test(String(bigoRaw))) {
-      return { status: '기타', statusRaw: v };
-    }
-    if (/^K/i.test(v) || /IT/i.test(v)) {
-      return { status: '기타', statusRaw: v };
-    }
+    // 위치값이 이미 "판매"/"폐기"처럼 확정적인 값이면, 비고의 파손 메모보다 이 값을
+    // 우선합니다 — 파손 메모는 "상품화완료로 보여도 되는지" 판단용 보조 정보일 뿐이라,
+    // 이미 폐기/판매로 확정된 자산까지 기타로 뭉개면 안 됩니다.
     if (/판매/i.test(v)) {
       return { status: '판매' };
     }
     if (/폐기/i.test(v)) {
       return { status: '폐기' };
+    }
+    if (bigoRaw && /파손|스크래치|스크레치|기스/.test(String(bigoRaw))) {
+      return { status: '기타', statusRaw: v };
+    }
+    if (/^K/i.test(v) || /IT/i.test(v)) {
+      return { status: '기타', statusRaw: v };
     }
     if (/^[A-FIL]\d+$/i.test(v)) {
       return { status: '상품화완료', locationCode: v.toUpperCase() };

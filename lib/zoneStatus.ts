@@ -419,6 +419,9 @@ export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[
 
   for (const asset of assets) {
     if (!asset.assetId.trim()) continue;
+    // 판매된 자산은 더 이상 회사 재고가 아니라서(매입/수리 판단용 현황판이라 "지금 있는
+    // 것"만 보여야 함) 아예 집계에서 뺍니다 — 임대중과 달리 총재고에도 안 들어갑니다.
+    if (asset.status === '판매') continue;
     const screen = asset.screen.trim();
     const detailCode =
       asset.category === '모니터'

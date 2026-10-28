@@ -15,8 +15,10 @@ import {
 import { STATUSES, type Asset } from '@/lib/types';
 import { DonutChart, StatusLegend, statusColor } from './charts';
 
-/** 세부표시 표는 한 화면에 들어오도록 임대중 열은 빼요(총재고/상단 요약엔 그대로 포함돼요). */
-const DETAIL_STATUSES = BREAKDOWN_STATUSES.filter((s) => s !== '임대중');
+/** 세부표시 표는 한 화면에 들어오도록 임대중 열은 빼요(총재고/상단 요약엔 그대로 포함돼요).
+ * 판매는 buildCategoryBreakdown에서 아예 집계 대상에서 빠지므로(더 이상 회사 재고가
+ * 아님) 항상 0이라 열 자체를 안 보여줍니다. */
+const DETAIL_STATUSES = BREAKDOWN_STATUSES.filter((s) => s !== '임대중' && s !== '판매');
 
 type Props = {
   assets: Asset[];
