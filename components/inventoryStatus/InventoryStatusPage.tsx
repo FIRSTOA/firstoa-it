@@ -13,7 +13,10 @@ import {
   type SafetyStock,
 } from '@/lib/zoneStatus';
 import { STATUSES, type Asset } from '@/lib/types';
-import { DonutChart, StackedBar, StatusLegend, statusColor } from './charts';
+import { DonutChart, StatusLegend, statusColor } from './charts';
+
+/** 세부표시 표는 한 화면에 들어오도록 임대중 열은 빼요(총재고/상단 요약엔 그대로 포함돼요). */
+const DETAIL_STATUSES = BREAKDOWN_STATUSES.filter((s) => s !== '임대중');
 
 type Props = {
   assets: Asset[];
@@ -144,7 +147,7 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
             }
 
             return (
-              <div key={category} style={{ minWidth: '760px', flex: '1 1 760px' }}>
+              <div key={category} style={{ minWidth: '660px', flex: '1 1 660px' }}>
                 <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
                   {category} ({total}대)
                 </div>
@@ -154,13 +157,12 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
                       <tr>
                         <th>구분코드</th>
                         <th>총재고</th>
-                        {BREAKDOWN_STATUSES.map((s) => (
+                        {DETAIL_STATUSES.map((s) => (
                           <th key={s}>{s}</th>
                         ))}
                         <th>가용재고</th>
                         <th>안전재고</th>
                         <th>부족재고</th>
-                        <th>비율</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -176,7 +178,7 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
                                 {r.total}
                               </button>
                             </td>
-                            {BREAKDOWN_STATUSES.map((s) => {
+                            {DETAIL_STATUSES.map((s) => {
                               const count = r.byStatus[s] ?? 0;
                               return (
                                 <td key={s}>
@@ -212,12 +214,6 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
                               <SafetyStockInput value={safetyCount} onSave={(n) => handleSetSafetyStock(category, r.detailCode, n)} />
                             </td>
                             <td style={{ fontWeight: 700, color: shortage > 0 ? 'var(--red-600)' : 'var(--ink-400)' }}>{shortage}</td>
-                            <td>
-                              <StackedBar
-                                segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: r.byStatus[s] ?? 0, color: statusColor(s) }))}
-                                total={r.total}
-                              />
-                            </td>
                           </tr>
                         );
                       })}
@@ -228,7 +224,7 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
                             {total}
                           </button>
                         </td>
-                        {BREAKDOWN_STATUSES.map((s) => {
+                        {DETAIL_STATUSES.map((s) => {
                           const count = totalByStatus[s] ?? 0;
                           return (
                             <td key={s} style={{ fontWeight: 700 }}>
@@ -257,12 +253,6 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
                         </td>
                         <td style={{ fontWeight: 700 }}>{totalSafety}</td>
                         <td style={{ fontWeight: 700, color: totalShortage > 0 ? 'var(--red-600)' : 'var(--ink-400)' }}>{totalShortage}</td>
-                        <td>
-                          <StackedBar
-                            segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: totalByStatus[s] ?? 0, color: statusColor(s) }))}
-                            total={total}
-                          />
-                        </td>
                       </tr>
                     </tbody>
                   </table>

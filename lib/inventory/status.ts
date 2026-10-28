@@ -33,6 +33,9 @@ export function parseLocationStatus_(
     if (/^K/i.test(v) || /IT/i.test(v)) {
       return { status: '기타', statusRaw: v };
     }
+    if (/판매/i.test(v)) {
+      return { status: '판매' };
+    }
     if (/폐기/i.test(v)) {
       return { status: '폐기' };
     }
@@ -48,6 +51,9 @@ export function parseLocationStatus_(
     return { status: '기타', statusRaw: v };
   }
 
+  if (/판매/i.test(v)) {
+    return { status: '판매' };
+  }
   if (/폐기/i.test(v)) {
     return { status: '폐기' };
   }

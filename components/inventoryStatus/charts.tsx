@@ -8,6 +8,7 @@ export const STATUS_COLORS: Record<string, string> = {
   상품화완료: '#059669',
   임대중: '#2563eb',
   수리중: '#dc2626',
+  판매: '#4f46e5',
   폐기: '#334155',
   미정: '#94a3b8',
   기타: '#cbd5e1',
