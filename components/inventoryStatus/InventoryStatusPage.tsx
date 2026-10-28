@@ -1,77 +1,64 @@
 'use client';
 
-import { Fragment, useMemo, useState } from 'react';
-import { addStaffNameIfNew } from '@/app/actions';
-import { setQuantityCheck, setStockCheckOverride } from '@/app/inventoryStatus/actions';
+import { useMemo, useState } from 'react';
+import { setSafetyStock } from '@/app/inventoryStatus/actions';
 import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import {
+  AVAILABLE_BREAKDOWN_STATUSES,
   BREAKDOWN_STATUSES,
   buildCategoryBreakdown,
   buildLocationCheckTables,
-  buildLocationQuantitySummary,
-  isStockCheckExcluded,
-  type LocationQuantityRow,
-  type QuantityCheck,
-  type StockCheckOverride,
+  type CategoryBreakdownAssetRef,
+  type SafetyStock,
 } from '@/lib/zoneStatus';
 import { STATUSES, type Asset } from '@/lib/types';
 import { DonutChart, StackedBar, StatusLegend, statusColor } from './charts';
 
-const CUSTOM_OPTION = '__custom__';
-
 type Props = {
   assets: Asset[];
   stocktakeConfirmations: Record<string, StocktakeConfirmation>;
-  staffNames: string[];
-  quantityChecks: QuantityCheck[];
-  stockCheckOverrides: StockCheckOverride[];
+  safetyStock: SafetyStock[];
 };
 
-export default function InventoryStatusPage({
-  assets,
-  staffNames,
-  stocktakeConfirmations,
-  quantityChecks,
-  stockCheckOverrides,
-}: Props) {
-  const [checks, setChecks] = useState(quantityChecks);
-  const [overrides, setOverrides] = useState(stockCheckOverrides);
-  const [toast, setToast] = useState({ msg: '', show: false });
+type Drilldown = { title: string; assets: CategoryBreakdownAssetRef[] } | null;
 
-  function showToast(msg: string) {
-    setToast({ msg, show: true });
-  }
+function safetyKey(category: string, detailCode: string): string {
+  return `${category}\u0000${detailCode}`;
+}
+
+export default function InventoryStatusPage({ assets, stocktakeConfirmations, safetyStock }: Props) {
+  const [safety, setSafety] = useState(safetyStock);
+  const [drilldown, setDrilldown] = useState<Drilldown>(null);
+  const [toast, setToast] = useState({ msg: '', show: false });
 
   const checkTables = useMemo(
     () => buildLocationCheckTables(assets, stocktakeConfirmations),
     [assets, stocktakeConfirmations],
   );
-  const locationQuantityRows = useMemo(() => buildLocationQuantitySummary(assets, checks), [assets, checks]);
-  const overrideByLocation = useMemo(() => new Map(overrides.map((o) => [o.location, o.excluded])), [overrides]);
   const breakdown = useMemo(() => buildCategoryBreakdown(assets), [assets]);
   const grandTotal = breakdown.reduce((sum, g) => sum + g.total, 0);
+  const safetyByKey = useMemo(() => new Map(safety.map((s) => [safetyKey(s.category, s.detailCode), s.safetyCount])), [safety]);
 
-  async function handleSetQuantityCheck(location: string, count: number, checkedBy: string) {
-    setChecks((prev) => {
-      const next = prev.filter((c) => c.location !== location);
-      next.push({ location, countedCount: count, checkedBy, checkedAt: new Date().toISOString() });
-      return next;
-    });
-    const trimmedName = checkedBy.trim();
-    if (trimmedName && !staffNames.includes(trimmedName)) {
-      addStaffNameIfNew(trimmedName).catch(() => {});
-    }
-    const result = await setQuantityCheck(location, count, checkedBy);
-    showToast(result.ok ? `${location} ${count}대로 기록했어요.` : result.error);
+  function showToast(msg: string) {
+    setToast({ msg, show: true });
   }
 
-  async function handleToggleExcluded(location: string, excluded: boolean) {
-    setOverrides((prev) => [
-      ...prev.filter((o) => o.location !== location),
-      { location, excluded, updatedBy: '', updatedAt: new Date().toISOString() },
-    ]);
-    const result = await setStockCheckOverride(location, excluded);
-    showToast(result.ok ? `${location} — ${excluded ? '체크 안 함으로 옮겼어요.' : '체크 대상으로 옮겼어요.'}` : result.error);
+  function openDrilldown(title: string, assetList: CategoryBreakdownAssetRef[]) {
+    setDrilldown({ title, assets: assetList });
+  }
+
+  async function handleSetSafetyStock(category: string, detailCode: string, count: number) {
+    setSafety((prev) => [...prev.filter((s) => !(s.category === category && s.detailCode === detailCode)), { category, detailCode, safetyCount: count }]);
+    const result = await setSafetyStock(category, detailCode, count);
+    if (!result.ok) showToast(result.error);
+  }
+
+  function availableCount(byStatus: Record<string, number>): number {
+    return AVAILABLE_BREAKDOWN_STATUSES.reduce((s, st) => s + (byStatus[st] ?? 0), 0);
+  }
+
+  function availableAssets(assetList: CategoryBreakdownAssetRef[]): CategoryBreakdownAssetRef[] {
+    return assetList.filter((a) => (AVAILABLE_BREAKDOWN_STATUSES as readonly string[]).includes(a.status));
   }
 
   return (
@@ -82,8 +69,9 @@ export default function InventoryStatusPage({
           <StatusLegend />
         </div>
         <div className="sub" style={{ marginBottom: '14px' }}>
-          품목별로 구분코드(또는 모델명)별 대수와 재고상태를 보여줘요(임대중 포함). 선반 위치는
-          지하/2층 밖에 없어서 층별 집계는 따로 안 해요.
+          품목별로 구분코드(또는 모델명)별 대수와 재고상태를 보여줘요(임대중 포함). 가용재고는
+          상품화준비중·상품화완료·수리중 합계예요. 안전재고를 입력하면 부족재고가 자동으로
+          계산돼요. 숫자를 누르면 해당 자산번호/스펙을 볼 수 있어요.
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '18px' }}>
@@ -117,59 +105,144 @@ export default function InventoryStatusPage({
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
-          {breakdown.map(({ category, rows, total, totalByStatus }) => (
-            <div key={category} style={{ minWidth: '460px', flex: '1 1 460px' }}>
-              <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
-                {category} ({total}대)
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ fontSize: '12.5px' }}>
-                  <thead>
-                    <tr>
-                      <th>구분코드</th>
-                      <th>총재고</th>
-                      {BREAKDOWN_STATUSES.map((s) => (
-                        <th key={s}>{s}</th>
-                      ))}
-                      <th>비율</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((r) => (
-                      <tr key={r.detailCode}>
-                        <td style={{ fontWeight: 700 }}>{r.detailCode}</td>
-                        <td style={{ fontWeight: 700 }}>{r.total}</td>
+          {breakdown.map(({ category, rows, total, totalByStatus }) => {
+            const categoryAssets = rows.flatMap((r) => r.assets);
+            const totalAvailable = availableCount(totalByStatus);
+            let totalSafety = 0;
+            let totalShortage = 0;
+            for (const r of rows) {
+              const s = safetyByKey.get(safetyKey(category, r.detailCode)) ?? 0;
+              totalSafety += s;
+              totalShortage += Math.max(0, s - availableCount(r.byStatus));
+            }
+
+            return (
+              <div key={category} style={{ minWidth: '620px', flex: '1 1 620px' }}>
+                <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
+                  {category} ({total}대)
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ fontSize: '12.5px' }}>
+                    <thead>
+                      <tr>
+                        <th>구분코드</th>
+                        <th>총재고</th>
                         {BREAKDOWN_STATUSES.map((s) => (
-                          <td key={s}>{r.byStatus[s] ?? '-'}</td>
+                          <th key={s}>{s}</th>
                         ))}
+                        <th>가용재고</th>
+                        <th>안전재고</th>
+                        <th>부족재고</th>
+                        <th>비율</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => {
+                        const available = availableCount(r.byStatus);
+                        const safetyCount = safetyByKey.get(safetyKey(category, r.detailCode)) ?? 0;
+                        const shortage = Math.max(0, safetyCount - available);
+                        return (
+                          <tr key={r.detailCode}>
+                            <td style={{ fontWeight: 700 }}>{r.detailCode}</td>
+                            <td>
+                              <button type="button" className="chip" style={{ fontWeight: 700 }} onClick={() => openDrilldown(`${category} · ${r.detailCode} · 총재고`, r.assets)}>
+                                {r.total}
+                              </button>
+                            </td>
+                            {BREAKDOWN_STATUSES.map((s) => {
+                              const count = r.byStatus[s] ?? 0;
+                              return (
+                                <td key={s}>
+                                  {count > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="chip"
+                                      onClick={() => openDrilldown(`${category} · ${r.detailCode} · ${s}`, r.assets.filter((a) => a.status === s))}
+                                    >
+                                      {count}
+                                    </button>
+                                  ) : (
+                                    '-'
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td>
+                              {available > 0 ? (
+                                <button
+                                  type="button"
+                                  className="chip"
+                                  style={{ fontWeight: 700 }}
+                                  onClick={() => openDrilldown(`${category} · ${r.detailCode} · 가용재고`, availableAssets(r.assets))}
+                                >
+                                  {available}
+                                </button>
+                              ) : (
+                                '0'
+                              )}
+                            </td>
+                            <td>
+                              <SafetyStockInput value={safetyCount} onSave={(n) => handleSetSafetyStock(category, r.detailCode, n)} />
+                            </td>
+                            <td style={{ fontWeight: 700, color: shortage > 0 ? 'var(--red-600)' : 'var(--ink-400)' }}>{shortage}</td>
+                            <td>
+                              <StackedBar
+                                segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: r.byStatus[s] ?? 0, color: statusColor(s) }))}
+                                total={r.total}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      <tr>
+                        <td style={{ fontWeight: 700 }}>총계</td>
+                        <td>
+                          <button type="button" className="chip" style={{ fontWeight: 700 }} onClick={() => openDrilldown(`${category} · 총재고`, categoryAssets)}>
+                            {total}
+                          </button>
+                        </td>
+                        {BREAKDOWN_STATUSES.map((s) => {
+                          const count = totalByStatus[s] ?? 0;
+                          return (
+                            <td key={s} style={{ fontWeight: 700 }}>
+                              {count > 0 ? (
+                                <button
+                                  type="button"
+                                  className="chip"
+                                  onClick={() => openDrilldown(`${category} · ${s}`, categoryAssets.filter((a) => a.status === s))}
+                                >
+                                  {count}
+                                </button>
+                              ) : (
+                                '-'
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td style={{ fontWeight: 700 }}>
+                          {totalAvailable > 0 ? (
+                            <button type="button" className="chip" style={{ fontWeight: 700 }} onClick={() => openDrilldown(`${category} · 가용재고`, availableAssets(categoryAssets))}>
+                              {totalAvailable}
+                            </button>
+                          ) : (
+                            '0'
+                          )}
+                        </td>
+                        <td style={{ fontWeight: 700 }}>{totalSafety}</td>
+                        <td style={{ fontWeight: 700, color: totalShortage > 0 ? 'var(--red-600)' : 'var(--ink-400)' }}>{totalShortage}</td>
                         <td>
                           <StackedBar
-                            segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: r.byStatus[s] ?? 0, color: statusColor(s) }))}
-                            total={r.total}
+                            segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: totalByStatus[s] ?? 0, color: statusColor(s) }))}
+                            total={total}
                           />
                         </td>
                       </tr>
-                    ))}
-                    <tr>
-                      <td style={{ fontWeight: 700 }}>총계</td>
-                      <td style={{ fontWeight: 700 }}>{total}</td>
-                      {BREAKDOWN_STATUSES.map((s) => (
-                        <td key={s} style={{ fontWeight: 700 }}>
-                          {totalByStatus[s] ?? '-'}
-                        </td>
-                      ))}
-                      <td>
-                        <StackedBar
-                          segments={BREAKDOWN_STATUSES.map((s) => ({ label: s, value: totalByStatus[s] ?? 0, color: statusColor(s) }))}
-                          total={total}
-                        />
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         {breakdown.length === 0 && (
           <div className="empty-state">
@@ -240,13 +313,29 @@ export default function InventoryStatusPage({
         )}
       </div>
 
-      <QuantityCheckPanel
-        rows={locationQuantityRows}
-        overrideByLocation={overrideByLocation}
-        staffNames={staffNames}
-        onSave={handleSetQuantityCheck}
-        onToggleExcluded={handleToggleExcluded}
-      />
+      {drilldown && (
+        <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && setDrilldown(null)}>
+          <div className="modal" style={{ width: '480px' }}>
+            <h2>{drilldown.title}</h2>
+            <div className="sub" style={{ marginBottom: '10px' }}>{drilldown.assets.length}대</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '420px', overflowY: 'auto' }}>
+              {drilldown.assets.map((a) => (
+                <div key={a.assetId} style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '12.5px', padding: '4px 0', borderBottom: '1px solid var(--ink-100)' }}>
+                  <span className="asset-id">{a.assetId}</span>
+                  <span style={{ color: 'var(--ink-500)' }}>{a.model || '-'}</span>
+                  <span style={{ color: 'var(--ink-400)', marginLeft: 'auto', fontSize: '11.5px' }}>{a.specLabel || '-'}</span>
+                </div>
+              ))}
+              {drilldown.assets.length === 0 && <div className="sub">해당하는 자산이 없어요.</div>}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-primary" onClick={() => setDrilldown(null)}>
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className={`toast${toast.show ? ' show' : ''}`}>
         <span>{toast.msg}</span>
@@ -258,244 +347,29 @@ export default function InventoryStatusPage({
   );
 }
 
-function CountCell({ countedCount, onSave }: { countedCount: number | null; onSave: (count: number) => void }) {
-  const [value, setValue] = useState(countedCount === null ? '' : String(countedCount));
+function SafetyStockInput({ value, onSave }: { value: number; onSave: (count: number) => void }) {
+  const [text, setText] = useState(String(value));
 
   function commit() {
-    const n = Number(value);
-    if (value.trim() === '' || !Number.isFinite(n) || n < 0) {
-      setValue(countedCount === null ? '' : String(countedCount));
+    const n = Number(text);
+    if (text.trim() === '' || !Number.isFinite(n) || n < 0) {
+      setText(String(value));
       return;
     }
-    if (n !== countedCount) onSave(n);
+    if (n !== value) onSave(n);
   }
 
   return (
     <input
       type="number"
       min="0"
-      value={value}
-      placeholder="입력"
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => setValue(e.target.value)}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur();
       }}
-      style={{ width: '70px' }}
+      style={{ width: '64px' }}
     />
-  );
-}
-
-function QuantityCheckRows({
-  rows,
-  expanded,
-  onToggle,
-  excludedSection,
-  onSaveCount,
-  onToggleExcluded,
-}: {
-  rows: LocationQuantityRow[];
-  expanded: string | null;
-  onToggle: (location: string) => void;
-  excludedSection: boolean;
-  onSaveCount: (location: string, count: number) => void;
-  onToggleExcluded: (location: string, excluded: boolean) => void;
-}) {
-  const total = rows.reduce(
-    (acc, r) => ({ system: acc.system + r.systemCount, counted: acc.counted + (r.countedCount ?? 0) }),
-    { system: 0, counted: 0 },
-  );
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ fontSize: '12.5px' }}>
-        <thead>
-          <tr>
-            <th>위치</th>
-            <th>전산 수량</th>
-            <th>실사수량</th>
-            <th>업데이트</th>
-            <th>담당자</th>
-            <th>비고</th>
-            <th>분류</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <Fragment key={r.location}>
-              <tr style={r.mismatch ? { background: 'var(--red-50, #fef2f2)' } : undefined}>
-                <td style={{ fontWeight: 700, cursor: 'pointer' }} onClick={() => onToggle(r.location)}>
-                  {expanded === r.location ? '▼' : '▶'} {r.location}
-                </td>
-                <td>{r.systemCount}</td>
-                <td>
-                  <CountCell countedCount={r.countedCount} onSave={(count) => onSaveCount(r.location, count)} />
-                </td>
-                <td style={{ fontSize: '11px', color: 'var(--ink-500)' }}>
-                  {r.checkedAt ? formatKstDateTime(r.checkedAt) : '-'}
-                </td>
-                <td>{r.checkedBy || '-'}</td>
-                <td
-                  style={{
-                    fontWeight: 700,
-                    color: r.countedCount === null ? 'var(--ink-500)' : r.mismatch ? 'var(--red-600)' : 'var(--green-600)',
-                  }}
-                >
-                  {r.countedCount === null ? '-' : r.mismatch ? '불일치' : '일치'}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="chip"
-                    style={{ fontSize: '10.5px', padding: '1px 6px' }}
-                    onClick={() => onToggleExcluded(r.location, !excludedSection)}
-                  >
-                    {excludedSection ? '체크대상으로' : '체크안함으로'}
-                  </button>
-                </td>
-              </tr>
-              {expanded === r.location && (
-                <tr>
-                  <td colSpan={7} style={{ background: 'var(--ink-50)' }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 4px' }}>
-                      {r.assetIds.map((a) => (
-                        <span key={a.assetId} className="chip" style={{ fontSize: '11.5px' }}>
-                          <span className="asset-id">{a.assetId}</span> {a.category} {a.model}
-                        </span>
-                      ))}
-                      {r.assetIds.length === 0 && <span className="sub">자산이 없어요.</span>}
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </Fragment>
-          ))}
-          <tr>
-            <td style={{ fontWeight: 700 }}>총계</td>
-            <td style={{ fontWeight: 700 }}>{total.system}</td>
-            <td style={{ fontWeight: 700 }}>{total.counted}</td>
-            <td />
-            <td />
-            <td />
-            <td />
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function QuantityCheckPanel({
-  rows,
-  overrideByLocation,
-  staffNames,
-  onSave,
-  onToggleExcluded,
-}: {
-  rows: LocationQuantityRow[];
-  overrideByLocation: Map<string, boolean>;
-  staffNames: string[];
-  onSave: (location: string, count: number, checkedBy: string) => void;
-  onToggleExcluded: (location: string, excluded: boolean) => void;
-}) {
-  const [checkedBy, setCheckedBy] = useState('');
-  const [customMode, setCustomMode] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [showExcluded, setShowExcluded] = useState(false);
-
-  function toggleExpanded(loc: string) {
-    setExpanded((prev) => (prev === loc ? null : loc));
-  }
-
-  // 선반 위치가 아닌 값(파손/판매/분실/반출/폐기/직송-.../김정식프로문의/K열/PM 등 상태·메모성
-  // 텍스트)은 기본적으로 실재고 체크 대상이 아니지만, overrideByLocation에 예외가 있으면
-  // 양쪽 방향으로 수동으로 뒤집을 수 있습니다("분류" 버튼).
-  const shelfRows = rows.filter((r) => !isStockCheckExcluded(r.location, overrideByLocation));
-  const excludedRows = rows.filter((r) => isStockCheckExcluded(r.location, overrideByLocation));
-
-  return (
-    <div className="panel" style={{ marginBottom: '12px' }}>
-      <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>1차 수량 체크 — 자산번호 없이 대수만</div>
-      <div className="sub" style={{ marginBottom: '10px' }}>
-        품목 구분 없이 위치 하나당 전산 수량과 실사수량(선반을 보고 눈으로 센 대수)만
-        비교해요. 전산 수량 오른쪽 실사수량 칸에 직접 입력하면 바로 기록돼요. "분류" 버튼으로
-        그 위치를 실재고체크 대상/안 함으로 옮길 수 있어요.
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px', alignItems: 'center' }}>
-        <span className="sub" style={{ fontSize: '12.5px' }}>
-          지금 체크하는 사람:
-        </span>
-        {customMode || staffNames.length === 0 ? (
-          <input value={checkedBy} onChange={(e) => setCheckedBy(e.target.value)} placeholder="담당자 이름 입력" style={{ width: '110px' }} />
-        ) : (
-          <select
-            value={staffNames.includes(checkedBy) ? checkedBy : ''}
-            onChange={(e) => {
-              if (e.target.value === CUSTOM_OPTION) {
-                setCustomMode(true);
-                setCheckedBy('');
-              } else {
-                setCheckedBy(e.target.value);
-              }
-            }}
-          >
-            <option value="">담당자 선택</option>
-            {staffNames.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-            <option value={CUSTOM_OPTION}>➕ 새 이름 입력</option>
-          </select>
-        )}
-        {customMode && staffNames.length > 0 && (
-          <button
-            type="button"
-            className="chip"
-            onClick={() => {
-              setCustomMode(false);
-              setCheckedBy('');
-            }}
-          >
-            목록에서 선택
-          </button>
-        )}
-      </div>
-
-      <QuantityCheckRows
-        rows={shelfRows}
-        expanded={expanded}
-        onToggle={toggleExpanded}
-        excludedSection={false}
-        onSaveCount={(location, count) => onSave(location, count, checkedBy)}
-        onToggleExcluded={onToggleExcluded}
-      />
-      {shelfRows.length === 0 && (
-        <div className="empty-state">
-          <div>📋</div>위치가 입력된 가용 자산이 없어요.
-        </div>
-      )}
-
-      {excludedRows.length > 0 && (
-        <div style={{ marginTop: '14px' }}>
-          <button type="button" className="chip" onClick={() => setShowExcluded((v) => !v)}>
-            {showExcluded ? '▲' : '▶'} 실재고체크안함 ({excludedRows.length}개)
-          </button>
-          {showExcluded && (
-            <div style={{ marginTop: '8px' }}>
-              <QuantityCheckRows
-                rows={excludedRows}
-                expanded={expanded}
-                onToggle={toggleExpanded}
-                excludedSection={true}
-                onSaveCount={(location, count) => onSave(location, count, checkedBy)}
-                onToggleExcluded={onToggleExcluded}
-              />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   );
 }

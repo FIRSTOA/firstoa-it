@@ -1,5 +1,4 @@
-import { listStaffNames } from '@/app/actions';
-import { listQuantityChecks, listStockCheckOverrides } from '@/app/inventoryStatus/actions';
+import { listSafetyStock } from '@/app/inventoryStatus/actions';
 import { listAllAssetsUnified } from '@/app/stocktake/actions';
 import InventoryStatusPage from '@/components/inventoryStatus/InventoryStatusPage';
 import SetupGuide from '@/components/SetupGuide';
@@ -18,12 +17,10 @@ export default async function Page() {
     );
   }
 
-  const [assets, staffNames, stocktakeConfirmations, quantityChecks, stockCheckOverrides] = await Promise.all([
+  const [assets, stocktakeConfirmations, safetyStock] = await Promise.all([
     listAllAssetsUnified().catch(() => []),
-    listStaffNames(),
     loadStocktakeConfirmations(),
-    listQuantityChecks(),
-    listStockCheckOverrides(),
+    listSafetyStock(),
   ]);
 
   return (
@@ -32,13 +29,7 @@ export default async function Page() {
       title="📊 재고 현황판"
       note="위치별/품목별 가용 재고 합산 — 렌탈 중 자산은 제외돼요."
     >
-      <InventoryStatusPage
-        assets={assets}
-        staffNames={staffNames}
-        stocktakeConfirmations={stocktakeConfirmations}
-        quantityChecks={quantityChecks}
-        stockCheckOverrides={stockCheckOverrides}
-      />
+      <InventoryStatusPage assets={assets} stocktakeConfirmations={stocktakeConfirmations} safetyStock={safetyStock} />
     </Shell>
   );
 }

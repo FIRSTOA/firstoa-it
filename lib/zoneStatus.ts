@@ -381,10 +381,18 @@ export function buildLocationCheckTables(
     .sort((a, b) => a.category.localeCompare(b.category, 'ko'));
 }
 
+export type CategoryBreakdownAssetRef = {
+  assetId: string;
+  model: string;
+  specLabel: string;
+  status: string;
+};
+
 export type CategoryBreakdownRow = {
   detailCode: string;
   total: number;
   byStatus: Record<string, number>;
+  assets: CategoryBreakdownAssetRef[];
 };
 
 export type CategoryBreakdownGroup = {
@@ -393,6 +401,9 @@ export type CategoryBreakdownGroup = {
   total: number;
   totalByStatus: Record<string, number>;
 };
+
+/** "가용재고" — 지금 당장 쓸 수 있거나(상품화준비중/상품화완료) 곧 쓸 수 있는(수리중) 자산. */
+export const AVAILABLE_BREAKDOWN_STATUSES = ['상품화준비중', '상품화완료', '수리중'] as const;
 
 /**
  * 품목 → 세부구분코드별 수량 집계(참고: first-as-search의 SKU별 재고 현황판과 비슷한
@@ -403,7 +414,7 @@ export type CategoryBreakdownGroup = {
  * 맞아야 하고, 몇 대가 임대 나가 있는지도 한눈에 보여야 하기 때문입니다.
  */
 export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[] {
-  type Bucket = { total: number; byStatus: Record<string, number> };
+  type Bucket = { total: number; byStatus: Record<string, number>; assets: CategoryBreakdownAssetRef[] };
   const byCategory = new Map<string, Map<string, Bucket>>();
 
   for (const asset of assets) {
@@ -418,16 +429,22 @@ export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[
 
     const byDetail = byCategory.get(asset.category) ?? new Map<string, Bucket>();
     byCategory.set(asset.category, byDetail);
-    const bucket = byDetail.get(detailCode) ?? { total: 0, byStatus: {} };
+    const bucket = byDetail.get(detailCode) ?? { total: 0, byStatus: {}, assets: [] };
     bucket.total += 1;
     bucket.byStatus[asset.status] = (bucket.byStatus[asset.status] ?? 0) + 1;
+    bucket.assets.push({
+      assetId: asset.assetId,
+      model: asset.model,
+      specLabel: asset.specLabel || asset.spec,
+      status: asset.status,
+    });
     byDetail.set(detailCode, bucket);
   }
 
   return [...byCategory.entries()]
     .map(([category, byDetail]) => {
       const rows = [...byDetail.entries()]
-        .map(([detailCode, b]) => ({ detailCode, total: b.total, byStatus: b.byStatus }))
+        .map(([detailCode, b]) => ({ detailCode, total: b.total, byStatus: b.byStatus, assets: b.assets }))
         .sort((a, b) => b.total - a.total);
       const total = rows.reduce((s, r) => s + r.total, 0);
       const totalByStatus: Record<string, number> = {};
@@ -439,4 +456,21 @@ export function buildCategoryBreakdown(assets: Asset[]): CategoryBreakdownGroup[
       return { category, rows, total, totalByStatus };
     })
     .sort((a, b) => b.total - a.total);
+}
+
+/** 품목×구분코드별 안전재고 — 직접 입력해두면 가용재고와 비교해 부족분을 계산하는 데 씁니다. */
+export type SafetyStock = {
+  category: string;
+  detailCode: string;
+  safetyCount: number;
+};
+
+export type SafetyStockRow = {
+  category: string;
+  detail_code: string;
+  safety_count: number;
+};
+
+export function rowToSafetyStock(row: SafetyStockRow): SafetyStock {
+  return { category: row.category, detailCode: row.detail_code, safetyCount: row.safety_count };
 }

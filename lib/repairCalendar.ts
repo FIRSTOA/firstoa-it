@@ -22,8 +22,12 @@ export async function scheduleRepairCalendarEvent(
 ): Promise<void> {
   try {
     const supabase = createAdminClient();
-    const { data: calendars } = await supabase.from('it_naver_calendars').select('id').order('created_at').limit(1);
-    const calendarId = ((calendars ?? [])[0] as { id: string } | undefined)?.id ?? null;
+    // "익일통합" 전용으로 이미 연결해둔 네이버 캘린더가 있으면 그걸 정확히 골라 씁니다 —
+    // 아무 캘린더나(연결 순서상 처음 것) 쓰면 안 되고, 이름에 "익일통합"이 들어간 캘린더가
+    // 바로 그 용도입니다(없으면 app 전용으로 저장만 하고 네이버 푸시는 건너뜀).
+    const { data: calendars } = await supabase.from('it_naver_calendars').select('id,name');
+    const target = ((calendars ?? []) as { id: string; name: string }[]).find((c) => c.name.includes('익일통합'));
+    const calendarId = target?.id ?? null;
 
     const tomorrow = toKstDateKey(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
     const title = `IT접수/익일통합/${info.category}/${info.model || info.assetId || '수리'}`.trim();

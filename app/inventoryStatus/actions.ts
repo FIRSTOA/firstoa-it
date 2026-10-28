@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import {
   rowToLocationFloorMap,
   rowToQuantityCheck,
+  rowToSafetyStock,
   rowToStockCheckOverride,
   rowToZoneStatus,
   rowToZoneVerification,
@@ -11,6 +12,8 @@ import {
   type LocationFloorMapRow,
   type QuantityCheck,
   type QuantityCheckRow,
+  type SafetyStock,
+  type SafetyStockRow,
   type StockCheckOverride,
   type StockCheckOverrideRow,
   type ZoneStatus,
@@ -22,6 +25,7 @@ import {
   createAdminClient,
   LOCATION_FLOOR_MAP_TABLE,
   QUANTITY_CHECKS_TABLE,
+  SAFETY_STOCK_TABLE,
   STOCK_CHECK_OVERRIDES_TABLE,
   ZONE_LOCATIONS_TABLE,
   ZONE_STATUS_TABLE,
@@ -250,6 +254,40 @@ export async function setStockCheckOverride(location: string, excluded: boolean,
   );
   if (error) {
     console.error('[inventoryStatus] setStockCheckOverride 실패:', error);
+    return { ok: false, error: `저장에 실패했어요: ${error.message}` };
+  }
+  revalidatePath('/inventory-status');
+  return { ok: true };
+}
+
+export async function listSafetyStock(): Promise<SafetyStock[]> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.from(SAFETY_STOCK_TABLE).select('*');
+  if (error) {
+    console.error('[inventoryStatus] listSafetyStock 실패:', error);
+    return [];
+  }
+  return ((data ?? []) as SafetyStockRow[]).map(rowToSafetyStock);
+}
+
+/** 품목×구분코드 하나의 안전재고 수량을 저장합니다. */
+export async function setSafetyStock(category: string, detailCode: string, count: number, updatedBy = ''): Promise<ActionResult> {
+  if (!category.trim() || !detailCode.trim()) return { ok: false, error: '품목/구분코드가 비어있어요.' };
+  if (!Number.isFinite(count) || count < 0) return { ok: false, error: '안전재고 수량을 올바르게 입력해주세요.' };
+
+  const supabase = createAdminClient();
+  const { error } = await supabase.from(SAFETY_STOCK_TABLE).upsert(
+    {
+      category,
+      detail_code: detailCode,
+      safety_count: count,
+      updated_by: updatedBy.trim(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'category,detail_code' },
+  );
+  if (error) {
+    console.error('[inventoryStatus] setSafetyStock 실패:', error);
     return { ok: false, error: `저장에 실패했어요: ${error.message}` };
   }
   revalidatePath('/inventory-status');

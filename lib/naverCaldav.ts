@@ -14,6 +14,10 @@ import 'server-only';
  */
 
 const CALDAV_BASE = 'https://caldav.calendar.naver.com';
+// 네이버 CalDAV 서버가 느리거나 응답이 없을 때 서버 액션 전체가 무한정 멈추는 걸 막는
+// 안전장치 — best-effort 동기화(syncToNaverBestEffort)가 이 시간 안에 실패로 처리되고
+// 로컬 저장은 그대로 성공합니다(실제로 수리입고 등록이 몇십 초씩 멈추는 증상으로 발견됨).
+const NAVER_TIMEOUT_MS = 8000;
 
 function caldavId(): string {
   return process.env.NAVER_CALDAV_ID || '';
@@ -198,6 +202,7 @@ export async function putEvent(calendarId: string, uid: string, icalBody: string
     method: 'PUT',
     headers: { Authorization: authHeader(), 'Content-Type': 'text/calendar; charset=utf-8' },
     body: icalBody.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'),
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -207,7 +212,10 @@ export async function putEvent(calendarId: string, uid: string, icalBody: string
 }
 
 export async function getEvent(calendarId: string, uid: string): Promise<string | null> {
-  const res = await fetch(eventUrl(calendarId, uid), { headers: { Authorization: authHeader() } });
+  const res = await fetch(eventUrl(calendarId, uid), {
+    headers: { Authorization: authHeader() },
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
+  });
   if (res.status === 404) return null;
   if (!res.ok) {
     if (res.status === 401) throw new Error('CalDAV 인증 실패 — 앱비밀번호를 확인하세요.');
@@ -220,6 +228,7 @@ export async function deleteEvent(calendarId: string, uid: string): Promise<void
   const res = await fetch(eventUrl(calendarId, uid), {
     method: 'DELETE',
     headers: { Authorization: authHeader() },
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
   });
   if (!res.ok && res.status !== 404) {
     if (res.status === 401) throw new Error('CalDAV 인증 실패 — 앱비밀번호를 확인하세요.');
@@ -237,6 +246,7 @@ export async function fetchCtag(calendarId: string): Promise<string> {
     method: 'PROPFIND',
     headers: { Authorization: authHeader(), 'Content-Type': 'application/xml; charset=utf-8', Depth: '0' },
     body,
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
   });
   if (!res.ok) return '';
   const xml = await res.text();
@@ -258,6 +268,7 @@ export async function reportChangedEvents(calendarId: string, startYmd: string, 
     method: 'REPORT',
     headers: { Authorization: authHeader(), 'Content-Type': 'application/xml; charset=utf-8', Depth: '1' },
     body,
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
   });
   const text = await res.text();
   if (!res.ok) {
@@ -276,7 +287,10 @@ export async function reportChangedEvents(calendarId: string, startYmd: string, 
 
 /** href로 이벤트 원문을 직접 가져옵니다(REPORT 결과의 inline calendar-data는 신뢰하지 않고 별도 GET). */
 export async function getEventByHref(href: string): Promise<string> {
-  const res = await fetch(`${CALDAV_BASE}${href}`, { headers: { Authorization: authHeader() } });
+  const res = await fetch(`${CALDAV_BASE}${href}`, {
+    headers: { Authorization: authHeader() },
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`네이버 일정 본문 조회 실패(${res.status})`);
   return res.text();
 }
@@ -296,6 +310,7 @@ export async function listCalendars(): Promise<NaverCalendarInfo[]> {
     method: 'PROPFIND',
     headers: { Authorization: authHeader(), 'Content-Type': 'application/xml; charset=utf-8', Depth: '1' },
     body,
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
   });
   const text = await res.text();
   if (!res.ok) {

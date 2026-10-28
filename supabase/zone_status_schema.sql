@@ -68,6 +68,17 @@ create table if not exists public.it_stock_check_overrides (
   updated_at timestamptz not null default now()
 );
 
+-- 품목×구분코드별 안전재고 — 직접 입력해두면 재고현황판이 가용재고와 비교해서 부족분을
+-- 바로 계산해 보여줍니다.
+create table if not exists public.it_safety_stock (
+  category      text not null,
+  detail_code   text not null,
+  safety_count  integer not null default 0,
+  updated_by    text not null default '',
+  updated_at    timestamptz not null default now(),
+  primary key (category, detail_code)
+);
+
 drop trigger if exists it_zone_status_set_updated_at on public.it_zone_status;
 create trigger it_zone_status_set_updated_at
   before update on public.it_zone_status
@@ -80,3 +91,4 @@ alter table public.it_zone_verifications enable row level security;
 alter table public.it_location_floor_map enable row level security;
 alter table public.it_quantity_checks enable row level security;
 alter table public.it_stock_check_overrides enable row level security;
+alter table public.it_safety_stock enable row level security;
