@@ -22,6 +22,20 @@ export function isITEvent(title: string): boolean {
   return /\bIT\b/.test(title);
 }
 
+/** 연결된 캘린더마다 다른 색으로 보여주기 위한 팔레트 칸 수 — app/globals.css의 .calendar-cal-0~N과 짝. */
+export const CALENDAR_COLOR_COUNT = 8;
+
+/**
+ * calendarId가 연결된 캘린더 목록(calendarIds, listConnectedCalendars가 created_at 순으로 줌)
+ * 안에서 몇 번째인지로 색 인덱스를 결정합니다 — 연결 순서가 바뀌지 않는 한 같은 캘린더는
+ * 항상 같은 색을 유지합니다. 연결이 끊겼거나(calendarId가 null) 목록에 없으면 null.
+ */
+export function calendarColorIndex(calendarId: string | null | undefined, calendarIds: string[]): number | null {
+  if (!calendarId) return null;
+  const idx = calendarIds.indexOf(calendarId);
+  return idx < 0 ? null : idx % CALENDAR_COLOR_COUNT;
+}
+
 export type CalendarEventItem = {
   category: string;
   model: string;

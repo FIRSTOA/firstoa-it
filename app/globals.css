@@ -6,6 +6,10 @@
   --blue-600:#2563eb; --blue-50:#eff6ff; --blue-100:#dbeafe;
   --amber-600:#d97706; --amber-50:#fffbeb; --amber-100:#fef3c7;
   --red-600:#dc2626; --red-50:#fef2f2; --red-100:#fee2e2;
+  --purple-600:#9333ea; --purple-50:#faf5ff; --purple-100:#f3e8ff;
+  --pink-600:#db2777; --pink-50:#fdf2f8; --pink-100:#fce7f3;
+  --teal-600:#0d9488; --teal-50:#f0fdfa; --teal-100:#ccfbf1;
+  --orange-600:#ea580c; --orange-50:#fff7ed; --orange-100:#ffedd5;
   --slate-50:#f8fafc;
   --radius:14px;
 }
@@ -370,6 +374,34 @@ tbody tr:hover{background:var(--indigo-50);}
 .calendar-event-time{font-weight:700;}
 .calendar-event-more{font-size:10.5px; color:var(--ink-500); padding:0 5px; background:none; border:none; cursor:pointer; text-align:left; font-family:inherit;}
 .calendar-event-more:hover{text-decoration:underline; color:var(--indigo-600);}
+
+/* 연결된 캘린더별 색상 — lib/calendar.ts의 calendarColorIndex가 고르는 0~7 인덱스와 짝 */
+.calendar-cal-0{background:var(--indigo-50); color:var(--indigo-700);}
+.calendar-cal-0:hover{background:var(--indigo-100);}
+.calendar-cal-1{background:var(--green-50); color:var(--green-600);}
+.calendar-cal-1:hover{background:var(--green-100);}
+.calendar-cal-2{background:var(--amber-50); color:var(--amber-600);}
+.calendar-cal-2:hover{background:var(--amber-100);}
+.calendar-cal-3{background:var(--blue-50); color:var(--blue-600);}
+.calendar-cal-3:hover{background:var(--blue-100);}
+.calendar-cal-4{background:var(--purple-50); color:var(--purple-600);}
+.calendar-cal-4:hover{background:var(--purple-100);}
+.calendar-cal-5{background:var(--pink-50); color:var(--pink-600);}
+.calendar-cal-5:hover{background:var(--pink-100);}
+.calendar-cal-6{background:var(--teal-50); color:var(--teal-600);}
+.calendar-cal-6:hover{background:var(--teal-100);}
+.calendar-cal-7{background:var(--orange-50); color:var(--orange-600);}
+.calendar-cal-7:hover{background:var(--orange-100);}
+
+.calendar-color-dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; flex-shrink:0;}
+.calendar-dot-0{background:var(--indigo-600);}
+.calendar-dot-1{background:var(--green-600);}
+.calendar-dot-2{background:var(--amber-600);}
+.calendar-dot-3{background:var(--blue-600);}
+.calendar-dot-4{background:var(--purple-600);}
+.calendar-dot-5{background:var(--pink-600);}
+.calendar-dot-6{background:var(--teal-600);}
+.calendar-dot-7{background:var(--orange-600);}
 @media (max-width: 640px){
   .calendar-grid{grid-auto-rows:minmax(60px, auto);}
   .calendar-event-chip{font-size:10px;}

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from 'react';
 import { createEvent, deleteEvent, listConnectedCalendars, listEventsInRange, updateEvent } from '@/app/calendar/actions';
 import {
   CALENDAR_EVENT_KINDS,
+  calendarColorIndex,
   groupEventsByDate,
   isITEvent,
   monthGridRange,
@@ -133,6 +134,17 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
     () => new Map(connectedCalendars.map((c) => [c.id, c.name])),
     [connectedCalendars],
   );
+  // 연결 순서(created_at)로 색 인덱스를 고정 — 같은 캘린더는 항상 같은 색
+  const calendarIds = useMemo(() => connectedCalendars.map((c) => c.id), [connectedCalendars]);
+  function calendarChipClass(ev: CalendarEvent): string {
+    const idx = calendarColorIndex(ev.calendarId, calendarIds);
+    return idx === null ? '' : ` calendar-cal-${idx}`;
+  }
+  function calendarDot(calendarId: string | null) {
+    const idx = calendarColorIndex(calendarId, calendarIds);
+    if (idx === null) return null;
+    return <span className={`calendar-color-dot calendar-dot-${idx}`} />;
+  }
   const selectedDayEvents = useMemo(() => eventsByDate.get(selectedDate) ?? [], [eventsByDate, selectedDate]);
   const selectedDateLabel = useMemo(() => {
     const [y, m, d] = selectedDate.split('-').map(Number);
@@ -296,7 +308,9 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
               type="button"
               className={`chip${calendarFilter === c.id ? ' active' : ''}`}
               onClick={() => setCalendarFilter(calendarFilter === c.id ? null : c.id)}
+              style={{ display: 'inline-flex', alignItems: 'center' }}
             >
+              {calendarFilter !== c.id && calendarDot(c.id)}
               {c.name}
             </button>
           ))}
@@ -374,7 +388,16 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                         {ev.status}
                       </span>
                     </td>
-                    <td style={{ fontSize: '12px' }}>{ev.calendarId ? calendarNameById.get(ev.calendarId) ?? '-' : '-'}</td>
+                    <td style={{ fontSize: '12px' }}>
+                      {ev.calendarId ? (
+                        <>
+                          {calendarDot(ev.calendarId)}
+                          {calendarNameById.get(ev.calendarId) ?? '-'}
+                        </>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
                     <td>{ev.author || '-'}</td>
                   </tr>
                 ))}
@@ -417,7 +440,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
                     <button
                       key={ev.id}
                       type="button"
-                      className={`calendar-event-chip${ev.status === '완료' ? ' done' : ''}`}
+                      className={`calendar-event-chip${ev.status === '완료' ? ' done' : ''}${calendarChipClass(ev)}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         openEdit(ev);
@@ -471,6 +494,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
           </div>
           <DayEventList
             events={selectedDayEvents}
+            calendarIds={calendarIds}
             onToggleStatus={handleToggleStatus}
             onEdit={openEdit}
             emptyMessage="이 날 일정이 없어요 — [이 날에 추가]를 눌러주세요."
@@ -482,6 +506,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
         open={dayPopupOpen}
         dateLabel={selectedDateLabel}
         events={selectedDayEvents}
+        calendarIds={calendarIds}
         onClose={() => setDayPopupOpen(false)}
         onToggleStatus={handleToggleStatus}
         onEdit={(ev) => {

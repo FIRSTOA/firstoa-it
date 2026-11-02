@@ -7,6 +7,7 @@ type Props = {
   open: boolean;
   dateLabel: string;
   events: CalendarEvent[];
+  calendarIds: string[];
   onClose: () => void;
   onToggleStatus: (ev: CalendarEvent) => void;
   onEdit: (ev: CalendarEvent) => void;
@@ -14,7 +15,7 @@ type Props = {
 };
 
 /** 날짜 칸을 눌렀을 때 뜨는 팝업 — 그 날 일정 전체를 한눈에 보여줍니다. */
-export default function DayEventsModal({ open, dateLabel, events, onClose, onToggleStatus, onEdit, onAddNew }: Props) {
+export default function DayEventsModal({ open, dateLabel, events, calendarIds, onClose, onToggleStatus, onEdit, onAddNew }: Props) {
   if (!open) return null;
 
   return (
@@ -30,7 +31,13 @@ export default function DayEventsModal({ open, dateLabel, events, onClose, onTog
           </button>
         </div>
         <div style={{ marginTop: '14px', maxHeight: '420px', overflowY: 'auto' }}>
-          <DayEventList events={events} onToggleStatus={onToggleStatus} onEdit={onEdit} emptyMessage="이 날 일정이 없어요." />
+          <DayEventList
+            events={events}
+            calendarIds={calendarIds}
+            onToggleStatus={onToggleStatus}
+            onEdit={onEdit}
+            emptyMessage="이 날 일정이 없어요."
+          />
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-primary" onClick={onAddNew}>
