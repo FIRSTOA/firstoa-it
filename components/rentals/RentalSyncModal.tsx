@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { applyRentalSheetSync, compareRentalSheet, type ApplyResult, type CompareResult } from '@/app/rentals/actions';
+import { applyWorksSync, compareWorksSync, type ApplyResult, type CompareResult } from '@/app/rentals/actions';
 
 type Props = {
   open: boolean;
@@ -23,7 +23,7 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
 
   async function runCompare() {
     setState({ status: 'comparing' });
-    const result = await compareRentalSheet();
+    const result = await compareWorksSync();
     if (!result.ok) {
       setState({ status: 'error', message: result.error });
       return;
@@ -38,7 +38,7 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
 
   async function handleApply() {
     setState({ status: 'applying' });
-    const result = await applyRentalSheetSync();
+    const result = await applyWorksSync();
     if (!result.ok) {
       setState({ status: 'error', message: result.error });
       return;
@@ -52,11 +52,11 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: '440px' }}>
-        <h2>🔄 구글시트 대조</h2>
+        <h2>🔄 firstoa-works 대조</h2>
         {sheetUrl && (
           <div className="sub">
             <a href={sheetUrl} target="_blank" rel="noreferrer">
-              시트 열기 ↗
+              firstoa-works 열기 ↗
             </a>
           </div>
         )}
@@ -64,21 +64,27 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
         <div style={{ margin: '18px 0', minHeight: '90px' }}>
           {(state.status === 'comparing' || state.status === 'applying') && (
             <div style={{ color: 'var(--ink-500)', fontSize: '13px' }}>
-              {state.status === 'comparing' ? '구글시트와 대조하는 중…' : '반영하는 중…(행이 많아 시간이 좀 걸려요)'}
+              {state.status === 'comparing' ? 'firstoa-works와 대조하는 중…' : '반영하는 중…(행이 많아 시간이 좀 걸려요)'}
             </div>
           )}
           {state.status === 'compared' && (
             <div style={{ display: 'grid', gap: '6px', fontSize: '13px' }}>
-              <div>시트 전체: <b>{state.result.totalSheetRows.toLocaleString()}건</b></div>
+              <div>임대리스트 전체: <b>{state.result.totalSheetRows.toLocaleString()}건</b></div>
               <div>🆕 신규: <b>{state.result.newCount.toLocaleString()}건</b></div>
               <div>✏️ 변경: <b>{state.result.changedCount.toLocaleString()}건</b></div>
               <div>🗑 삭제됨: <b>{state.result.removedCount.toLocaleString()}건</b></div>
               <div style={{ color: 'var(--ink-400)' }}>변동없음: {state.result.unchangedCount.toLocaleString()}건</div>
+              <div style={{ borderTop: '1px solid var(--line, #e5e5e5)', marginTop: '4px', paddingTop: '8px' }}>
+                청구 명세 — 🆕 신규 <b>{state.result.billingNewCount.toLocaleString()}건</b> · ✏️ 변경{' '}
+                <b>{state.result.billingChangedCount.toLocaleString()}건</b>
+                <span style={{ color: 'var(--ink-400)' }}> · 변동없음 {state.result.billingUnchangedCount.toLocaleString()}건</span>
+              </div>
             </div>
           )}
           {state.status === 'applied' && (
             <div style={{ fontSize: '13px' }}>
-              ✅ 반영 완료 — {state.result.upserted.toLocaleString()}건 갱신, {state.result.deleted.toLocaleString()}건 삭제
+              ✅ 반영 완료 — 임대리스트 {state.result.upserted.toLocaleString()}건 갱신,{' '}
+              {state.result.deleted.toLocaleString()}건 삭제 · 청구 명세 {state.result.billingUpserted.toLocaleString()}건 갱신
             </div>
           )}
           {state.status === 'error' && (

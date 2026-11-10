@@ -1,10 +1,12 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { readRentalSheetRows, type RentalSheetRow } from '@/lib/rentals/sync';
-import { createAdminClient, RENTAL_TABLE } from '@/lib/supabase/server';
+import { readWorksAssetRows, type WorksAssetRow } from '@/lib/rentals/worksSync';
+import { readWorksBillingLines, WORKS_BILLING_SOURCE_ID } from '@/lib/rentals/worksBilling';
+import { billingLineInputToRow } from '@/lib/billing';
+import { createAdminClient, RENTAL_TABLE, BILLING_LINES_TABLE } from '@/lib/supabase/server';
 
-function toDbRow(r: RentalSheetRow) {
+function toDbRow(r: WorksAssetRow) {
   return {
     sheet_row: r.sheetRow,
     row_hash: r.rowHash,
@@ -40,24 +42,37 @@ export type CompareResult =
       changedCount: number;
       removedCount: number;
       unchangedCount: number;
+      billingNewCount: number;
+      billingChangedCount: number;
+      billingUnchangedCount: number;
     }
   | { ok: false; error: string };
 
-/** 시트와 로컬 사본을 비교만 합니다(아무것도 쓰지 않음) — "다시 대조" 버튼에서 반복 호출됨. */
-export async function compareRentalSheet(): Promise<CompareResult> {
-  try {
-    const sheetRows = await readRentalSheetRows();
-    const supabase = createAdminClient();
-    const { data, error } = await supabase.from(RENTAL_TABLE).select('sheet_row, row_hash');
-    if (error) throw error;
+const CHUNK_SIZE = 500;
 
-    const existing = new Map<number, string>((data ?? []).map((r) => [r.sheet_row as number, r.row_hash as string]));
+/** 임대리스트+청구 명세를 firstoa-works와 비교만 합니다(아무것도 쓰지 않음) — "다시 대조" 버튼에서 반복 호출됨. */
+export async function compareWorksSync(): Promise<CompareResult> {
+  try {
+    const { rows: assetRows, assetCodeById } = await readWorksAssetRows();
+    const vendorNameById = new Map<number, string>(assetRows.map((r) => [r.sheetRow, r.vendorName]));
+    const billingLines = await readWorksBillingLines(assetCodeById, vendorNameById);
+
+    const supabase = createAdminClient();
+
+    const { data: rentalExistingData, error: rentalError } = await supabase
+      .from(RENTAL_TABLE)
+      .select('sheet_row, row_hash');
+    if (rentalError) throw rentalError;
+
+    const existing = new Map<number, string>(
+      (rentalExistingData ?? []).map((r) => [r.sheet_row as number, r.row_hash as string]),
+    );
     let newCount = 0;
     let changedCount = 0;
     let unchangedCount = 0;
     const seen = new Set<number>();
 
-    for (const row of sheetRows) {
+    for (const row of assetRows) {
       seen.add(row.sheetRow);
       const prevHash = existing.get(row.sheetRow);
       if (prevHash === undefined) newCount++;
@@ -70,39 +85,70 @@ export async function compareRentalSheet(): Promise<CompareResult> {
       if (!seen.has(sheetRow)) removedCount++;
     }
 
+    const { data: billingExistingData, error: billingError } = await supabase
+      .from(BILLING_LINES_TABLE)
+      .select('source_line_id, amount, status, allocation_status')
+      .eq('source_invoice_id', WORKS_BILLING_SOURCE_ID);
+    if (billingError) throw billingError;
+
+    const billingExisting = new Map(
+      (billingExistingData ?? []).map((r) => [
+        r.source_line_id as string,
+        `${r.amount}|${r.status}|${r.allocation_status}`,
+      ]),
+    );
+    let billingNewCount = 0;
+    let billingChangedCount = 0;
+    let billingUnchangedCount = 0;
+
+    for (const line of billingLines) {
+      const key = `${line.amount}|${line.status}|${line.allocationStatus}`;
+      const prev = billingExisting.get(line.sourceLineId);
+      if (prev === undefined) billingNewCount++;
+      else if (prev !== key) billingChangedCount++;
+      else billingUnchangedCount++;
+    }
+
     return {
       ok: true,
-      totalSheetRows: sheetRows.length,
+      totalSheetRows: assetRows.length,
       newCount,
       changedCount,
       removedCount,
       unchangedCount,
+      billingNewCount,
+      billingChangedCount,
+      billingUnchangedCount,
     };
   } catch (err) {
-    console.error('[rentals] compareRentalSheet 실패:', err);
-    return { ok: false, error: err instanceof Error ? err.message : '구글시트 대조에 실패했어요.' };
+    console.error('[rentals] compareWorksSync 실패:', err);
+    return { ok: false, error: err instanceof Error ? err.message : 'firstoa-works 대조에 실패했어요.' };
   }
 }
 
-export type ApplyResult = { ok: true; upserted: number; deleted: number } | { ok: false; error: string };
+export type ApplyResult =
+  | { ok: true; upserted: number; deleted: number; billingUpserted: number }
+  | { ok: false; error: string };
 
-const CHUNK_SIZE = 500;
-
-/** 시트를 다시 읽어 로컬 사본에 실제로 반영합니다(upsert + 사라진 행 삭제). */
-export async function applyRentalSheetSync(): Promise<ApplyResult> {
+/** firstoa-works를 다시 읽어 임대리스트+청구 명세를 실제로 반영합니다(upsert + 사라진 임대 건 삭제). */
+export async function applyWorksSync(): Promise<ApplyResult> {
   try {
-    const sheetRows = await readRentalSheetRows();
+    const { rows: assetRows, assetCodeById } = await readWorksAssetRows();
+    const vendorNameById = new Map<number, string>(assetRows.map((r) => [r.sheetRow, r.vendorName]));
+    const billingLines = await readWorksBillingLines(assetCodeById, vendorNameById);
+
     const supabase = createAdminClient();
 
+    // 1) 임대리스트 먼저 반영 — 청구 명세가 rental_sheet_row로 참조하므로 순서가 중요함.
     let upserted = 0;
-    for (let i = 0; i < sheetRows.length; i += CHUNK_SIZE) {
-      const chunk = sheetRows.slice(i, i + CHUNK_SIZE).map(toDbRow);
+    for (let i = 0; i < assetRows.length; i += CHUNK_SIZE) {
+      const chunk = assetRows.slice(i, i + CHUNK_SIZE).map(toDbRow);
       const { error } = await supabase.from(RENTAL_TABLE).upsert(chunk, { onConflict: 'sheet_row' });
       if (error) throw error;
       upserted += chunk.length;
     }
 
-    const currentRows = new Set(sheetRows.map((r) => r.sheetRow));
+    const currentRows = new Set(assetRows.map((r) => r.sheetRow));
     const { data: existingRows, error: fetchError } = await supabase.from(RENTAL_TABLE).select('sheet_row');
     if (fetchError) throw fetchError;
     const staleRows = (existingRows ?? [])
@@ -117,11 +163,24 @@ export async function applyRentalSheetSync(): Promise<ApplyResult> {
       deleted += chunk.length;
     }
 
+    // 2) 청구 명세 반영 — (source_invoice_id, source_line_id) upsert라 재동기화해도 중복 안 됨.
+    let billingUpserted = 0;
+    for (let i = 0; i < billingLines.length; i += CHUNK_SIZE) {
+      const chunk = billingLines.slice(i, i + CHUNK_SIZE).map((line) => billingLineInputToRow(line));
+      const { error } = await supabase
+        .from(BILLING_LINES_TABLE)
+        .upsert(chunk, { onConflict: 'source_invoice_id,source_line_id' });
+      if (error) throw error;
+      billingUpserted += chunk.length;
+    }
+
     revalidatePath('/rentals');
-    return { ok: true, upserted, deleted };
+    revalidatePath('/billing');
+    revalidatePath('/');
+    return { ok: true, upserted, deleted, billingUpserted };
   } catch (err) {
-    console.error('[rentals] applyRentalSheetSync 실패:', err);
-    return { ok: false, error: err instanceof Error ? err.message : '구글시트 반영에 실패했어요.' };
+    console.error('[rentals] applyWorksSync 실패:', err);
+    return { ok: false, error: err instanceof Error ? err.message : 'firstoa-works 반영에 실패했어요.' };
   }
 }
 

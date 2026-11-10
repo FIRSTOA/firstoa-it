@@ -18,7 +18,11 @@ export default async function Page() {
   const lines = await listBillingLines({ searchTerm: '', needsReviewOnly: false });
 
   return (
-    <Shell activeMenu="청구리스트" title="🧾 청구리스트" note="장비별 청구 명세 — 자산 상세의 '임대·청구'와 같은 데이터예요">
+    <Shell
+      activeMenu="청구리스트"
+      title="🧾 청구리스트"
+      note="firstoa-works에서 들어온 청구는 임대리스트 화면의 'firstoa-works 대조'로 최신화돼요 — 여기서는 직접 등록/엑셀 업로드도 가능해요"
+    >
       <BillingPage initialLines={lines} />
     </Shell>
   );
