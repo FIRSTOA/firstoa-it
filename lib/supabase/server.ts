@@ -47,3 +47,5 @@ export const LOCATION_FLOOR_MAP_TABLE = 'it_location_floor_map';
 export const QUANTITY_CHECKS_TABLE = 'it_quantity_checks';
 export const STOCK_CHECK_OVERRIDES_TABLE = 'it_stock_check_overrides';
 export const SAFETY_STOCK_TABLE = 'it_safety_stock';
+export const ASSET_PURCHASE_INFO_TABLE = 'it_asset_purchase_info';
+export const BILLING_LINES_TABLE = 'it_billing_lines';

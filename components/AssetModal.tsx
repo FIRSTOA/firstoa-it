@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { lookupRentalAsset } from '@/app/actions';
+import { upsertAssetPurchaseInfo } from '@/app/billing/actions';
 import type { DataSource } from '@/lib/dataSource';
 import { parseLocationStatus_ } from '@/lib/inventory/status';
 import { BRANDS, CATEGORIES, SPECS, STATUSES, type Asset } from '@/lib/types';
@@ -101,9 +102,19 @@ export default function AssetModal({ open, editing, pending, dataSource, onClose
   }
 
   function handleSave() {
+    const assetId = form.assetId.trim();
+    // 구매단가/구입처는 구글시트(buildRowArray)가 아니라 별도 Supabase 오버레이에
+    // 저장됩니다 — 공유 스프레드시트에 금액을 쓰는 걸 피하고, 그 컬럼 자체가 없는
+    // 품목(예: 노트북)도 동일하게 다루기 위함입니다. 본 저장(onSave)을 막지 않는
+    // best-effort 호출입니다(실패해도 자산 저장 자체는 그대로 진행).
+    const vendor = (form.vendor ?? '').trim();
+    const purchasePrice = (form.purchasePrice ?? '').trim();
+    if (assetId && (vendor || purchasePrice)) {
+      void upsertAssetPurchaseInfo(assetId, vendor, purchasePrice);
+    }
     onSave({
       ...form,
-      assetId: form.assetId.trim(),
+      assetId,
       model: form.model.trim(),
       ram: form.ram.trim(),
       storage: form.storage.trim(),
@@ -255,6 +266,25 @@ export default function AssetModal({ open, editing, pending, dataSource, onClose
               onChange={(e) => set('serialNo', e.target.value)}
               placeholder="예: 5CG0444MXO"
             />
+          </div>
+          <div className="form-field">
+            <label>구입처</label>
+            <input
+              value={form.vendor}
+              onChange={(e) => set('vendor', e.target.value)}
+              placeholder="예: 다나와"
+            />
+          </div>
+          <div className="form-field">
+            <label>구매단가</label>
+            <input
+              value={form.purchasePrice}
+              onChange={(e) => set('purchasePrice', e.target.value)}
+              placeholder="예: 1200000"
+            />
+            <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
+              VAT 별도(공급가) 기준으로 입력해주세요 — 원가회수율 계산 기준과 맞춰야 해요.
+            </div>
           </div>
           <div className="form-field">
             <label>{dataSource === 'sheets' ? '이력(비고)' : '이력(건)'}</label>

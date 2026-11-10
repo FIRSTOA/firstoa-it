@@ -44,6 +44,7 @@ type Props = {
   dataSource: DataSource;
   spreadsheetUrl: string | null;
   stocktakeConfirmations: Record<string, StocktakeConfirmation>;
+  initialAssetId: string | null;
 };
 
 /**
@@ -51,7 +52,7 @@ type Props = {
  * 쓰기 작업은 Server Action → revalidatePath('/') 로 이 prop 이 갱신되므로
  * 목록을 별도 state 로 복제하지 않습니다.
  */
-export default function InventoryPage({ items, dataSource, spreadsheetUrl, stocktakeConfirmations }: Props) {
+export default function InventoryPage({ items, dataSource, spreadsheetUrl, stocktakeConfirmations, initialAssetId }: Props) {
   const { filters, searchTerm, debouncedSearchTerm, setSearchTerm, setFilter, setCategory, resetAll } =
     useFilterState();
   const [modalOpen, setModalOpen] = useState(false);
@@ -181,6 +182,16 @@ export default function InventoryPage({ items, dataSource, spreadsheetUrl, stock
     setDetailAsset(fresh ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
+
+  // /rentals·종료거래처의 자산코드 클릭(`/?asset=X8420`)으로 들어왔을 때 그 자산 상세를
+  // 자동으로 엽니다. 최초 1회만 — 이후 모달을 직접 닫으면 다시 열리지 않습니다.
+  useEffect(() => {
+    if (!initialAssetId) return;
+    const found = items.find((it) => it.assetId === initialAssetId);
+    if (found) setDetailAsset(found);
+    else showToast(`자산 ${initialAssetId}을(를) 현재 IT재고 목록에서 찾을 수 없어요.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handlePrint(assets: Asset[]) {
     setPrintAssets(assets);

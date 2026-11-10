@@ -199,7 +199,19 @@ export default function RentalListPage({ sheetUrl }: { sheetUrl: string | null }
                 <td style={{ fontSize: '12.5px' }}>{r.manager || '-'}</td>
                 <td style={{ fontSize: '12.5px' }}>{r.phone || '-'}</td>
                 <td>
-                  <span className="asset-id">{r.assetCode || '-'}</span>
+                  {r.assetCode ? (
+                    <a
+                      className="asset-id"
+                      href={`/?asset=${encodeURIComponent(r.assetCode)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="자산 상세(임대·청구)로 이동"
+                    >
+                      {r.assetCode}
+                    </a>
+                  ) : (
+                    '-'
+                  )}
                 </td>
                 <td>{r.modelName || '-'}</td>
                 <td style={{ fontSize: '12.5px' }}>{r.serialNumber || '-'}</td>
