@@ -242,7 +242,9 @@ export default function AssetDetailModal({
           const purchasePrice = parsePurchasePrice(item.purchasePrice);
           const recovery = computeRecoveryRate(purchasePrice, billingLines);
           const activeRentals = rentalHistory.filter((r) => r.status !== '임대종료');
-          const mismatch = item.status === '임대중' && activeRentals.length === 0;
+          // billingLoaded 전엔 rentalHistory가 항상 빈 배열이라 "불일치"로 오판할 수 있어서,
+          // 로딩이 끝난 뒤에만 판단합니다.
+          const mismatch = billingLoaded && item.status === '임대중' && activeRentals.length === 0;
 
           return (
             <div>
