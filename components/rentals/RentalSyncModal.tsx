@@ -76,7 +76,8 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
               <div style={{ color: 'var(--ink-400)' }}>변동없음: {state.result.unchangedCount.toLocaleString()}건</div>
               <div style={{ borderTop: '1px solid var(--line, #e5e5e5)', marginTop: '4px', paddingTop: '8px' }}>
                 청구 명세 — 🆕 신규 <b>{state.result.billingNewCount.toLocaleString()}건</b> · ✏️ 변경{' '}
-                <b>{state.result.billingChangedCount.toLocaleString()}건</b>
+                <b>{state.result.billingChangedCount.toLocaleString()}건</b> · 🗑 삭제{' '}
+                <b>{state.result.billingRemovedCount.toLocaleString()}건</b>
                 <span style={{ color: 'var(--ink-400)' }}> · 변동없음 {state.result.billingUnchangedCount.toLocaleString()}건</span>
               </div>
             </div>
@@ -84,7 +85,8 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
           {state.status === 'applied' && (
             <div style={{ fontSize: '13px' }}>
               ✅ 반영 완료 — 임대리스트 {state.result.upserted.toLocaleString()}건 갱신,{' '}
-              {state.result.deleted.toLocaleString()}건 삭제 · 청구 명세 {state.result.billingUpserted.toLocaleString()}건 갱신
+              {state.result.deleted.toLocaleString()}건 삭제 · 청구 명세 신규 {state.result.billingInserted.toLocaleString()}건,
+              변경 {state.result.billingUpdated.toLocaleString()}건, 삭제 {state.result.billingDeleted.toLocaleString()}건
             </div>
           )}
           {state.status === 'error' && (
