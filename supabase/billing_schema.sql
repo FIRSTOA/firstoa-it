@@ -52,6 +52,8 @@ create unique index if not exists it_billing_lines_source_idx on public.it_billi
   where source_invoice_id <> '' and source_line_id <> '';
 create index if not exists it_billing_lines_asset_id_idx on public.it_billing_lines (asset_id);
 create index if not exists it_billing_lines_allocation_idx on public.it_billing_lines (allocation_status);
+-- 임대 건(it_rental_list) 삭제 시 FK(on delete set null) 확인이 청구 명세 전체를 훑지 않도록.
+create index if not exists it_billing_lines_rental_sheet_row_idx on public.it_billing_lines (rental_sheet_row);
 
 drop trigger if exists it_billing_lines_set_updated_at on public.it_billing_lines;
 create trigger it_billing_lines_set_updated_at

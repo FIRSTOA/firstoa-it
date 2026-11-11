@@ -1,23 +1,18 @@
 'use client';
 
-import { useMemo, useRef, useState, useTransition, type ChangeEvent } from 'react';
-import * as XLSX from 'xlsx';
+import { useMemo, useState, useTransition } from 'react';
 import {
   createBillingLine,
   deleteBillingLine,
-  importBillingLines,
   listBillingLines,
   resolveBillingAllocation,
   updateBillingLine,
-  type ImportBillingRow,
 } from '@/app/billing/actions';
 import { type BillingLine, type BillingLineInput } from '@/lib/billing';
 import { formatWon } from '@/lib/currency';
 import BillingLineModal from './BillingLineModal';
 
 type Props = { initialLines: BillingLine[] };
-
-const TEMPLATE_HEADERS = ['청구번호', '행식별자', '자산번호', '거래처', '청구일', '대상기간시작', '대상기간끝', '금액', '상태'];
 
 export default function BillingPage({ initialLines }: Props) {
   const [lines, setLines] = useState(initialLines);
@@ -29,7 +24,6 @@ export default function BillingPage({ initialLines }: Props) {
   const [resolveAssetId, setResolveAssetId] = useState('');
   const [toast, setToast] = useState({ msg: '', show: false });
   const [pending, startTransition] = useTransition();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function showToast(msg: string) {
     setToast({ msg, show: true });
@@ -91,71 +85,6 @@ export default function BillingPage({ initialLines }: Props) {
     });
   }
 
-  function handleDownloadTemplate() {
-    const sheet = XLSX.utils.json_to_sheet(
-      [
-        {
-          청구번호: 'INV-2026-001',
-          행식별자: '1',
-          자산번호: 'X8420',
-          거래처: '주식회사 유디임팩트',
-          청구일: '2026-03-10',
-          대상기간시작: '2026-03-01',
-          대상기간끝: '2026-03-31',
-          금액: 300000,
-          상태: '확정',
-        },
-      ],
-      { header: TEMPLATE_HEADERS },
-    );
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, '청구명세_템플릿');
-    XLSX.writeFile(workbook, '청구명세_업로드템플릿.xlsx');
-  }
-
-  async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: 'array' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
-
-    const rows: ImportBillingRow[] = rawRows
-      .map((r) => {
-        const amount = Number(String(r['금액'] ?? '').toString().replace(/[^0-9.-]/g, ''));
-        return {
-          sourceInvoiceId: String(r['청구번호'] ?? '').trim(),
-          sourceLineId: String(r['행식별자'] ?? '').trim(),
-          assetId: String(r['자산번호'] ?? '').trim(),
-          vendorName: String(r['거래처'] ?? '').trim(),
-          billingDate: String(r['청구일'] ?? '').trim(),
-          periodStart: String(r['대상기간시작'] ?? '').trim(),
-          periodEnd: String(r['대상기간끝'] ?? '').trim(),
-          amount: Number.isFinite(amount) ? amount : 0,
-          status: String(r['상태'] ?? '확정').trim() || '확정',
-        };
-      })
-      .filter((r) => r.billingDate && r.amount !== 0);
-
-    if (rows.length === 0) {
-      showToast('가져올 수 있는 행이 없어요(청구일/금액 확인).');
-      return;
-    }
-
-    startTransition(async () => {
-      const result = await importBillingLines(rows);
-      if (!result.ok) {
-        showToast(result.error);
-        return;
-      }
-      showToast(`${result.upserted}건 반영했어요. (배분 확인 필요 ${result.needsReview}건)`);
-      await refetch();
-    });
-  }
-
   return (
     <div className="app">
       <div className="topbar" style={{ marginBottom: '14px' }}>
@@ -163,13 +92,6 @@ export default function BillingPage({ initialLines }: Props) {
           총 {lines.length}건{needsReviewCount > 0 && ` · 배분 확인 필요 ${needsReviewCount}건`}
         </div>
         <div className="actions">
-          <button type="button" className="btn btn-ghost" onClick={handleDownloadTemplate} disabled={pending}>
-            📄 템플릿 다운로드
-          </button>
-          <button type="button" className="btn btn-ghost" disabled={pending} onClick={() => fileInputRef.current?.click()}>
-            ⬆ 엑셀 업로드
-          </button>
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFileChange} />
           <button
             type="button"
             className="btn btn-primary"
