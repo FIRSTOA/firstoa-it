@@ -126,7 +126,7 @@ export default function RentalListPage({ sheetUrl }: { sheetUrl: string | null }
         </div>
         <div className="actions">
           <button type="button" className="btn btn-ghost" onClick={() => setSyncOpen(true)}>
-            🔄 시트 대조
+            🔄 firstoa-works 대조
           </button>
         </div>
       </div>
@@ -237,7 +237,7 @@ export default function RentalListPage({ sheetUrl }: { sheetUrl: string | null }
             <div>📋</div>
             <div>
               {totalCount === 0
-                ? '아직 동기화된 데이터가 없어요. "시트 대조"로 먼저 반영해주세요.'
+                ? '아직 동기화된 데이터가 없어요. "firstoa-works 대조"로 먼저 반영해주세요.'
                 : '조건에 맞는 거래처가 없어요.'}
             </div>
           </div>
