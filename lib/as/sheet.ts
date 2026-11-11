@@ -1,4 +1,5 @@
 import 'server-only';
+import { unstable_cache } from 'next/cache';
 import { getSheetsClient, isGoogleServiceAccountConfigured } from '@/lib/googleAuth';
 
 /**
@@ -71,14 +72,40 @@ export function isAsSheetConfigured(): boolean {
   return isGoogleServiceAccountConfigured();
 }
 
+function isQuotaError(err: unknown): boolean {
+  const e = err as { code?: number; status?: number; message?: string };
+  return e?.code === 429 || e?.status === 429 || /quota/i.test(e?.message ?? '');
+}
+
+async function fetchAsRecordsFromSheet(): Promise<AsRecord[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await getSheetsClient().spreadsheets.values.get({
+        spreadsheetId: AS_SHEET_ID,
+        range: `'${AS_SHEET_TAB}'!A2:AZ`,
+      });
+      const rows = (res.data.values ?? []).map((r) => r.map((v) => String(v ?? '')));
+      return rows.filter((r) => r.some((v) => v.trim())).map(parseRow);
+    } catch (err) {
+      // 구글시트 읽기 한도(분당)에 걸리면 잠깐 쉬었다가 다시 시도합니다.
+      if (attempt < 2 && isQuotaError(err)) {
+        await new Promise((r) => setTimeout(r, 4000 * (attempt + 1)));
+        continue;
+      }
+      if (isQuotaError(err)) throw new Error('구글시트 읽기 한도에 걸렸어요. 1분 뒤 다시 조회해주세요.');
+      throw err;
+    }
+  }
+}
+
+// 서버 인스턴스끼리 공유되는 캐시(5분) — 구글시트 분당 읽기 한도를 아끼기 위해.
+const cachedAsRecords = unstable_cache(fetchAsRecordsFromSheet, ['it-as-sheet-records'], {
+  revalidate: CACHE_TTL_MS / 1000,
+});
+
 async function readAllAsRecords(): Promise<AsRecord[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.records;
-  const res = await getSheetsClient().spreadsheets.values.get({
-    spreadsheetId: AS_SHEET_ID,
-    range: `'${AS_SHEET_TAB}'!A2:AZ`,
-  });
-  const rows = (res.data.values ?? []).map((r) => r.map((v) => String(v ?? '')));
-  const records = rows.filter((r) => r.some((v) => v.trim())).map(parseRow);
+  const records = await cachedAsRecords();
   cache = { at: Date.now(), records };
   return records;
 }
