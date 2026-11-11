@@ -31,6 +31,10 @@ function toDbRow(r: WorksAssetRow) {
     option2: r.option2,
     option3: r.option3,
     option4: r.option4,
+    base_amount: r.baseAmount,
+    first_contract_date: r.firstContractDate,
+    entry_date: r.entryDate,
+    removal_date: r.removalDate,
   };
 }
 

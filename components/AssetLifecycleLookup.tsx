@@ -48,7 +48,7 @@ export default function AssetLifecycleLookup({ initialQuery = '', asSheetUrl }: 
 
   const recovery =
     data && data.purchasePrice && data.purchasePrice > 0
-      ? `원가회수율 ${((data.billedTotal / data.purchasePrice) * 100).toFixed(1)}%`
+      ? `원가회수율 ${((data.contractTotal / data.purchasePrice) * 100).toFixed(1)}%`
       : undefined;
 
   return (
@@ -96,7 +96,7 @@ export default function AssetLifecycleLookup({ initialQuery = '', asSheetUrl }: 
             <Card label="입고일" value={data.receivedDate || '기록 없음'} sub={data.receivedSource || '앱 입고 대장에 기록이 없어요'} />
             <Card label="매입처" value={data.purchaseVendor || '미입력'} />
             <Card label="매입금액" value={data.purchasePrice !== null ? formatWon(data.purchasePrice) : '미입력'} />
-            <Card label="받은 렌탈요금 합계" value={formatWon(data.billedTotal)} sub={recovery} />
+            <Card label="받은 렌탈요금 합계(계약 기준)" value={formatWon(data.contractTotal)} sub={recovery} />
             <Card label="AS 접수" value={`${data.asRecords.length}건`} />
           </div>
 
@@ -109,10 +109,12 @@ export default function AssetLifecycleLookup({ initialQuery = '', asSheetUrl }: 
                 <tr>
                   <th>거래처</th>
                   <th>현장</th>
-                  <th>계약 기간</th>
+                  <th>임대 기간</th>
                   <th>상태</th>
-                  <th>청구 기간</th>
-                  <th style={{ textAlign: 'right' }}>받은 렌탈요금</th>
+                  <th style={{ textAlign: 'right' }}>개월</th>
+                  <th style={{ textAlign: 'right' }}>기본금액</th>
+                  <th style={{ textAlign: 'right' }}>청구금액</th>
+                  <th style={{ textAlign: 'right' }}>firstoa-works 청구</th>
                 </tr>
               </thead>
               <tbody>
@@ -120,21 +122,32 @@ export default function AssetLifecycleLookup({ initialQuery = '', asSheetUrl }: 
                   <tr key={i}>
                     <td>{r.vendorName || '-'}</td>
                     <td>{r.siteName || '-'}</td>
-                    <td>{r.contractDate || r.endDate ? period(r.contractDate, r.endDate) : '-'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{r.contractDate || r.endDate ? period(r.contractDate, r.endDate) : '-'}</td>
                     <td>{r.status || '-'}</td>
-                    <td>{r.billedMonths > 0 ? `${period(r.firstBilled, r.lastBilled)} (${r.billedMonths}개월)` : '-'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{formatWon(r.billedTotal)}</td>
+                    <td style={{ textAlign: 'right' }}>{r.months > 0 ? `${r.months}개월` : '-'}</td>
+                    <td style={{ textAlign: 'right' }}>{r.baseAmount !== null ? formatWon(r.baseAmount) : '-'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700 }}>{r.contractTotal !== null ? formatWon(r.contractTotal) : '-'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--ink-500)' }}>
+                      {r.billedTotal !== 0 ? formatWon(r.billedTotal) : '-'}
+                      {r.billedMonths > 0 && (
+                        <div style={{ fontSize: '11px', color: 'var(--ink-400)' }}>
+                          {period(r.firstBilled, r.lastBilled)} ({r.billedMonths}개월)
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 <tr>
-                  <td colSpan={5} style={{ fontWeight: 700 }}>합계</td>
-                  <td style={{ textAlign: 'right', fontWeight: 800 }}>{formatWon(data.billedTotal)}</td>
+                  <td colSpan={6} style={{ fontWeight: 700 }}>합계</td>
+                  <td style={{ textAlign: 'right', fontWeight: 800 }}>{formatWon(data.contractTotal)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--ink-500)' }}>{formatWon(data.billedTotal)}</td>
                 </tr>
               </tbody>
             </table>
           )}
           <div style={{ fontSize: '11.5px', color: 'var(--ink-400)', marginTop: '4px' }}>
-            firstoa-works 청구 데이터 기준(중지·병합 월 제외). 청구 데이터는 2025-10 이후분만 있어요.
+            청구금액 = 개월수 × 기본금액. 기간은 첫계약일 ~ 입력일(임대종료 건, 진행 중이면 오늘까지), 개월수는 일수÷30.4 반올림(최소 1개월).
+            firstoa-works 청구는 실제 청구 데이터(2025-10 이후분만 있음, 중지·병합 월 제외).
           </div>
 
           <div className="detail-section-title">

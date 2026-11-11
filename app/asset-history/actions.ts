@@ -1,7 +1,7 @@
 'use server';
 
 import { findAsRecords, isAsSheetConfigured, type AsRecord } from '@/lib/as/sheet';
-import { rowToBillingLine, sumConfirmedBilling, type BillingLineRow } from '@/lib/billing';
+import { computeRentalTerm, groupRentalRows, rowToBillingLine, sumConfirmedBilling, type BillingLineRow } from '@/lib/billing';
 import { parseKoreanWon } from '@/lib/currency';
 import { getAssetFromSheets, isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import { rowToReceiving, type ReceivingRow } from '@/lib/receiving';
@@ -18,9 +18,12 @@ import type { Asset } from '@/lib/types';
 export type LifecycleRental = {
   vendorName: string;
   siteName: string;
-  contractDate: string;
-  endDate: string;
+  contractDate: string; // 시작(첫계약일 우선)
+  endDate: string; // 끝(임대종료 건은 입력일), 진행중이면 ''
   status: string;
+  months: number; // 계약 기준 개월수
+  baseAmount: number | null; // 기본금액(월)
+  contractTotal: number | null; // 개월수 × 기본금액
   firstBilled: string; // 첫 청구월 YYYY-MM
   lastBilled: string; // 마지막 청구월 YYYY-MM
   billedMonths: number;
@@ -38,6 +41,7 @@ export type AssetLifecycle = {
   purchasePrice: number | null;
   rentals: LifecycleRental[];
   billedTotal: number;
+  contractTotal: number;
   asRecords: AsRecord[];
   asError: string;
 };
@@ -76,14 +80,14 @@ export async function getAssetLifecycle(rawQuery: string): Promise<LifecycleResu
   const rentalRes = orFilter
     ? await supabase
         .from(RENTAL_TABLE)
-        .select('sheet_row, asset_code, serial_number, vendor_name, site_name, contract_date, end_date, status')
+        .select('*')
         .or(orFilter)
         .order('contract_date', { ascending: true })
     : { data: [], error: null };
   if (rentalRes.error) return { ok: false, error: `임대리스트 조회 실패: ${rentalRes.error.message}` };
-  const rentalRows = rentalRes.data ?? [];
+  const rentalRows = (rentalRes.data ?? []) as Record<string, unknown>[];
 
-  const assetCode = (asset?.assetId || rentalRows.find((r) => r.asset_code)?.asset_code || query).toUpperCase();
+  const assetCode = (asset?.assetId || String(rentalRows.find((r) => r.asset_code)?.asset_code ?? '') || query).toUpperCase();
   const serials = [
     ...new Set(
       [asset?.serialNo ?? '', ...rentalRows.map((r) => String(r.serial_number ?? ''))]
@@ -101,43 +105,31 @@ export async function getAssetLifecycle(rawQuery: string): Promise<LifecycleResu
   const billingLines = ((billingRes.data ?? []) as BillingLineRow[]).map(rowToBillingLine);
   const receivings = ((receivingRes.data ?? []) as ReceivingRow[]).map(rowToReceiving);
 
-  // 임대 건 — firstoa-works에 같은 임대가 중복 행으로 있는 경우가 있어 거래처+현장+계약일로 묶습니다.
-  const rentalMap = new Map<string, LifecycleRental & { rows: Set<number> }>();
-  for (const r of rentalRows) {
-    const key = `${r.vendor_name}|${r.site_name}|${r.contract_date}`;
-    const entry =
-      rentalMap.get(key) ??
-      {
-        vendorName: String(r.vendor_name ?? ''),
-        siteName: String(r.site_name ?? ''),
-        contractDate: String(r.contract_date ?? ''),
-        endDate: String(r.end_date ?? ''),
-        status: String(r.status ?? ''),
-        firstBilled: '',
-        lastBilled: '',
-        billedMonths: 0,
-        billedTotal: 0,
-        rows: new Set<number>(),
-      };
-    entry.rows.add(r.sheet_row as number);
-    if (!entry.endDate && r.end_date) entry.endDate = String(r.end_date);
-    rentalMap.set(key, entry);
-  }
-  const rentals = [...rentalMap.values()];
-  for (const rental of rentals) {
-    const lines = billingLines.filter((l) => l.rentalSheetRow !== null && rental.rows.has(l.rentalSheetRow));
+  // 임대 건 — firstoa-works 중복 행은 거래처+현장+계약일로 묶고, 계약 기준 기간·금액을 계산합니다.
+  const grouped = groupRentalRows(rentalRows);
+  const rentalsOut: LifecycleRental[] = grouped.map((g) => {
+    const term = computeRentalTerm(g);
+    const lines = billingLines.filter((l) => l.rentalSheetRow !== null && g.sheetRows.includes(l.rentalSheetRow));
     const billed = lines.filter((l) => l.status !== '취소' && l.allocationStatus === 'confirmed' && l.amount !== 0);
     const months = [...new Set(billed.map((l) => l.billingDate.slice(0, 7)).filter(Boolean))].sort();
-    rental.billedTotal = sumConfirmedBilling(lines);
-    rental.billedMonths = months.length;
-    rental.firstBilled = months[0] ?? '';
-    rental.lastBilled = months[months.length - 1] ?? '';
-  }
-  // 특정 임대 건에 안 묶인 청구(수기 입력 등)
-  const allRows = new Set(rentals.flatMap((r) => [...r.rows]));
+    return {
+      vendorName: g.vendorName,
+      siteName: g.siteName,
+      contractDate: term.start,
+      endDate: term.end,
+      status: g.status,
+      months: term.months,
+      baseAmount: term.baseAmount,
+      contractTotal: term.total,
+      firstBilled: months[0] ?? '',
+      lastBilled: months[months.length - 1] ?? '',
+      billedMonths: months.length,
+      billedTotal: sumConfirmedBilling(lines),
+    };
+  });
+  const allRows = new Set(grouped.flatMap((g) => g.sheetRows));
   const unassigned = billingLines.filter((l) => l.rentalSheetRow === null || !allRows.has(l.rentalSheetRow));
   const unassignedTotal = sumConfirmedBilling(unassigned);
-  const rentalsOut: LifecycleRental[] = rentals.map(({ rows: _rows, ...rest }) => rest);
   if (unassignedTotal !== 0) {
     rentalsOut.push({
       vendorName: '임대 건 미지정',
@@ -145,6 +137,9 @@ export async function getAssetLifecycle(rawQuery: string): Promise<LifecycleResu
       contractDate: '',
       endDate: '',
       status: '',
+      months: 0,
+      baseAmount: null,
+      contractTotal: null,
       firstBilled: '',
       lastBilled: '',
       billedMonths: 0,
@@ -204,6 +199,7 @@ export async function getAssetLifecycle(rawQuery: string): Promise<LifecycleResu
       purchasePrice,
       rentals: rentalsOut,
       billedTotal: sumConfirmedBilling(billingLines),
+      contractTotal: rentalsOut.reduce((sum, r) => sum + (r.contractTotal ?? 0), 0),
       asRecords,
       asError,
     },

@@ -11,6 +11,7 @@ import {
   type BillingLineInput,
   type BillingLineRow,
   type RentalHistoryEntry,
+  groupRentalRows,
 } from '@/lib/billing';
 import {
   ASSET_PURCHASE_INFO_TABLE,
@@ -91,20 +92,14 @@ export async function getAssetRentalHistory(assetId: string): Promise<RentalHist
   const trimmed = assetId.trim();
   if (!trimmed || !isSupabaseConfigured()) return [];
   const supabase = createAdminClient();
+  // select('*') — base_amount 등 추가 컬럼 SQL을 아직 안 돌린 DB에서도 깨지지 않게.
   const { data, error } = await supabase
     .from(RENTAL_TABLE)
-    .select('sheet_row, vendor_name, site_name, contract_date, end_date, status')
+    .select('*')
     .eq('asset_code', trimmed)
     .order('contract_date', { ascending: true });
   if (error || !data) return [];
-  return data.map((r) => ({
-    sheetRow: r.sheet_row as number,
-    vendorName: r.vendor_name as string,
-    siteName: r.site_name as string,
-    contractDate: r.contract_date as string,
-    endDate: r.end_date as string,
-    status: r.status as string,
-  }));
+  return groupRentalRows(data as Record<string, unknown>[]);
 }
 
 // ── 청구 명세 ────────────────────────────────────────────────────

@@ -42,6 +42,10 @@ export type WorksAssetRow = {
   option2: string;
   option3: string;
   option4: string;
+  baseAmount: string; // 기본금액(월)
+  firstContractDate: string; // 첫계약일
+  entryDate: string; // 입력일 — 임대종료 건은 철수(종료)된 날짜
+  removalDate: string;
 };
 
 type WorksAssetApiRow = {
@@ -67,6 +71,11 @@ type WorksAssetApiRow = {
   option2: string | null;
   option3: string | null;
   option4: string | null;
+  base_amount: number | string | null;
+  first_contract_date: string | null;
+  entry_date: string | null;
+  input_date_raw: string | null;
+  removal_date: string | null;
 };
 
 const SELECT_COLS = [
@@ -92,10 +101,22 @@ const SELECT_COLS = [
   'option2',
   'option3',
   'option4',
+  'base_amount',
+  'first_contract_date',
+  'entry_date',
+  'input_date_raw',
+  'removal_date',
 ].join(',');
 
-function str(v: string | null): string {
-  return (v ?? '').trim();
+function str(v: string | number | null): string {
+  return String(v ?? '').trim();
+}
+
+/** "2024. 12. 16" / "2024-12-16" / "2024-12-16T..." → "2024-12-16" (못 읽으면 원문) */
+function normalizeDate(v: string | null): string {
+  const s = str(v);
+  const m = s.match(/^(\d{4})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : s;
 }
 
 /** 매핑된 필드만으로 변경 감지용 해시를 계산합니다(충돌 안전성은 필요 없음 — 대조 속도용). */
@@ -149,6 +170,10 @@ export async function readWorksAssetRows(): Promise<WorksAssetsResult> {
       option2: str(r.option2),
       option3: str(r.option3),
       option4: str(r.option4),
+      baseAmount: str(r.base_amount),
+      firstContractDate: normalizeDate(r.first_contract_date),
+      entryDate: normalizeDate(r.entry_date) || normalizeDate(r.input_date_raw),
+      removalDate: normalizeDate(r.removal_date),
     };
 
     rows.push({ sheetRow: r.id, rowHash: hashFields(fields), ...fields });

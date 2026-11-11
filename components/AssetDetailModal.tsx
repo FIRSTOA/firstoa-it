@@ -5,7 +5,7 @@ import { listAssetMovements, logAssetNote, type AssetNoteEntry } from '@/app/act
 import { getAssetAsRecords } from '@/app/asset-history/actions';
 import { createBillingLine, getAssetBillingLines, getAssetRentalHistory } from '@/app/billing/actions';
 import type { AsRecord } from '@/lib/as/sheet';
-import { computeRecoveryRate, type BillingLine, type RentalHistoryEntry } from '@/lib/billing';
+import { computeRecoveryRate, computeRentalTerm, type BillingLine, type RentalHistoryEntry } from '@/lib/billing';
 import { formatWon, parseKoreanWon } from '@/lib/currency';
 import { parseHistoryEntries } from '@/lib/inventory/history';
 import type { Asset } from '@/lib/types';
@@ -263,6 +263,7 @@ export default function AssetDetailModal({
           // billingLoaded 전엔 rentalHistory가 항상 빈 배열이라 "불일치"로 오판할 수 있어서,
           // 로딩이 끝난 뒤에만 판단합니다.
           const mismatch = billingLoaded && item.status === '임대중' && activeRentals.length === 0;
+          const contractTotal = rentalHistory.reduce((sum, r) => sum + (computeRentalTerm(r).total ?? 0), 0);
 
           return (
             <div>
@@ -272,7 +273,11 @@ export default function AssetDetailModal({
                   <span className="detail-value">{purchasePrice !== null ? formatWon(purchasePrice) : '구매단가 미입력'}</span>
                 </div>
                 <div className="detail-field">
-                  <span className="detail-label">누적 청구액</span>
+                  <span className="detail-label">계약 기준 누적 청구액</span>
+                  <span className="detail-value">{formatWon(contractTotal)}</span>
+                </div>
+                <div className="detail-field">
+                  <span className="detail-label">firstoa-works 청구액</span>
                   <span className="detail-value">
                     {recovery.kind === 'ok' || recovery.kind === 'zero_price' || recovery.kind === 'no_price'
                       ? formatWon(billingLines.filter((l) => l.status !== '취소' && l.allocationStatus === 'confirmed').reduce((s, l) => s + l.amount, 0))
@@ -300,7 +305,7 @@ export default function AssetDetailModal({
               )}
 
               {(() => {
-                const unassigned = billingLines.filter((l) => l.rentalSheetRow === null);
+                const unassigned = billingLines.filter((l) => l.rentalSheetRow === null || !rentalHistory.some((r) => r.sheetRows.includes(l.rentalSheetRow as number)));
                 const unassignedSubtotal = unassigned
                   .filter((l) => l.status !== '취소' && l.allocationStatus === 'confirmed')
                   .reduce((s, l) => s + l.amount, 0);
@@ -313,7 +318,8 @@ export default function AssetDetailModal({
                     ) : (
                       <>
                         {rentalHistory.map((r) => {
-                  const lines = billingLines.filter((l) => l.rentalSheetRow === r.sheetRow);
+                  const lines = billingLines.filter((l) => l.rentalSheetRow !== null && r.sheetRows.includes(l.rentalSheetRow));
+                  const term = computeRentalTerm(r);
                   const subtotal = lines.filter((l) => l.status !== '취소' && l.allocationStatus === 'confirmed').reduce((s, l) => s + l.amount, 0);
                   const expanded = expandedRow === r.sheetRow;
                   return (
@@ -324,13 +330,24 @@ export default function AssetDetailModal({
                           {r.siteName ? ` · ${r.siteName}` : ''}
                           <span style={{ color: 'var(--ink-400)' }}>
                             {' '}
-                            ({r.contractDate || '시작일 미상'} ~ {r.endDate || '진행중'})
+                            ({term.start || '시작일 미상'} ~ {term.end || '진행중'})
                           </span>
                           <span className={`badge ${r.status === '임대종료' ? 'badge-미정' : 'badge-임대중'}`} style={{ marginLeft: '6px' }}>
                             {r.status || '-'}
                           </span>
                         </span>
-                        <span style={{ fontWeight: 700 }}>{formatWon(subtotal)}</span>
+                        <span style={{ textAlign: 'right' }}>
+                          <span style={{ fontWeight: 700 }}>
+                            {term.total !== null
+                              ? `${term.months}개월 × ${formatWon(term.baseAmount ?? 0)} = ${formatWon(term.total)}`
+                              : term.months > 0
+                                ? `${term.months}개월 · 기본금액 미상`
+                                : '-'}
+                          </span>
+                          {subtotal !== 0 && (
+                            <div style={{ fontSize: '11px', color: 'var(--ink-400)' }}>firstoa-works 청구 {formatWon(subtotal)}</div>
+                          )}
+                        </span>
                       </div>
 
                       {expanded && (

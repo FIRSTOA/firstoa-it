@@ -45,3 +45,11 @@ create index if not exists it_rental_list_status_idx      on public.it_rental_li
 
 -- 기존 테이블들과 동일한 보안 모델: RLS 켜고 정책은 만들지 않음 → service_role 서버 코드만 접근
 alter table public.it_rental_list enable row level security;
+
+-- 거래처별 임대 기간·청구 예상액 계산용(firstoa-works assets) — 기본금액/첫계약일/입력일(종료건은 철수일)/철수일.
+-- 여러 번 실행해도 안전합니다. 실행 후 임대리스트 → "firstoa-works 대조" → 반영을 한 번 눌러주세요.
+alter table public.it_rental_list
+  add column if not exists base_amount text not null default '',
+  add column if not exists first_contract_date text not null default '',
+  add column if not exists entry_date text not null default '',
+  add column if not exists removal_date text not null default '';

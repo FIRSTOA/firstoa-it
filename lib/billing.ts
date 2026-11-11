@@ -157,9 +157,83 @@ export function rowToAssetPurchaseInfo(row: AssetPurchaseInfoRow): AssetPurchase
 
 export type RentalHistoryEntry = {
   sheetRow: number;
+  /** firstoa-works에 같은 임대 건이 중복 행으로 있는 경우 묶인 행 전체 */
+  sheetRows: number[];
   vendorName: string;
   siteName: string;
   contractDate: string;
   endDate: string;
   status: string;
+  baseAmount: number | null; // 기본금액(월)
+  firstContractDate: string; // 첫계약일
+  entryDate: string; // 입력일 — 임대종료 건은 철수된 날짜
+  removalDate: string;
 };
+
+/** it_rental_list 행들을 임대 건(거래처+현장+계약일) 단위로 묶습니다. */
+export function groupRentalRows(rows: Record<string, unknown>[]): RentalHistoryEntry[] {
+  const s = (v: unknown) => String(v ?? '').trim();
+  const map = new Map<string, RentalHistoryEntry>();
+  for (const r of rows) {
+    const key = `${s(r.vendor_name)}|${s(r.site_name)}|${s(r.contract_date)}`;
+    const base = Number(String(r.base_amount ?? '').replace(/[^0-9.-]/g, ''));
+    const existing = map.get(key);
+    if (existing) {
+      existing.sheetRows.push(r.sheet_row as number);
+      existing.endDate ||= s(r.end_date);
+      existing.entryDate ||= s(r.entry_date);
+      existing.removalDate ||= s(r.removal_date);
+      existing.firstContractDate ||= s(r.first_contract_date);
+      if (existing.baseAmount === null && s(r.base_amount) && Number.isFinite(base)) existing.baseAmount = base;
+      continue;
+    }
+    map.set(key, {
+      sheetRow: r.sheet_row as number,
+      sheetRows: [r.sheet_row as number],
+      vendorName: s(r.vendor_name),
+      siteName: s(r.site_name),
+      contractDate: s(r.contract_date),
+      endDate: s(r.end_date),
+      status: s(r.status),
+      baseAmount: s(r.base_amount) && Number.isFinite(base) ? base : null,
+      firstContractDate: s(r.first_contract_date),
+      entryDate: s(r.entry_date),
+      removalDate: s(r.removal_date),
+    });
+  }
+  return [...map.values()];
+}
+
+export type RentalTerm = {
+  start: string;
+  end: string; // 진행중이면 ''
+  months: number;
+  baseAmount: number | null;
+  total: number | null; // 개월수 × 기본금액
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function parseYmd(s: string): Date | null {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+}
+
+/**
+ * 계약 기준 임대 기간·청구액. 시작 = 첫계약일(없으면 계약일), 끝 = 임대종료 건은 입력일
+ * (임대리스트에 철수가 기록된 날, 없으면 철수일/종료일), 진행 중이면 오늘까지.
+ * 개월수 = 일수 ÷ 30.4를 반올림(최소 1개월) — 예: 11/27~12/16 → 1개월, 4/10~7/23 → 3개월.
+ */
+export function computeRentalTerm(r: RentalHistoryEntry, today = new Date()): RentalTerm {
+  const start = r.firstContractDate || r.contractDate;
+  const ended = r.status.includes('종료');
+  const end = ended ? r.entryDate || r.removalDate || r.endDate : '';
+  const startDate = parseYmd(start);
+  const endDate = end ? parseYmd(end) : new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  let months = 0;
+  if (startDate && endDate && endDate >= startDate) {
+    months = Math.max(1, Math.round((endDate.getTime() - startDate.getTime()) / DAY_MS / 30.4));
+  }
+  const total = r.baseAmount !== null && months > 0 ? months * r.baseAmount : null;
+  return { start, end, months, baseAmount: r.baseAmount, total };
+}
