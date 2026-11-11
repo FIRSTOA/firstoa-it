@@ -13,7 +13,7 @@ type Props = {
 type State =
   | { status: 'comparing' }
   | { status: 'compared'; result: Extract<CompareResult, { ok: true }> }
-  | { status: 'applying' }
+  | { status: 'applying'; round: number; written: number }
   | { status: 'applied'; result: Extract<ApplyResult, { ok: true }> }
   | { status: 'error'; message: string };
 
@@ -36,15 +36,29 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // 한 번 호출에 다 못 쓰면(서버 시간 상한) done:false가 오므로, 끝날 때까지 이어서 호출합니다.
   async function handleApply() {
-    setState({ status: 'applying' });
-    const result = await applyWorksSync();
-    if (!result.ok) {
-      setState({ status: 'error', message: result.error });
-      return;
+    const MAX_ROUNDS = 15;
+    const total = { upserted: 0, deleted: 0, billingInserted: 0, billingUpdated: 0, billingDeleted: 0 };
+    for (let round = 1; round <= MAX_ROUNDS; round++) {
+      setState({ status: 'applying', round, written: total.upserted + total.billingInserted + total.billingUpdated });
+      const result = await applyWorksSync();
+      if (!result.ok) {
+        setState({ status: 'error', message: result.error });
+        return;
+      }
+      total.upserted += result.upserted;
+      total.deleted += result.deleted;
+      total.billingInserted += result.billingInserted;
+      total.billingUpdated += result.billingUpdated;
+      total.billingDeleted += result.billingDeleted;
+      if (result.done) {
+        setState({ status: 'applied', result: { ...result, ...total } });
+        onApplied();
+        return;
+      }
     }
-    setState({ status: 'applied', result });
-    onApplied();
+    setState({ status: 'error', message: '반영이 너무 오래 걸려 중단했어요. "다시 대조" 후 "반영"을 한 번 더 눌러주세요(이어서 반영돼요).' });
   }
 
   if (!open) return null;
@@ -64,7 +78,9 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
         <div style={{ margin: '18px 0', minHeight: '90px' }}>
           {(state.status === 'comparing' || state.status === 'applying') && (
             <div style={{ color: 'var(--ink-500)', fontSize: '13px' }}>
-              {state.status === 'comparing' ? 'firstoa-works와 대조하는 중…' : '반영하는 중…(행이 많아 시간이 좀 걸려요)'}
+              {state.status === 'comparing'
+                ? 'firstoa-works와 대조하는 중…'
+                : `반영하는 중…(${state.round}회차${state.written ? ` · 지금까지 ${state.written.toLocaleString()}건 저장` : ''}) — 행이 많아 몇 분 걸릴 수 있어요, 창을 닫지 마세요`}
             </div>
           )}
           {state.status === 'compared' && (

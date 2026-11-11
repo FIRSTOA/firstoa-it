@@ -233,6 +233,8 @@ export async function compareWorksSync(): Promise<CompareResult> {
 export type ApplyResult =
   | {
       ok: true;
+      /** false면 시간 예산을 다 써서 중간에 멈춘 것 — 다시 호출하면 남은 차분만 이어서 반영됨 */
+      done: boolean;
       upserted: number;
       deleted: number;
       billingInserted: number;
@@ -240,6 +242,32 @@ export type ApplyResult =
       billingDeleted: number;
     }
   | { ok: false; error: string };
+
+// Vercel 함수 상한(300초) 안에서 끝나도록, 쓰기는 이 시간까지만 하고 멈춥니다.
+const WRITE_BUDGET_MS = 200_000;
+const WRITE_PARALLEL = 4;
+
+/** items를 size씩 잘라 parallel개씩 동시에 write하되, deadline이 지나면 멈춥니다. 처리한 개수를 반환. */
+async function writeChunks<T>(
+  items: T[],
+  size: number,
+  deadline: number,
+  write: (chunk: T[]) => PromiseLike<{ error: unknown }>,
+): Promise<number> {
+  let processed = 0;
+  for (let i = 0; i < items.length; i += size * WRITE_PARALLEL) {
+    if (Date.now() > deadline) break;
+    const chunks: T[][] = [];
+    for (let j = 0; j < WRITE_PARALLEL; j++) {
+      const chunk = items.slice(i + j * size, i + (j + 1) * size);
+      if (chunk.length) chunks.push(chunk);
+    }
+    const results = await Promise.all(chunks.map((c) => write(c)));
+    for (const r of results) if (r.error) throw r.error;
+    processed += chunks.reduce((n, c) => n + c.length, 0);
+  }
+  return processed;
+}
 
 /**
  * firstoa-works를 다시 읽어 임대리스트+청구 명세를 실제로 반영합니다. 바뀐 행만 씁니다.
@@ -249,55 +277,45 @@ export type ApplyResult =
  */
 export async function applyWorksSync(): Promise<ApplyResult> {
   try {
+    const startedAt = Date.now();
     const supabase = createAdminClient();
     const plan = await buildSyncPlan(supabase);
+    const deadline = startedAt + WRITE_BUDGET_MS;
 
     // 1) 임대리스트 먼저 — 청구 명세가 rental_sheet_row로 참조하므로 순서가 중요함.
-    for (let i = 0; i < plan.rentalUpserts.length; i += WRITE_CHUNK) {
-      const chunk = plan.rentalUpserts.slice(i, i + WRITE_CHUNK).map(toDbRow);
-      const { error } = await supabase.from(RENTAL_TABLE).upsert(chunk, { onConflict: 'sheet_row' });
-      if (error) throw error;
-    }
+    const upserted = await writeChunks(plan.rentalUpserts.map(toDbRow), WRITE_CHUNK, deadline, (c) =>
+      supabase.from(RENTAL_TABLE).upsert(c, { onConflict: 'sheet_row' }),
+    );
 
     // 2) 청구 명세
-    for (let i = 0; i < plan.billingInserts.length; i += WRITE_CHUNK) {
-      const { error } = await supabase.from(BILLING_LINES_TABLE).insert(plan.billingInserts.slice(i, i + WRITE_CHUNK));
-      if (error) throw error;
-    }
-    for (let i = 0; i < plan.billingUpdates.length; i += WRITE_CHUNK) {
-      const { error } = await supabase
-        .from(BILLING_LINES_TABLE)
-        .upsert(plan.billingUpdates.slice(i, i + WRITE_CHUNK), { onConflict: 'id' });
-      if (error) throw error;
-    }
-    for (let i = 0; i < plan.billingStaleIds.length; i += DELETE_CHUNK) {
-      const { error } = await supabase
-        .from(BILLING_LINES_TABLE)
-        .delete()
-        .in('id', plan.billingStaleIds.slice(i, i + DELETE_CHUNK));
-      if (error) throw error;
-    }
+    const billingInserted = await writeChunks(plan.billingInserts, WRITE_CHUNK, deadline, (c) =>
+      supabase.from(BILLING_LINES_TABLE).insert(c),
+    );
+    const billingUpdated = await writeChunks(plan.billingUpdates, WRITE_CHUNK, deadline, (c) =>
+      supabase.from(BILLING_LINES_TABLE).upsert(c, { onConflict: 'id' }),
+    );
+    const billingDeleted = await writeChunks(plan.billingStaleIds, DELETE_CHUNK, deadline, (c) =>
+      supabase.from(BILLING_LINES_TABLE).delete().in('id', c),
+    );
 
     // 3) firstoa-works에 없는 임대 건(예: 예전 구글시트에서 온 행) 삭제 — 청구 명세 FK는 on delete set null.
-    for (let i = 0; i < plan.rentalStale.length; i += DELETE_CHUNK) {
-      const { error } = await supabase
-        .from(RENTAL_TABLE)
-        .delete()
-        .in('sheet_row', plan.rentalStale.slice(i, i + DELETE_CHUNK));
-      if (error) throw error;
-    }
+    const deleted = await writeChunks(plan.rentalStale, DELETE_CHUNK, deadline, (c) =>
+      supabase.from(RENTAL_TABLE).delete().in('sheet_row', c),
+    );
 
-    revalidatePath('/rentals');
-    revalidatePath('/billing');
-    revalidatePath('/');
-    return {
-      ok: true,
-      upserted: plan.rentalUpserts.length,
-      deleted: plan.rentalStale.length,
-      billingInserted: plan.billingInserts.length,
-      billingUpdated: plan.billingUpdates.length,
-      billingDeleted: plan.billingStaleIds.length,
-    };
+    const done =
+      upserted === plan.rentalUpserts.length &&
+      billingInserted === plan.billingInserts.length &&
+      billingUpdated === plan.billingUpdates.length &&
+      billingDeleted === plan.billingStaleIds.length &&
+      deleted === plan.rentalStale.length;
+
+    if (done) {
+      revalidatePath('/rentals');
+      revalidatePath('/billing');
+      revalidatePath('/');
+    }
+    return { ok: true, done, upserted, deleted, billingInserted, billingUpdated, billingDeleted };
   } catch (err) {
     console.error('[rentals] applyWorksSync 실패:', err);
     return { ok: false, error: errorMessage(err, 'firstoa-works 반영에 실패했어요.') };
