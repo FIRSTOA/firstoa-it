@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { listAssetMovements, logAssetNote, type AssetNoteEntry } from '@/app/actions';
+import { getAssetAsRecords } from '@/app/asset-history/actions';
 import { createBillingLine, getAssetBillingLines, getAssetRentalHistory } from '@/app/billing/actions';
+import type { AsRecord } from '@/lib/as/sheet';
 import { computeRecoveryRate, type BillingLine, type RentalHistoryEntry } from '@/lib/billing';
 import { formatWon, parseKoreanWon } from '@/lib/currency';
 import { parseHistoryEntries } from '@/lib/inventory/history';
@@ -68,6 +70,22 @@ export default function AssetDetailModal({
 
   const assetId = item?.assetId ?? '';
   const category = item?.category ?? '';
+  const serialNo = item?.serialNo ?? '';
+
+  const [asRecords, setAsRecords] = useState<AsRecord[] | null>(null);
+  useEffect(() => {
+    if (!open || !assetId) {
+      setAsRecords(null);
+      return;
+    }
+    let cancelled = false;
+    getAssetAsRecords(assetId, serialNo).then((rows) => {
+      if (!cancelled) setAsRecords(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, assetId, serialNo]);
 
   useEffect(() => {
     if (!open || !assetId) {
@@ -449,8 +467,27 @@ export default function AssetDetailModal({
         </div>
         {noteError && <div style={{ fontSize: '12px', color: 'var(--red-600)', marginTop: '4px' }}>{noteError}</div>}
 
-        <div className="detail-section-title">AS접수 이력</div>
-        <div className="detail-empty">AS접수 이력 기능은 아직 없어요.</div>
+        <div className="detail-section-title">
+          AS접수 이력{asRecords ? ` ${asRecords.length}건` : ''}{' '}
+          <a href={`/asset-history?q=${encodeURIComponent(assetId)}`} target="_blank" rel="noreferrer" style={{ fontSize: '12px', fontWeight: 400 }}>
+            통합 조회 ↗
+          </a>
+        </div>
+        {asRecords === null ? (
+          <div className="detail-empty">불러오는 중…</div>
+        ) : asRecords.length === 0 ? (
+          <div className="detail-empty">AS 접수 기록이 없어요.</div>
+        ) : (
+          asRecords.map((r, i) => (
+            <div key={i} className="detail-history-entry">
+              <span style={{ color: 'var(--ink-400)', marginRight: '6px' }}>
+                {r.receivedDate} · {r.status || '-'} · {r.company || '-'}
+              </span>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{r.symptom || '-'}</div>
+              {r.action && <div className="sub" style={{ whiteSpace: 'pre-wrap', color: 'var(--ink-500)' }}>→ {r.action}</div>}
+            </div>
+          ))
+        )}
 
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={() => onPrint([item])}>

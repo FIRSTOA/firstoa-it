@@ -1,4 +1,6 @@
 import AssetHistoryTable from '@/components/AssetHistoryTable';
+import AssetLifecycleLookup from '@/components/AssetLifecycleLookup';
+import { AS_SHEET_URL } from '@/lib/as/sheet';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
 import { rowToAssetMovement, type AssetMovementRow } from '@/lib/assetMovements';
@@ -7,7 +9,8 @@ import { ASSET_MOVEMENTS_TABLE, createAdminClient, isSupabaseConfigured } from '
 // 이력은 매 요청마다 최신 상태를 읽습니다.
 export const dynamic = 'force-dynamic';
 
-export default async function Page() {
+export default async function Page({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  const { q } = await searchParams;
   if (!isSupabaseConfigured()) {
     return (
       <Shell activeMenu="자산 이력" title="🕘 자산 이력">
@@ -34,7 +37,8 @@ export default async function Page() {
   const movements = ((data ?? []) as AssetMovementRow[]).map(rowToAssetMovement);
 
   return (
-    <Shell activeMenu="자산 이력" title="🕘 자산 이력" note="자산 위치·상태 변경 이력 (최근 500건)">
+    <Shell activeMenu="자산 이력" title="🕘 자산 이력" note="자산번호·시리얼로 입고/매입/임대/AS 통합 조회 + 위치·상태 변경 이력 (최근 500건)">
+      <AssetLifecycleLookup initialQuery={q ?? ''} asSheetUrl={AS_SHEET_URL} />
       <AssetHistoryTable movements={movements} />
     </Shell>
   );
