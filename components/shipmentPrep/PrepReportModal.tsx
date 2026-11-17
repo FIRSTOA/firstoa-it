@@ -93,7 +93,9 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
         k === i
           ? {
               ...u,
-              serial: !u.serial.trim() && !touchedSerial.current.has(i) && found.serials.length === 1 ? found.serials[0] : u.serial,
+              serial: !u.serial.trim() && !touchedSerial.current.has(i) && (found.serials.length === 1 || found.source === 'inventory') && found.serials[0]
+                    ? found.serials[0] // IT재고 시트 시리얼 우선(구글시트 출고 탭과 같은 값)
+                    : u.serial,
               model: u.model?.trim() ? u.model : found.model,
               gubun: u.gubun?.trim() ? u.gubun : found.gubun,
               spec: u.spec?.trim() ? u.spec : found.spec,
