@@ -14,11 +14,11 @@ import {
   uploadPrepPhoto,
 } from '@/app/shipment-prep/reportActions';
 import { resizeImageFile } from '@/lib/imageResize';
-import { APPEARANCE_GRADES, countUnits, KAKAO_ROOM, shortDateLabel, type PrepPhoto, type PrepUnit } from '@/lib/shipmentPrep';
+import { countUnits, KAKAO_ROOM, shortDateLabel, type PrepPhoto, type PrepUnit } from '@/lib/shipmentPrep';
 
 type Props = { event: PrepEventRow; people: string[]; onClose: () => void };
 
-const blankUnit = (): PrepUnit => ({ serial: '', assetId: '', grade: 'A' });
+const blankUnit = (): PrepUnit => ({ serial: '', assetId: '', grade: '' });
 
 export default function PrepReportModal({ event, people, onClose }: Props) {
   const [loading, setLoading] = useState(true);
@@ -98,7 +98,6 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
               gubun: u.gubun?.trim() ? u.gubun : found.gubun,
               spec: u.spec?.trim() ? u.spec : found.spec,
               category: found.category || u.category,
-              grade: found.category === '데스크탑' ? '' : u.grade || 'A',
             }
           : u,
       ),
@@ -273,13 +272,6 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
                       ))}
                     </datalist>
                   )}
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    {u.category !== '데스크탑' && APPEARANCE_GRADES.map((g) => (
-                      <button key={g} type="button" className={`chip${u.grade === g ? ' active' : ''}`} onClick={() => setUnit(i, { grade: g })}>
-                        {g}
-                      </button>
-                    ))}
-                  </div>
                   <button type="button" className="icon-btn danger" onClick={() => setUnits(units.filter((_, k) => k !== i))} title="줄 삭제">
                     ×
                   </button>
