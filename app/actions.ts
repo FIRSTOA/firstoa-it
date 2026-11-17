@@ -241,23 +241,54 @@ export type AssetNoteEntry = { id: string; movedAt: string; memo: string; fromLo
  */
 export async function listAssetMovements(assetId: string): Promise<AssetNoteEntry[]> {
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from(ASSET_MOVEMENTS_TABLE)
-    .select('id,moved_at,memo,from_location,to_location')
-    .eq('asset_number', assetId)
-    .order('moved_at', { ascending: false })
-    .limit(50);
-  if (error) {
-    console.error('[actions] listAssetMovements 실패:', error);
-    return [];
-  }
-  return (data ?? []).map((row) => ({
+  const key = assetId.trim();
+  // 입고 대장(수리/렌탈/구매입고예정) 등록·완료도 작업 이력으로 같이 보여줍니다 — 입고 등록
+  // 화면에서 바로 등록한 수리입고예정은 asset_movements에 따로 기록되지 않기 때문.
+  const [movRes, recvRes] = await Promise.all([
+    supabase
+      .from(ASSET_MOVEMENTS_TABLE)
+      .select('id,moved_at,memo,from_location,to_location')
+      .ilike('asset_number', key)
+      .order('moved_at', { ascending: false })
+      .limit(50),
+    supabase
+      .from(RECEIVING_TABLE)
+      .select('id,kind,status,vendor,expected_date,notes,location,created_at,completed_at')
+      .ilike('asset_id', key)
+      .order('created_at', { ascending: false })
+      .limit(30),
+  ]);
+  if (movRes.error) console.error('[actions] listAssetMovements 실패:', movRes.error);
+  if (recvRes.error) console.error('[actions] listAssetMovements(입고 대장) 실패:', recvRes.error);
+
+  const entries: AssetNoteEntry[] = (movRes.data ?? []).map((row) => ({
     id: row.id as string,
     movedAt: row.moved_at as string,
     memo: row.memo as string,
     fromLocation: row.from_location as string | null,
     toLocation: row.to_location as string | null,
   }));
+
+  for (const r of (recvRes.data ?? []) as Record<string, string | null>[]) {
+    const kind = r.kind ?? '';
+    const vendorLabel = kind === '수리입고예정' ? '수리처' : kind === '렌탈입고예정' ? '회수처' : '발주처';
+    const parts = [`입고 대장 · ${kind} 등록`];
+    if (r.vendor) parts.push(`${vendorLabel}: ${r.vendor}`);
+    if (r.expected_date) parts.push(`예상입고 ${r.expected_date}`);
+    if (r.status === '취소') parts.push('(취소됨)');
+    if (r.notes) parts.push(r.notes);
+    entries.push({ id: `recv-${r.id}`, movedAt: r.created_at ?? '', memo: parts.join(' · '), fromLocation: null, toLocation: null });
+    if (r.status === '입고완료' && r.completed_at) {
+      entries.push({
+        id: `recv-done-${r.id}`,
+        movedAt: r.completed_at,
+        memo: `입고 대장 · ${kind.replace('예정', '')} 완료${r.location ? ` — 위치: ${r.location}` : ''}`,
+        fromLocation: null,
+        toLocation: null,
+      });
+    }
+  }
+  return entries.sort((a, b) => b.movedAt.localeCompare(a.movedAt));
 }
 
 export async function logAssetNote(assetId: string, category: string, note: string): Promise<ActionResult> {
