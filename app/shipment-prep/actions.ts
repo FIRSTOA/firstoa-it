@@ -1,6 +1,6 @@
 'use server';
 
-import { getEventWithEtag, isNaverCalDavConfigured, putEventByHref, rewriteSummaryTags } from '@/lib/naverCaldav';
+import { getEventWithEtag, isNaverCalDavConfigured, listCalendars, putEventByHref, rewriteSummaryTags } from '@/lib/naverCaldav';
 import { syncNaverCalendars } from '@/lib/naverCalendarSync';
 import {
   applyPrepStage,
@@ -178,21 +178,10 @@ export async function triggerPrepSync(): Promise<{ ok: boolean; error?: string; 
     const full = Date.now() - lastFullSync > 5 * 60_000;
     if (full) lastFullSync = Date.now();
     const r = await syncNaverCalendars(full);
-    // 임시 진단: 영화사집 16대 일정 원문 구조
+    // 임시 진단: 이 계정이 볼 수 있는 캘린더 목록
     let debug: unknown = null;
     try {
-      const supabase = createAdminClient();
-      const { data: st } = await supabase.from(SYNC_STATE_TABLE).select('href,uid').like('uid', 'it-9395%');
-      debug = await Promise.all(
-        ((st ?? []) as { href: string; uid: string }[]).map(async (row) => {
-          const { ics } = await getEventWithEtag(row.href);
-          return {
-            uid: row.uid,
-            vevents: (ics.match(/BEGIN:VEVENT/g) || []).length,
-            lines: ics.split(/\r?\n/).filter((l) => /^(UID|SUMMARY|DTSTART|RECURRENCE-ID|PRIORITY|X-NAVER|CATEGORIES|RRULE|BEGIN:VEVENT)/.test(l)).map((l) => l.slice(0, 90)),
-          };
-        }),
-      );
+      debug = await listCalendars();
     } catch (e) {
       debug = String(e);
     }
