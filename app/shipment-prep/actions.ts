@@ -169,10 +169,15 @@ export async function syncPrepTitleTag(eventId: string): Promise<TitleTagResult>
   }
 }
 
+let lastFullSync = 0;
+
 /** 화면을 열어두면 60초마다 호출 — 네이버 → 통합캘린더 동기화. */
 export async function triggerPrepSync(): Promise<{ ok: boolean; error?: string; results?: unknown }> {
   try {
-    const r = await syncNaverCalendars();
+    // ctag가 별표·완료 같은 속성 변경에 안 바뀔 수 있어, 5분에 한 번은 ctag와 무관하게 전체 대조.
+    const full = Date.now() - lastFullSync > 5 * 60_000;
+    if (full) lastFullSync = Date.now();
+    const r = await syncNaverCalendars(full);
     return r.ok ? { ok: true, results: 'results' in r ? r.results : undefined } : { ok: false, error: 'error' in r ? r.error : '' };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

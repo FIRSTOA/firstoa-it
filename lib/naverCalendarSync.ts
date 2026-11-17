@@ -231,7 +231,9 @@ export async function syncNaverCalendars(
         }
       }
 
-      if (newCtag) {
+      // 밀린 분량이나 실패가 있으면 ctag를 저장하지 않습니다 — 저장하면 남은 일정이 네이버에서
+      // 뭔가 바뀔 때까지 다시 안 읽혀 누락돼요(실제로 영화사집 별표 일정이 이렇게 빠졌음).
+      if (newCtag && !backlogged && failed === 0) {
         await supabase.from(NAVER_CALENDARS_TABLE).update({ ctag: newCtag }).eq('id', cal.id);
       }
 
