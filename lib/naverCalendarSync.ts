@@ -53,6 +53,52 @@ export async function syncNaverCalendars(
   const probe = await supabase.from(CALENDAR_TABLE).select('naver_important').limit(1);
   const hasImportantCol = !probe.error;
 
+  // 같은 UID가 여러 href(복사된 일정·다른 캘린더)에 있으면 행 하나에 서로 덮어써서 일정이
+  // 사라져 보였어요(영화사집 별표 일정). href마다 행을 따로 두기 위해 두 번째부터는
+  // "uid#href해시" 키를 씁니다. 이미 덮어써진 중복은 지문을 지워 다시 읽게 합니다.
+  const allState: SyncStateRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page } = await supabase
+      .from(SYNC_STATE_TABLE)
+      .select('href,etag,uid,calendar_id')
+      .order('href', { ascending: true })
+      .range(from, from + 999);
+    allState.push(...((page ?? []) as SyncStateRow[]));
+    if (!page || page.length < 1000) break;
+  }
+  const claimed = new Map<string, string>(); // 기본 uid → 그 키를 가진 href
+  const hrefsByUid = new Map<string, SyncStateRow[]>();
+  for (const r of allState) {
+    if (r.uid.startsWith('it-')) continue;
+    if (!r.uid.includes('#')) claimed.set(r.uid, r.href);
+    const base = r.uid.split('#')[0];
+    hrefsByUid.set(base, [...(hrefsByUid.get(base) ?? []), r]);
+  }
+  const collided = [...hrefsByUid.values()].filter((rs) => rs.filter((r) => !r.uid.includes('#')).length > 1).flat();
+  if (collided.length) {
+    for (const r of collided) {
+      await supabase.from(SYNC_STATE_TABLE).delete().eq('href', r.href);
+      if (claimed.get(r.uid) === r.href) claimed.delete(r.uid);
+    }
+    await supabase.from(NAVER_CALENDARS_TABLE).update({ ctag: '' }).neq('id', '');
+    for (const c of (calendars ?? []) as { ctag: string }[]) c.ctag = '';
+  }
+  const hrefHash = (h: string) => {
+    let x = 5381;
+    for (let i = 0; i < h.length; i++) x = ((x * 33) ^ h.charCodeAt(i)) >>> 0;
+    return x.toString(36);
+  };
+  /** 이 href의 행 키 — 이미 아는 href면 그대로, 처음이면 uid를 아무도 안 쓸 때만 uid. */
+  const rowKeyFor = (uid: string, href: string, known?: SyncStateRow) => {
+    if (known && !collided.some((c) => c.href === href)) return known.uid;
+    const owner = claimed.get(uid);
+    if (!owner || owner === href) {
+      claimed.set(uid, href);
+      return uid;
+    }
+    return `${uid}#${hrefHash(href)}`;
+  };
+
   const startYmd = todayPlus(-30);
   const endYmd = todayPlus(120);
   const results: Record<string, unknown> = {};
@@ -107,6 +153,7 @@ export async function syncNaverCalendars(
           if (!parsed) return;
 
           let error: { message: string } | null = null;
+          const rowKey = parsed.uid.startsWith('it-') ? parsed.uid : rowKeyFor(parsed.uid, href, prevByHref.get(href));
           if (parsed.uid.startsWith('it-')) {
             const patch = stripImportant({
                 title: parsed.title,
@@ -130,7 +177,7 @@ export async function syncNaverCalendars(
                 description: parsed.description,
                 status: parsed.completed ? '완료' : '진행중',
                 author: '',
-                naver_uid: parsed.uid,
+                naver_uid: rowKey,
                 source: 'naver',
                 calendar_id: cal.id,
                 naver_important: parsed.important,
@@ -149,7 +196,7 @@ export async function syncNaverCalendars(
           }
           await supabase
             .from(SYNC_STATE_TABLE)
-            .upsert({ href, etag, uid: parsed.uid, calendar_id: cal.id }, { onConflict: 'href' });
+            .upsert({ href, etag, uid: rowKey, calendar_id: cal.id }, { onConflict: 'href' });
         } catch (err) {
           failed++;
           console.error('[naverCalendarSync] 이벤트 처리 실패:', href, err);
