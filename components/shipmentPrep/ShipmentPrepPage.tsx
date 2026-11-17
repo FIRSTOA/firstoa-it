@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listPrepEvents,
   listPrepPeople,
@@ -57,6 +57,7 @@ export default function ShipmentPrepPage() {
   const [showPeople, setShowPeople] = useState(false);
   const [reportEvent, setReportEvent] = useState<PrepEventRow | null>(null);
   const [detailEvent, setDetailEvent] = useState<PrepEventRow | null>(null);
+  const tagSeq = useRef(0);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -131,7 +132,9 @@ export default function ShipmentPrepPage() {
     }
     setEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...e, prepChecks: res.checks } : e)));
     setBanner({ state: 'busy', eventId: ev.id, text: '네이버 일정 제목 바꾸는 중…' });
-    showTag(ev.id, await requestTitleTag(ev.id));
+    const seq = ++tagSeq.current;
+    const tag = await requestTitleTag(ev.id);
+    if (seq === tagSeq.current) showTag(ev.id, tag); // 연달아 누르면 마지막 결과만 표시
   }
 
   async function retryTag(eventId: string) {
