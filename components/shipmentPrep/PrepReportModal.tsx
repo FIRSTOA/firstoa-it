@@ -188,17 +188,24 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     if (!confirm(ask + stockNote)) return;
     setBusy(true);
     setError('');
-    const res = await sendPrepReport(event.id, draft(), visibleItems.length, mode);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.error);
-      return;
+    try {
+      const res = await sendPrepReport(event.id, draft(), visibleItems.length, mode);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      if (mode === 'fix') {
+        setInfo('수정 내용을 저장했어요(카톡은 안 보냈어요).');
+        return;
+      }
+      // 발송되면 창을 닫아요. 재고 위치 변경은 뒤에서 처리됨.
+      setSentAt(new Date().toISOString());
+      onClose();
+    } catch (err) {
+      setError(`처리 중 오류가 났어요: ${err instanceof Error ? err.message : String(err)} — 카톡이 이미 나갔는지 확인해주세요.`);
+    } finally {
+      setBusy(false);
     }
-    if (mode !== 'fix') setSentAt(new Date().toISOString());
-    setInfo(
-      (mode === 'fix' ? '수정 내용을 저장했어요(카톡은 안 보냈어요).' : `카톡 발송 요청 완료 — "${KAKAO_ROOM}" 방으로 곧 보내져요.`) +
-        (res.stockWarnings.length ? `\n⚠️ 재고: ${res.stockWarnings.join(' / ')}` : ''),
-    );
   }
 
   async function addItem() {
@@ -464,8 +471,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
             type="button"
             className="btn btn-ghost"
             onClick={() => send('fix')}
-            disabled={busy || loading || !!uploading || !sentAt}
-            title={sentAt ? '' : '발송한 뒤에 쓸 수 있어요'}
+            disabled={busy || loading || !!uploading}
           >
             ✏️ 고치기만(카톡 안 보냄)
           </button>

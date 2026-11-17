@@ -1,9 +1,9 @@
 'use server';
 
 import { headers } from 'next/headers';
-import { updateAsset } from '@/app/actions';
+import { after } from 'next/server';
 import { findAssetBrief } from '@/lib/inventory/assetIndex';
-import { getAssetFromSheets } from '@/lib/inventory/sheets';
+import { getAssetFromSheets, updateAssetInSheet } from '@/lib/inventory/sheets';
 import { logAssetMovement } from '@/lib/inventory/movements';
 import { extractSaleInfoFromImage, isOcrConfigured } from '@/lib/ocr';
 import { buildPrepMessage, KAKAO_ROOM, type PrepPhoto, type PrepReport, type PrepUnit } from '@/lib/shipmentPrep';
@@ -315,7 +315,7 @@ export async function sendPrepReport(
   photoItemCount: number,
   /** send = 처음 발송, resend = "[수정]" 붙여 다시 발송, fix = 고치기만(카톡 안 보냄) */
   mode: 'send' | 'resend' | 'fix' = 'send',
-): Promise<Result<{ message: string; stockWarnings: string[] }>> {
+): Promise<Result<{ message: string; stockWarnings: string[]; stockPending: number }>> {
   const saved = await savePrepReport(eventId, draft);
   if (!saved.ok) return saved;
   const supabase = createAdminClient();
@@ -348,49 +348,53 @@ export async function sendPrepReport(
     }
   }
 
-  // 재고 위치 변경 — 철수는 장비가 돌아오는 건이라 제외.
-  const stockWarnings: string[] = [];
-  const applied = new Set(report.stock_applied ?? []);
-  if (kind !== '철수') {
-    const d = new Date(Date.now() + 9 * 3600_000);
-    const stamp = `${String(d.getUTCFullYear()).slice(2)}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${String(d.getUTCDate()).padStart(2, '0')}`;
-    for (const u of units) {
-      const id = u.assetId.trim().toUpperCase();
-      if (!id || applied.has(id)) continue;
-      const asset = await getAssetFromSheets(id).catch(() => null);
-      if (!asset) {
-        stockWarnings.push(`${id}: IT재고에서 못 찾아 위치를 못 바꿨어요`);
-        continue;
-      }
-      const history = [asset.history.trim(), `${stamp} ${report.company || '출고'}`].filter(Boolean).join(' / ');
-      const r = await updateAsset(id, { ...asset, location: '임대중', history });
-      if (!r.ok) {
-        stockWarnings.push(`${id}: ${r.error}`);
-        continue;
-      }
-      await logAssetMovement({
-        assetNumber: id,
-        category: asset.category,
-        fromLocation: null,
-        toLocation: null,
-        fromStatus: null,
-        toStatus: null,
-        memo: `출고 준비 완료 보고 — ${report.company} (${evRow.date} ${kind})`,
-      });
-      applied.add(id);
-    }
-  }
-
+  // 보고 저장은 바로 — 응답을 빨리 돌려줘서 창이 닫히게.
   await supabase
     .from(REPORTS_TABLE)
-    .update({
-      message,
-      ...(mode === 'fix' ? {} : { sent_at: new Date().toISOString() }),
-      stock_applied: [...applied],
-      updated_at: new Date().toISOString(),
-    })
+    .update({ message, ...(mode === 'fix' ? {} : { sent_at: new Date().toISOString() }), updated_at: new Date().toISOString() })
     .eq('id', report.id);
-  return { ok: true, message, stockWarnings };
+
+  // 재고 위치 변경(철수 제외)은 응답 뒤에 따로 — 여러 대를 구글시트에 한 대씩 쓰면 1분을 넘겨
+  // 창이 "처리 중"에서 멈췄어요. 이미 바꾼 자산번호는 stock_applied로 건너뜀.
+  const pending = kind === '철수' ? [] : units.map((u) => u.assetId.trim().toUpperCase()).filter((id) => id && !(report.stock_applied ?? []).includes(id));
+  if (pending.length) {
+    after(async () => {
+      const d = new Date(Date.now() + 9 * 3600_000);
+      const stamp = `${String(d.getUTCFullYear()).slice(2)}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${String(d.getUTCDate()).padStart(2, '0')}`;
+      for (const id of [...new Set(pending)]) {
+        try {
+          const asset = await getAssetFromSheets(id);
+          if (!asset) {
+            console.warn('[prep] IT재고에 없는 자산번호:', id);
+            continue;
+          }
+          const tag = `${stamp} ${report.company || '출고'}`;
+          // 이미 반영된 자산(예전 발송이 중간에 끊긴 경우)은 이력을 두 번 쓰지 않음
+          const already = asset.location.trim() === '임대중' && asset.history.includes(tag);
+          const history = already ? asset.history : [asset.history.trim(), tag].filter(Boolean).join(' / ');
+          if (!already) await updateAssetInSheet(id, { ...asset, location: '임대중', history });
+          if (!already)
+            await logAssetMovement({
+              assetNumber: id,
+              category: asset.category,
+              fromLocation: null,
+              toLocation: null,
+              fromStatus: null,
+              toStatus: null,
+              memo: `출고 준비 완료 보고 — ${report.company} (${evRow.date} ${kind})`,
+            });
+          // 한 대씩 기록 — 중간에 끊겨도 다시 보낼 때 이미 바꾼 건 건너뜀
+          const { data: cur } = await supabase.from(REPORTS_TABLE).select('stock_applied').eq('id', report.id).single();
+          const done = new Set(((cur as { stock_applied: string[] } | null)?.stock_applied ?? []) as string[]);
+          done.add(id);
+          await supabase.from(REPORTS_TABLE).update({ stock_applied: [...done] }).eq('id', report.id);
+        } catch (err) {
+          console.error('[prep] 재고 위치 변경 실패:', id, err);
+        }
+      }
+    });
+  }
+  return { ok: true, message, stockWarnings: [], stockPending: pending.length };
 }
 
 /** 공개 앨범 뷰어(/album?id=)용 — 로그인 없이 사진만. */
