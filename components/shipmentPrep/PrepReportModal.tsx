@@ -13,6 +13,7 @@ import {
   appendPrepPhotos,
   type CheckItem,
 } from '@/app/shipment-prep/reportActions';
+import PhotoLightbox from '@/components/PhotoLightbox';
 import { resizeImageFile } from '@/lib/imageResize';
 import { countUnits, KAKAO_ROOM, shortDateLabel, type PrepPhoto, type PrepUnit } from '@/lib/shipmentPrep';
 
@@ -459,10 +460,12 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
       </div>
 
       {zoom && (
-        <div className="modal-overlay open" style={{ zIndex: 1000 }} onClick={() => setZoom(null)}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={zoom.url} alt="크게 보기" style={{ maxWidth: '94vw', maxHeight: '92vh', borderRadius: 8 }} />
-        </div>
+        <PhotoLightbox
+          photos={photos.map((p) => ({ url: p.url }))}
+          startIndex={Math.max(0, photos.findIndex((p) => p.path === zoom.path))}
+          title={company}
+          onClose={() => setZoom(null)}
+        />
       )}
     </div>
   );

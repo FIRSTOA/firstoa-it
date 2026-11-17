@@ -1,4 +1,5 @@
 import { getAlbum } from '@/app/shipment-prep/reportActions';
+import AlbumGallery from '@/components/shipmentPrep/AlbumGallery';
 import { shortDateLabel } from '@/lib/shipmentPrep';
 
 export const dynamic = 'force-dynamic';
@@ -18,17 +19,7 @@ export default async function AlbumPage({ searchParams }: { searchParams: Promis
           <div style={{ color: '#64748b', fontSize: 13, marginBottom: 12 }}>
             {album.date ? `${shortDateLabel(album.date)} · ` : ''}사진 {album.photos.length}장
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: 10 }}>
-            {album.photos.map((p, i) => (
-              <a key={p.path} href={p.url} target="_blank" rel="noreferrer" style={{ position: 'relative', display: 'block' }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={p.url} alt={`사진 ${i + 1}`} style={{ width: '100%', borderRadius: 8, display: 'block' }} loading="lazy" />
-                <span style={{ position: 'absolute', top: 6, left: 6, background: 'rgba(0,0,0,.6)', color: '#fff', fontSize: 12, padding: '1px 7px', borderRadius: 5 }}>
-                  {i + 1}
-                </span>
-              </a>
-            ))}
-          </div>
+          <AlbumGallery photos={album.photos} title={album.title} />
         </>
       )}
     </main>
