@@ -134,7 +134,21 @@ export type ParsedEvent = {
   location: string;
   description: string;
   completed: boolean;
+  /** 네이버 캘린더의 "중요"(★) 표시 — 출고 준비 리스트가 별표 일정만 씀 */
+  important: boolean;
 };
+
+/** 네이버 중요(★) 판정 — 원본 백오피스 naver-caldav-sync parseEvents와 같은 규칙. */
+export function isNaverImportant(unfolded: string): boolean {
+  const pm = unfolded.match(/^PRIORITY:\s*(\d+)/mi);
+  const priority = pm ? parseInt(pm[1], 10) : null;
+  return (
+    /^X-NAVER-(IMPORTANT|SPECIAL|STAR|MARK|COLOR|PRIORITY)[^:]*:\s*(TRUE|1|YES|GREEN|RED)/mi.test(unfolded) ||
+    /^CATEGORIES[^:]*:.*(중요|IMPORTANT|STAR|SPECIAL)/mi.test(unfolded) ||
+    (priority !== null && priority >= 1 && priority <= 4) ||
+    /^SUMMARY[^:]*:.*[★☆✩✪✰]/mi.test(unfolded)
+  );
+}
 
 function eventBlockOf(ics: string): string {
   const m = ics.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/);
@@ -180,6 +194,7 @@ export function parseEventBlock(ics: string): ParsedEvent | null {
     location: icsProp(unfolded, 'LOCATION'),
     description: icsProp(unfolded, 'DESCRIPTION'),
     completed: /^(true|1|yes)$/i.test(icsProp(unfolded, 'X-NAVER-COMPLETED')),
+    important: isNaverImportant(unfolded),
   };
 }
 
@@ -330,4 +345,95 @@ export async function listCalendars(): Promise<NaverCalendarInfo[]> {
     if (id) out.push({ id, name });
   }
   return out;
+}
+
+/** href로 일정 원문 + etag(낙관적 잠금용)를 읽습니다. */
+export async function getEventWithEtag(href: string): Promise<{ ics: string; etag: string | null }> {
+  const res = await fetch(`${CALDAV_BASE}${href}`, {
+    headers: { Authorization: authHeader() },
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
+  });
+  if (res.status === 401) throw new Error('네이버 인증 실패(401) — 앱 비밀번호가 무효이거나 해외 로그인 차단이에요.');
+  if (!res.ok) throw new Error(`네이버 일정 읽기 실패(${res.status})`);
+  return { ics: await res.text(), etag: res.headers.get('etag') };
+}
+
+/** href에 원문을 그대로 PUT합니다(If-Match). 412면 'conflict'를 돌려줍니다. */
+export async function putEventByHref(href: string, ics: string, etag: string | null): Promise<'ok' | 'conflict'> {
+  const res = await fetch(`${CALDAV_BASE}${href}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: authHeader(),
+      'Content-Type': 'text/calendar; charset=utf-8',
+      ...(etag ? { 'If-Match': etag } : {}),
+    },
+    body: ics,
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
+  });
+  if (res.status === 412) return 'conflict';
+  if (res.status === 403) throw new Error('네이버 일정 수정 권한이 없어요(403) — 이 캘린더에 쓰기 권한이 있는 계정인지 확인해주세요.');
+  if (res.status === 401) throw new Error('네이버 인증 실패(401) — 앱 비밀번호를 확인해주세요.');
+  if (!res.ok) throw new Error(`네이버 일정 수정 실패(${res.status}) ${(await res.text().catch(() => '')).slice(0, 120)}`);
+  return 'ok';
+}
+
+// ── 출고 준비 태그(제목 앞 "이름준비중" 등) ─────────────────────────
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const unescapeIcsText = (s: string) =>
+  s.replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\').trim();
+
+/** RFC 5545 줄 접기 · 75바이트 단위(한글이 잘리지 않게 글자 단위). */
+function foldLine(line: string, nl: string): string {
+  const enc = new TextEncoder();
+  const out: string[] = [];
+  let cur = '';
+  let bytes = 0;
+  for (const ch of line) {
+    const b = enc.encode(ch).length;
+    if (bytes + b > 75) {
+      out.push(cur);
+      cur = ' ' + ch;
+      bytes = 1 + b;
+    } else {
+      cur += ch;
+      bytes += b;
+    }
+  }
+  out.push(cur);
+  return out.join(nl);
+}
+
+/**
+ * 일정 본문의 SUMMARY 줄만(알림 VALARM 안의 SUMMARY는 제외) 태그 반영해 교체합니다.
+ * names에 있는 사람의 "이름오버홀/준비중/완료" 태그만 지우고 붙이므로 다른 시스템
+ * (백오피스)이 붙인 자기 담당자 태그는 건드리지 않습니다. 바뀔 게 없으면 null.
+ */
+export function rewriteSummaryTags(ics: string, names: string[], tags: string[]): { ics: string; title: string } | null {
+  const evStart = ics.search(/^BEGIN:VEVENT/m);
+  const evEnd = ics.search(/^END:VEVENT/m);
+  if (evStart < 0 || evEnd < 0) throw new Error('VEVENT 없음');
+  const alarms: Array<[number, number]> = [];
+  for (const am of ics.slice(evStart, evEnd).matchAll(/BEGIN:VALARM[\s\S]*?END:VALARM/g)) {
+    alarms.push([evStart + (am.index ?? 0), evStart + (am.index ?? 0) + am[0].length]);
+  }
+  const re = /^SUMMARY([^:\r\n]*):([^\r\n]*(?:\r?\n[ \t][^\r\n]*)*)/gm;
+  re.lastIndex = evStart;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(ics)) && m.index < evEnd) {
+    const at = m.index;
+    if (alarms.some(([s, e]) => at >= s && at < e)) continue;
+    const value = m[2].replace(/\r?\n[ \t]/g, '');
+    const stripped = names.length
+      ? value.replace(new RegExp(`(?:${names.map(escapeRe).join('|')})(?:오버홀|준비중|완료)\\s*`, 'g'), '').trimStart()
+      : value;
+    const next = (tags.length ? tags.join(' ') + ' ' : '') + stripped;
+    if (next === value) return null;
+    const nl = ics.includes('\r\n') ? '\r\n' : '\n';
+    return {
+      ics: ics.slice(0, at) + foldLine(`SUMMARY${m[1]}:${next}`, nl) + ics.slice(at + m[0].length),
+      title: unescapeIcsText(next),
+    };
+  }
+  throw new Error('일정 제목(SUMMARY) 없음');
 }

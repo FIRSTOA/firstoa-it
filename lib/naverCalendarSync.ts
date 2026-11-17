@@ -21,7 +21,8 @@ import { CALENDAR_TABLE, createAdminClient, isSupabaseConfigured } from './supab
 
 const NAVER_CALENDARS_TABLE = 'it_naver_calendars';
 const SYNC_STATE_TABLE = 'it_naver_sync_state';
-const MAX_CHANGED_PER_CALENDAR = 80;
+const MAX_CHANGED_PER_CALENDAR = 240;
+const FETCH_CONCURRENCY = 8;
 
 function todayPlus(days: number): string {
   const d = new Date();
@@ -65,28 +66,38 @@ export async function syncNaverCalendars(
 
       const current = await reportChangedEvents(cal.id, startYmd, endYmd);
 
-      const { data: stateRows } = await supabase
-        .from(SYNC_STATE_TABLE)
-        .select('href,etag,uid,calendar_id')
-        .eq('calendar_id', cal.id);
-      const prevByHref = new Map(((stateRows ?? []) as SyncStateRow[]).map((r) => [r.href, r]));
+      // 상태 행이 1000개를 넘으면 PostgREST가 잘라내서 일정이 영원히 누락됩니다 — 끝까지 페이지로 읽음.
+      const stateRows: SyncStateRow[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data: page, error: pageErr } = await supabase
+          .from(SYNC_STATE_TABLE)
+          .select('href,etag,uid,calendar_id')
+          .eq('calendar_id', cal.id)
+          .order('href', { ascending: true })
+          .range(from, from + 999);
+        if (pageErr) throw new Error(`동기화 상태 조회 실패: ${pageErr.message}`);
+        stateRows.push(...((page ?? []) as SyncStateRow[]));
+        if (!page || page.length < 1000) break;
+      }
+      const prevByHref = new Map(stateRows.map((r) => [r.href, r]));
 
-      const changed = current.filter((c) => prevByHref.get(c.href)?.etag !== c.etag).slice(0, MAX_CHANGED_PER_CALENDAR);
-      const backlogged = current.length - changed.length > 0 && changed.length === MAX_CHANGED_PER_CALENDAR;
+      const allChanged = current.filter((c) => prevByHref.get(c.href)?.etag !== c.etag);
+      const changed = allChanged.slice(0, MAX_CHANGED_PER_CALENDAR);
+      const backlogged = allChanged.length > changed.length;
 
       let updated = 0;
       let created = 0;
       let failed = 0;
 
-      for (const { href, etag } of changed) {
+      async function processOne({ href, etag }: { href: string; etag: string }) {
         try {
           const ics = await getEventByHref(href);
           const parsed = parseEventBlock(ics);
-          if (!parsed) continue;
+          if (!parsed) return;
 
+          let error: { message: string } | null = null;
           if (parsed.uid.startsWith('it-')) {
-            const localId = parsed.uid.slice(3);
-            const { error } = await supabase
+            ({ error } = await supabase
               .from(CALENDAR_TABLE)
               .update({
                 title: parsed.title,
@@ -95,13 +106,13 @@ export async function syncNaverCalendars(
                 location: parsed.location,
                 description: parsed.description,
                 status: parsed.completed ? '완료' : '진행중',
+                naver_important: parsed.important,
                 naver_synced_at: new Date().toISOString(),
               })
-              .eq('id', localId);
+              .eq('id', parsed.uid.slice(3)));
             if (!error) updated++;
-            else failed++;
           } else {
-            const { error } = await supabase.from(CALENDAR_TABLE).upsert(
+            ({ error } = await supabase.from(CALENDAR_TABLE).upsert(
               {
                 title: parsed.title,
                 date: parsed.date,
@@ -113,14 +124,20 @@ export async function syncNaverCalendars(
                 naver_uid: parsed.uid,
                 source: 'naver',
                 calendar_id: cal.id,
+                naver_important: parsed.important,
                 naver_synced_at: new Date().toISOString(),
               },
               { onConflict: 'naver_uid' },
-            );
+            ));
             if (!error) created++;
-            else failed++;
           }
-
+          // 저장에 실패한 일정은 지문(etag)을 남기지 않습니다 — 남기면 다음 동기화에서
+          // "변경 없음"으로 건너뛰어 영구 누락돼요.
+          if (error) {
+            failed++;
+            console.error('[naverCalendarSync] 일정 저장 실패:', href, error.message);
+            return;
+          }
           await supabase
             .from(SYNC_STATE_TABLE)
             .upsert({ href, etag, uid: parsed.uid, calendar_id: cal.id }, { onConflict: 'href' });
@@ -130,18 +147,31 @@ export async function syncNaverCalendars(
         }
       }
 
+      for (let i = 0; i < changed.length; i += FETCH_CONCURRENCY) {
+        await Promise.all(changed.slice(i, i + FETCH_CONCURRENCY).map(processOne));
+      }
+
+      // 삭제는 에러·밀린 분량이 없을 때만, 그리고 동기화 기간 창 안의 일정만 지웁니다 —
+      // 창 밖으로 밀려난 일정(30일 지난 것 등)은 상태 행만 정리하고 일정은 남겨둡니다.
       let deleted = 0;
       if (failed === 0 && !backlogged) {
         const currentHrefs = new Set(current.map((c) => c.href));
-        const staleStates = ((stateRows ?? []) as SyncStateRow[]).filter((r) => !currentHrefs.has(r.href));
+        const staleStates = stateRows.filter((r) => !currentHrefs.has(r.href));
+        const winStart = `${startYmd.slice(0, 4)}-${startYmd.slice(4, 6)}-${startYmd.slice(6, 8)}`;
+        const winEnd = `${endYmd.slice(0, 4)}-${endYmd.slice(4, 6)}-${endYmd.slice(6, 8)}`;
         for (const stale of staleStates) {
-          if (stale.uid.startsWith('it-')) {
-            await supabase.from(CALENDAR_TABLE).delete().eq('id', stale.uid.slice(3));
-          } else {
-            await supabase.from(CALENDAR_TABLE).delete().eq('naver_uid', stale.uid);
+          const byId = stale.uid.startsWith('it-');
+          const { data: local } = await supabase
+            .from(CALENDAR_TABLE)
+            .select('id,date')
+            .eq(byId ? 'id' : 'naver_uid', byId ? stale.uid.slice(3) : stale.uid)
+            .maybeSingle();
+          const d = (local as { date?: string } | null)?.date ?? '';
+          if (local && d >= winStart && d <= winEnd) {
+            await supabase.from(CALENDAR_TABLE).delete().eq('id', (local as { id: string }).id);
+            deleted++;
           }
           await supabase.from(SYNC_STATE_TABLE).delete().eq('href', stale.href);
-          deleted++;
         }
       }
 
