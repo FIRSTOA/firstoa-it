@@ -10,7 +10,8 @@ import {
   reserveAssetInSheet,
   updateAssetInSheet,
 } from '@/lib/inventory/sheets';
-import { lookupRentalByAssetId } from '@/lib/rentals/server';
+import { lookupRentalByAssetId, searchRentalAssetsByPrefix } from '@/lib/rentals/server';
+import type { RentalAssetHit } from '@/lib/rentals/spec';
 import { scheduleRepairCalendarEvent } from '@/lib/repairCalendar';
 import {
   ASSET_MOVEMENTS_TABLE,
@@ -294,6 +295,11 @@ export async function lookupRentalAsset(assetId: string): Promise<RentalLookupAc
   return { found: true, model: result.model, serialNo: result.serialNo, specHint: result.specHint };
 }
 
+/** 입고 등록(렌탈/수리입고예정) 자산번호 검색 — 임대리스트에서 자산번호/시리얼 앞부분 일치. */
+export async function searchRentalAssets(query: string): Promise<RentalAssetHit[]> {
+  return searchRentalAssetsByPrefix(query);
+}
+
 export type KnownAssetLookupResult =
   | {
       found: true;
@@ -338,20 +344,20 @@ export async function lookupKnownAsset(assetId: string): Promise<KnownAssetLooku
     }
   }
 
-  const rental = await lookupRentalByAssetId(trimmed);
-  if (rental) {
+  const hit = (await searchRentalAssetsByPrefix(trimmed, 1)).find((h) => h.assetId === trimmed.toUpperCase());
+  if (hit) {
     return {
       found: true,
       source: 'rental',
-      category: '',
-      brand: '',
-      model: rental.model ?? '',
-      cpu: '',
+      category: hit.category,
+      brand: hit.manufacturer,
+      model: hit.model,
+      cpu: hit.cpu,
       spec: '',
-      ram: '',
-      storage: '',
+      ram: hit.ram,
+      storage: hit.storage,
       screen: '',
-      serialNo: rental.serialNo ?? '',
+      serialNo: hit.serialNo,
     };
   }
 

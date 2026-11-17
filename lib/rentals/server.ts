@@ -1,5 +1,6 @@
 import 'server-only';
 import { createAdminClient, isSupabaseConfigured, RENTAL_TABLE } from '@/lib/supabase/server';
+import { rentalRowToHit, type RentalAssetHit } from '@/lib/rentals/spec';
 
 /**
  * 재고입력(AssetModal.tsx)에서 자산번호를 입력하면 기존 임대리스트에서 모델명/시리얼을
@@ -11,6 +12,40 @@ import { createAdminClient, isSupabaseConfigured, RENTAL_TABLE } from '@/lib/sup
  * 주의: 배포 직후 /rentals에서 "firstoa-works 반영"을 최소 1회 실행하기 전까지는
  * it_rental_list가 비어있어 이 조회가 전부 "못 찾음"으로 나옵니다.
  */
+
+const HIT_COLS =
+  'asset_code, vendor_name, site_name, status, contract_date, item, manufacturer, model_name, serial_number, option1, option2, option3, option4';
+
+/**
+ * 입고 등록(렌탈/수리입고예정)의 자산번호 검색 — 자산번호 또는 시리얼 앞부분으로 임대리스트를
+ * 찾고, 같은 자산번호는 계약일이 가장 최근인 건(=지금 나가 있거나 마지막으로 나갔던 곳) 하나로.
+ */
+export async function searchRentalAssetsByPrefix(query: string, limit = 10): Promise<RentalAssetHit[]> {
+  const q = query.trim().toUpperCase();
+  if (q.length < 2 || !/^[A-Z0-9._-]+$/.test(q) || !isSupabaseConfigured()) return [];
+  try {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from(RENTAL_TABLE)
+      .select(HIT_COLS)
+      .or(`asset_code.ilike.${q}%,serial_number.ilike.${q}%`)
+      .order('contract_date', { ascending: false })
+      .limit(200);
+    if (error || !data) return [];
+    const seen = new Map<string, RentalAssetHit>();
+    for (const row of data as Record<string, unknown>[]) {
+      const hit = rentalRowToHit(row);
+      if (!hit.assetId || seen.has(hit.assetId)) continue;
+      seen.set(hit.assetId, hit);
+    }
+    return [...seen.values()]
+      .sort((a, b) => (a.assetId === q ? -1 : b.assetId === q ? 1 : a.assetId.localeCompare(b.assetId)))
+      .slice(0, limit);
+  } catch (err) {
+    console.error('[rentals] 임대리스트 검색 실패:', err);
+    return [];
+  }
+}
 
 export type RentalLookupResult = {
   assetId: string;

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { lookupKnownAsset } from '@/app/actions';
+import { useEffect, useRef, useState } from 'react';
+import { lookupKnownAsset, searchRentalAssets } from '@/app/actions';
+import type { RentalAssetHit } from '@/lib/rentals/spec';
 import { normalizeWonInput } from '@/lib/currency';
 import { RECEIVING_KINDS, type ReceivingEntry, type ReceivingInput } from '@/lib/receiving';
 import { CATEGORIES, SPECS } from '@/lib/types';
@@ -79,7 +80,7 @@ export default function ReceivingModal({ open, editing, pending, locations, onCl
     }
     setForm((prev) => ({
       ...prev,
-      category: prev.category || result.category || prev.category,
+      category: result.category || prev.category,
       brand: prev.brand || result.brand,
       model: prev.model || result.model,
       cpu: prev.cpu || result.cpu,
@@ -97,6 +98,71 @@ export default function ReceivingModal({ open, editing, pending, locations, onCl
   // 렌탈/수리는 둘 다 "이미 있는 자산번호" 기준이라 자산번호가 필수고, 수량 필드도 의미가
   // 없습니다(항상 1건).
   const requiresAssetId = isRental || isRepair;
+
+  // 렌탈/수리입고예정 — 임대리스트(firstoa-works)에 있는 장비라 자산번호/시리얼로 검색해서 고름.
+  const [hits, setHits] = useState<RentalAssetHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showHits, setShowHits] = useState(false);
+  const searchSeq = useRef(0);
+
+  useEffect(() => {
+    if (!open || editing || !requiresAssetId) return;
+    const q = form.assetId.trim();
+    if (q.length < 2) {
+      setHits([]);
+      return;
+    }
+    const seq = ++searchSeq.current;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      const res = await searchRentalAssets(q);
+      if (seq !== searchSeq.current) return;
+      setHits(res);
+      setSearching(false);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [form.assetId, open, editing, requiresAssetId]);
+
+  async function selectHit(hit: RentalAssetHit) {
+    setShowHits(false);
+    setHits([]);
+    searchSeq.current++;
+    const spec = hit.options.filter(Boolean).join(' / ');
+    const where = [hit.vendorName, hit.siteName].filter(Boolean).join(' · ');
+    const memo = `임대리스트: ${where}${hit.status ? ` (${hit.status})` : ''}${spec ? ` · 사양 ${spec}` : ''}`;
+    setForm((prev) => ({
+      ...prev,
+      assetId: hit.assetId,
+      category: hit.category || prev.category,
+      brand: hit.manufacturer || prev.brand,
+      model: hit.model || prev.model,
+      cpu: hit.cpu || prev.cpu,
+      ram: hit.ram || prev.ram,
+      storage: hit.storage || prev.storage,
+      serialNumber: hit.serialNo || prev.serialNumber,
+      notes: prev.notes ? prev.notes : memo,
+    }));
+    // IT재고 시트에도 있는 자산이면 그쪽 사양(사양분류·화면크기 등)으로 빈 칸을 더 채웁니다.
+    setKnownLookup({ status: 'loading' });
+    const known = await lookupKnownAsset(hit.assetId);
+    if (known.found && known.source === 'inventory') {
+      setForm((prev) => ({
+        ...prev,
+        category: known.category || prev.category,
+        brand: prev.brand || known.brand,
+        model: prev.model || known.model,
+        cpu: prev.cpu || known.cpu,
+        spec: prev.spec || known.spec,
+        ram: prev.ram || known.ram,
+        storage: prev.storage || known.storage,
+        screen: prev.screen || known.screen,
+        serialNumber: prev.serialNumber || known.serialNo,
+      }));
+      setKnownLookup({ status: 'found', source: 'inventory' });
+    } else {
+      setKnownLookup({ status: 'found', source: 'rental' });
+    }
+  }
   // 기타주변기기는 소모성 재고라 랜선/어댑터 같은 걸 낱개 자산으로 안 쪼갬 — 수량 필드가
   // "행을 몇 개 만들지"가 아니라 "이 한 행의 재고 수량"을 뜻하게 됨(app/receiving/actions.ts).
   const isConsumable = form.category === '기타주변기기';
@@ -134,7 +200,11 @@ export default function ReceivingModal({ open, editing, pending, locations, onCl
     >
       <div className="modal" style={{ width: '600px' }}>
         <h2>{editing ? '입고 건 수정' : '입고 등록'}</h2>
-        <div className="sub">구매입고예정 또는 렌탈입고예정 건을 등록해요.</div>
+        <div className="sub">
+          {requiresAssetId
+            ? '임대리스트에 있는 장비예요 — 자산번호나 시리얼을 입력해 검색하면 정보가 자동으로 채워져요.'
+            : '구매입고예정·렌탈입고예정·수리입고예정 건을 등록해요.'}
+        </div>
         <div className="form-grid">
           <div className="form-field">
             <label>
@@ -161,16 +231,74 @@ export default function ReceivingModal({ open, editing, pending, locations, onCl
             </select>
           </div>
 
-          <div className="form-field">
+          <div className="form-field" style={{ position: 'relative' }}>
             <label>
               자산번호{requiresAssetId && <span className="required"> *</span>}
             </label>
             <input
               value={form.assetId}
-              onChange={(e) => set('assetId', e.target.value)}
-              onBlur={handleAssetIdBlur}
-              placeholder="예: P2400"
+              onChange={(e) => {
+                set('assetId', e.target.value.toUpperCase());
+                setShowHits(true);
+              }}
+              onFocus={() => setShowHits(true)}
+              onBlur={() => {
+                setShowHits(false);
+                handleAssetIdBlur();
+              }}
+              placeholder={requiresAssetId ? '자산번호 또는 시리얼로 검색 (임대리스트)' : '예: P2400'}
+              autoComplete="off"
             />
+            {requiresAssetId && !editing && showHits && form.assetId.trim().length >= 2 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  zIndex: 20,
+                  background: 'var(--surface, #fff)',
+                  border: '1px solid var(--line, #ddd)',
+                  borderRadius: '8px',
+                  boxShadow: '0 6px 18px rgba(0,0,0,.12)',
+                  maxHeight: '260px',
+                  overflowY: 'auto',
+                  minWidth: '420px',
+                }}
+              >
+                {searching && hits.length === 0 && (
+                  <div style={{ padding: '8px 10px', fontSize: '12px', color: 'var(--ink-400)' }}>임대리스트 검색 중…</div>
+                )}
+                {!searching && hits.length === 0 && (
+                  <div style={{ padding: '8px 10px', fontSize: '12px', color: 'var(--ink-400)' }}>
+                    임대리스트에 일치하는 자산이 없어요.
+                  </div>
+                )}
+                {hits.map((h) => (
+                  <div
+                    key={h.assetId}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectHit(h);
+                    }}
+                    style={{ padding: '7px 10px', cursor: 'pointer', borderBottom: '1px solid var(--line, #eee)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--ink-50, #f5f5f7)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '13px' }}>
+                      {h.assetId}{' '}
+                      <span style={{ fontWeight: 400, color: 'var(--ink-500)' }}>
+                        {[h.manufacturer, h.model].filter(Boolean).join(' ')} · S/N {h.serialNo || '-'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--ink-400)' }}>
+                      {[h.vendorName, h.siteName].filter(Boolean).join(' · ') || '-'} · {h.status || '-'}
+                      {h.contractDate && ` · 계약 ${h.contractDate}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             {!editing && knownLookup.status !== 'idle' && (
               <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
                 {knownLookup.status === 'loading' && '기존 데이터 조회 중…'}
