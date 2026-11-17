@@ -322,13 +322,13 @@ export default function ReceivingTable({
             <th style={{ width: '85px' }}>등록일</th>
             <th style={{ width: '110px' }}>유형</th>
             <th style={{ width: '86px' }}>상태</th>
-            <th style={{ width: '120px' }}>품목</th>
+            <th style={{ width: '145px' }}>품목</th>
             <th style={{ width: '110px' }}>브랜드</th>
             <th style={{ width: '160px' }}>모델명</th>
             <th style={{ width: '100px' }}>자산번호</th>
             <th style={{ width: '160px' }}>시리얼번호</th>
             <th style={{ width: '140px' }}>발주처</th>
-            <th style={{ width: '120px' }}>매입가</th>
+            <th style={{ width: '180px' }}>매입가</th>
             <th style={{ width: '36px' }}>🔗</th>
             <th style={{ width: '70px' }}>수량</th>
             <th style={{ width: '145px' }}>예상입고일</th>

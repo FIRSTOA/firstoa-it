@@ -468,6 +468,6 @@ tbody tr:hover{background:var(--indigo-50);}
 }
 
 /* 입고 대장 표 — 칸이 좁아 글자가 잘리지 않게 최소 폭 확보, 넘치면 가로 스크롤 */
-.receiving-table{min-width:2000px;}
+.receiving-table{min-width:2090px;}
 .receiving-table th{white-space:nowrap;}
 .receiving-table select.inline-cell-input{min-width:0; text-overflow:clip;}
