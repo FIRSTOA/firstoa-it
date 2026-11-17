@@ -120,7 +120,7 @@ function ReceivingRow({
         </select>
       </td>
       <td>
-        <span className={`badge ${STATUS_BADGE_CLASS[entry.status] ?? 'badge-기타'}`}>{entry.status}</span>
+        <span className={`badge ${STATUS_BADGE_CLASS[entry.status] ?? 'badge-기타'}`} style={{ whiteSpace: 'nowrap' }}>{entry.status}</span>
       </td>
       <td>
         <select
@@ -311,8 +311,8 @@ export default function ReceivingTable({
   const today = todayStr();
   const allSelected = entries.length > 0 && entries.every((e) => selectedIds.has(e.id));
   return (
-    <div className="panel" style={{ paddingTop: '6px' }}>
-      <table>
+    <div className="panel" style={{ paddingTop: '6px', overflowX: 'auto' }}>
+      <table className="receiving-table">
         <thead>
           <tr>
             <th style={{ width: '32px' }}>
@@ -320,20 +320,20 @@ export default function ReceivingTable({
             </th>
             <th style={{ width: '50px' }}>순번</th>
             <th style={{ width: '85px' }}>등록일</th>
-            <th>유형</th>
-            <th>상태</th>
-            <th>품목</th>
-            <th>브랜드</th>
-            <th>모델명</th>
-            <th>자산번호</th>
-            <th>시리얼번호</th>
-            <th>발주처</th>
-            <th>매입가</th>
-            <th>🔗</th>
-            <th>수량</th>
-            <th>예상입고일</th>
-            <th>담당자</th>
-            <th>비고</th>
+            <th style={{ width: '110px' }}>유형</th>
+            <th style={{ width: '86px' }}>상태</th>
+            <th style={{ width: '120px' }}>품목</th>
+            <th style={{ width: '110px' }}>브랜드</th>
+            <th style={{ width: '160px' }}>모델명</th>
+            <th style={{ width: '100px' }}>자산번호</th>
+            <th style={{ width: '160px' }}>시리얼번호</th>
+            <th style={{ width: '140px' }}>발주처</th>
+            <th style={{ width: '120px' }}>매입가</th>
+            <th style={{ width: '36px' }}>🔗</th>
+            <th style={{ width: '70px' }}>수량</th>
+            <th style={{ width: '145px' }}>예상입고일</th>
+            <th style={{ width: '95px' }}>담당자</th>
+            <th style={{ width: '220px' }}>비고</th>
             <th style={{ width: '150px' }} />
           </tr>
         </thead>
