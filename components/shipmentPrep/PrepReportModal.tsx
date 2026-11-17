@@ -8,6 +8,7 @@ import {
   deletePrepPhotos,
   getPrepReport,
   lookupUnitByAsset,
+  markPrepReportSent,
   savePrepReport,
   sendPrepReport,
   appendPrepPhotos,
@@ -93,7 +94,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     if (!id || lookedUp.current[i] === id) return;
     lookedUp.current[i] = id;
     setInfo(`${id} 조회 중…`);
-    const found = await lookupUnitByAsset(id);
+    const found = await lookupUnitByAsset(id, `${event.title} ${event.items.join(' ')}`);
     if (!found.source) {
       setInfo(`${id}: IT재고·임대리스트에서 못 찾았어요 — 직접 입력해주세요.`);
       return;
@@ -116,7 +117,10 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
       ),
     );
     if (found.serials.length > 1) setSerialChoices((prev) => ({ ...prev, [i]: found.serials }));
-    setInfo(`${id}: ${found.source === 'inventory' ? 'IT재고' : '임대리스트'}에서 불러왔어요.`);
+    setInfo(
+      `${id}: ${found.source === 'inventory' ? `IT재고(${found.category})` : '임대리스트'}에서 불러왔어요.` +
+        (found.duplicates?.length ? ` ⚠️ 같은 자산번호가 ${found.duplicates.join(', ')}에도 있어요 — 일정 품목에 맞는 쪽으로 채웠어요.` : ''),
+    );
   }
 
   // 사진은 저장만(OCR 없음) — 3장씩 동시에 올리고, 목록 저장은 끝에 한 번.
@@ -460,6 +464,25 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
         {info && <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: '#166534', marginTop: 8 }}>{info}</div>}
         {error && <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: 'var(--red-600)', marginTop: 8 }}>{error}</div>}
 
+        {!sentAt && !loading && (
+          <div style={{ textAlign: 'right', marginTop: 8 }}>
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={async () => {
+                if (!confirm('카톡은 이미 나갔는데 표시만 안 된 경우에 써요.\n카톡은 다시 보내지 않고 "카톡 발송됨"으로만 표시할까요?')) return;
+                setBusy(true);
+                const r = await markPrepReportSent(event.id);
+                setBusy(false);
+                if (r.ok) onClose();
+                else setError(r.error);
+              }}
+            >
+              이미 카톡 보냄 → 발송됨으로 표시
+            </button>
+          </div>
+        )}
         <div className="modal-footer" style={{ flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy || !!uploading}>
             닫기

@@ -37,13 +37,13 @@ async function readTab(category: string) {
   }
 }
 
-async function buildIndex(): Promise<Record<string, AssetBrief>> {
+async function buildIndex(): Promise<Record<string, AssetBrief[]>> {
   const lists = await Promise.all(CATEGORIES.map(readTab));
-  const out: Record<string, AssetBrief> = {};
+  const out: Record<string, AssetBrief[]> = {};
   for (const a of lists.flat()) {
     const id = a.assetId.trim().toUpperCase();
     if (!id) continue;
-    out[id] = {
+    (out[id] ??= []).push({
       assetId: id,
       category: a.category,
       brand: a.brand,
@@ -51,20 +51,33 @@ async function buildIndex(): Promise<Record<string, AssetBrief>> {
       serialNo: a.serialNo,
       specLabel: a.specLabel ?? '',
       gubun: a.gubunCode || '',
-    };
+    });
   }
   return out;
 }
 
-const cachedIndex = unstable_cache(buildIndex, ['it-asset-brief-index'], { revalidate: 300 });
+const cachedIndex = unstable_cache(buildIndex, ['it-asset-brief-index-v2'], { revalidate: 300 });
 
-let memo: { at: number; index: Record<string, AssetBrief> } | null = null;
+let memo: { at: number; index: Record<string, AssetBrief[]> } | null = null;
 
-export async function findAssetBrief(assetId: string): Promise<AssetBrief | null> {
+/**
+ * 같은 자산번호가 여러 탭(예: P1024 노트북·모니터)에 있으면 전부 돌려줍니다.
+ * hint(일정 품목 글자)에 맞는 품목을 맨 앞에, 그 외엔 노트북·데스크탑 먼저.
+ */
+export async function findAssetBriefs(assetId: string, hint = ''): Promise<AssetBrief[]> {
   const key = assetId.trim().toUpperCase();
-  if (!key) return null;
+  if (!key) return [];
   if (!memo || Date.now() - memo.at > 300_000) {
     memo = { at: Date.now(), index: await cachedIndex() };
   }
-  return memo.index[key] ?? null;
+  const list = [...(memo.index[key] ?? [])];
+  const score = (c: string) => {
+    const hinted =
+      (c === '노트북' && /노트북|사노|설노|맥북|갤럭시북|그램/.test(hint)) ||
+      (c === '데스크탑' && /데스크|사데|설데|PC/i.test(hint)) ||
+      (c === '모니터' && /모니터/.test(hint)) ||
+      (c === '빔프로젝트' && /빔|프로젝터/.test(hint));
+    return (hinted ? 0 : 10) + ['노트북', '데스크탑', '모니터', '빔프로젝트', '기타주변기기'].indexOf(c);
+  };
+  return list.sort((a, b) => score(a.category) - score(b.category));
 }

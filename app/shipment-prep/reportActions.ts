@@ -2,7 +2,7 @@
 
 import { headers } from 'next/headers';
 import { after } from 'next/server';
-import { findAssetBrief } from '@/lib/inventory/assetIndex';
+import { findAssetBriefs } from '@/lib/inventory/assetIndex';
 import { getAssetFromSheets, updateAssetInSheet } from '@/lib/inventory/sheets';
 import { logAssetMovement } from '@/lib/inventory/movements';
 import { extractSaleInfoFromImage, isOcrConfigured } from '@/lib/ocr';
@@ -194,19 +194,29 @@ export async function ocrPrepPhoto(base64: string, mediaType: string): Promise<R
   }
 }
 
-export type UnitLookup = { serials: string[]; model: string; gubun: string; spec: string; category: string; source: 'inventory' | 'rental' | '' };
+export type UnitLookup = {
+  serials: string[];
+  model: string;
+  gubun: string;
+  spec: string;
+  category: string;
+  source: 'inventory' | 'rental' | '';
+  /** 같은 자산번호가 다른 탭에도 있으면 그 품목들(예: ['모니터']) */
+  duplicates?: string[];
+};
 
 /**
  * 자산번호 → 시리얼·모델명·구분값·스펙. IT재고(구글시트)가 구분값/스펙까지 있어 우선,
  * 없으면 임대리스트(firstoa-works 사본)의 모델명·시리얼·옵션.
  */
-export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
+export async function lookupUnitByAsset(assetId: string, hint = ''): Promise<UnitLookup> {
   const key = assetId.trim().toUpperCase();
   const empty: UnitLookup = { serials: [], model: '', gubun: '', spec: '', category: '', source: '' };
   if (!/^[A-Z0-9._-]{2,}$/.test(key)) return empty;
   // 공유 캐시 색인 먼저(시트 읽기 한도 회피), 실패하면 단건 조회.
+  const briefs = await findAssetBriefs(key, hint).catch(() => []);
   const brief =
-    (await findAssetBrief(key).catch(() => null)) ??
+    briefs[0] ??
     (await getAssetFromSheets(key)
       .then((a) =>
         a ? { serialNo: a.serialNo, brand: a.brand, model: a.model, specLabel: a.specLabel ?? '', gubun: a.gubunCode || '', category: a.category } : null,
@@ -224,6 +234,7 @@ export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
       spec: brief.specLabel,
       category: brief.category,
       source: 'inventory',
+      duplicates: briefs.slice(1).map((b) => `${b.category}(${[b.brand, b.model].filter(Boolean).join(' ')})`),
     };
   }
   const { data } = await createAdminClient()
@@ -406,4 +417,15 @@ export async function getAlbum(id: string): Promise<{ title: string; date: strin
   const r = data as { company: string; model: string; photos: PrepPhoto[]; event_id: string };
   const { data: ev } = await supabase.from(CALENDAR_TABLE).select('date').eq('id', r.event_id).maybeSingle();
   return { title: [r.company, r.model].filter(Boolean).join(' · ') || '출고 준비 사진', date: (ev as { date?: string } | null)?.date ?? '', photos: r.photos ?? [] };
+}
+
+/** 카톡은 이미 나갔는데 "발송 완료"가 저장되지 않은 보고를 발송됨으로 표시(카톡 다시 안 보냄). */
+export async function markPrepReportSent(eventId: string): Promise<Result> {
+  const report = await ensureReport(eventId);
+  if (report.sent_at) return { ok: true };
+  const { error } = await createAdminClient()
+    .from(REPORTS_TABLE)
+    .update({ sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', report.id);
+  return error ? { ok: false, error: error.message } : { ok: true };
 }
