@@ -190,7 +190,7 @@ export default function ShipmentPrepPage() {
         style={{ width: full ? '100%' : undefined, whiteSpace: 'nowrap', fontSize: full ? 14 : 12 }}
         onClick={() => setReportEvent(ev)}
       >
-        {ev.reportSent ? `✅ 발송됨 · 사진 ${ev.photoCount}` : `📷 완료 보고${ev.photoCount ? ` · ${ev.photoCount}장` : ''}`}
+        {ev.reportSent ? `✅ 카톡 발송됨 · 사진 ${ev.photoCount}장` : ev.photoCount ? `📷 완료 보고 (미발송) · 사진 ${ev.photoCount}장` : `📷 완료 보고`}
       </button>
     );
   }
