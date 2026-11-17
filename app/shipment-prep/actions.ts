@@ -1,8 +1,7 @@
 'use server';
 
-import { getEventWithEtag, isNaverCalDavConfigured, listCalendars, putEventByHref, rewriteSummaryTags } from '@/lib/naverCaldav';
+import { getEventWithEtag, isNaverCalDavConfigured, putEventByHref, rewriteSummaryTags } from '@/lib/naverCaldav';
 import { syncNaverCalendars } from '@/lib/naverCalendarSync';
-import { reportChangedEvents } from '@/lib/naverCaldav';
 import {
   applyPrepStage,
   eventKindOf,
@@ -179,28 +178,7 @@ export async function triggerPrepSync(): Promise<{ ok: boolean; error?: string; 
     const full = Date.now() - lastFullSync > 5 * 60_000;
     if (full) lastFullSync = Date.now();
     const r = await syncNaverCalendars(full);
-    // 임시 진단: 11/18 네이버 원본 일정(제목·별표)
-    let debug: unknown = null;
-    try {
-      const list = await reportChangedEvents('75632617', '20261118', '20261118');
-      debug = await Promise.all(
-        list.map(async (it) => {
-          const { ics } = await getEventWithEtag(it.href);
-          const un = ics.replace(/\r?\n[ \t]/g, '');
-          const g = (k: string) => (un.match(new RegExp('^' + k + '[^:]*:(.*)$', 'm')) || [])[1] ?? '';
-          return {
-            href: it.href.slice(-30),
-            uid: g('UID').slice(0, 44),
-            title: g('SUMMARY').slice(0, 50),
-            pri: g('PRIORITY'),
-            x: un.split(/\r?\n/).filter((l) => /^X-NAVER/.test(l) && !/REGISTERER|MODIFIER/.test(l)).map((l) => l.slice(0, 60)),
-          };
-        }),
-      );
-    } catch (e) {
-      debug = String(e);
-    }
-    return r.ok ? { ok: true, results: 'results' in r ? { ...r.results, _debug: debug } : undefined } : { ok: false, error: 'error' in r ? r.error : '' };
+    return r.ok ? { ok: true, results: 'results' in r ? r.results : undefined } : { ok: false, error: 'error' in r ? r.error : '' };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

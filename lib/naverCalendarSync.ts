@@ -207,6 +207,18 @@ export async function syncNaverCalendars(
         await Promise.all(changed.slice(i, i + FETCH_CONCURRENCY).map(processOne));
       }
 
+      // 네이버는 별표(★)·완료 체크만 바꾸면 etag가 안 바뀌어요. 전체 대조 때는 가까운 일정
+      // (어제~7일 뒤)을 etag와 상관없이 다시 읽어 별표를 맞춥니다.
+      let refreshed = 0;
+      if (forceFull) {
+        const done = new Set(changed.map((c) => c.href));
+        const near = (await reportChangedEvents(cal.id, todayPlus(-1), todayPlus(7))).filter((c) => !done.has(c.href));
+        for (let i = 0; i < near.length; i += FETCH_CONCURRENCY) {
+          await Promise.all(near.slice(i, i + FETCH_CONCURRENCY).map(processOne));
+        }
+        refreshed = near.length;
+      }
+
       // 삭제는 에러·밀린 분량이 없을 때만, 그리고 동기화 기간 창 안의 일정만 지웁니다 —
       // 창 밖으로 밀려난 일정(30일 지난 것 등)은 상태 행만 정리하고 일정은 남겨둡니다.
       let deleted = 0;
@@ -237,13 +249,13 @@ export async function syncNaverCalendars(
         await supabase.from(NAVER_CALENDARS_TABLE).update({ ctag: newCtag }).eq('id', cal.id);
       }
 
-      results[cal.id] = { name: cal.name, checked: current.length, updated, created, deleted, failed, backlogged };
+      results[cal.id] = { name: cal.name, checked: current.length, refreshed, updated, created, deleted, failed, backlogged };
     } catch (err) {
       console.error('[naverCalendarSync] 캘린더 동기화 실패:', cal.id, err);
       results[cal.id] = { error: err instanceof Error ? err.message : String(err) };
     }
   }
 
-  results._dup = { collided: collided.length, hrefs: collided.map((c) => c.uid).slice(0, 10) };
+  if (collided.length) results._dup = { collided: collided.length };
   return { ok: true, results };
 }
