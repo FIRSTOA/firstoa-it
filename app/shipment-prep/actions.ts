@@ -170,10 +170,10 @@ export async function syncPrepTitleTag(eventId: string): Promise<TitleTagResult>
 }
 
 /** 화면을 열어두면 60초마다 호출 — 네이버 → 통합캘린더 동기화. */
-export async function triggerPrepSync(): Promise<{ ok: boolean; error?: string }> {
+export async function triggerPrepSync(): Promise<{ ok: boolean; error?: string; results?: unknown }> {
   try {
     const r = await syncNaverCalendars();
-    return r.ok ? { ok: true } : { ok: false, error: 'error' in r ? r.error : '' };
+    return r.ok ? { ok: true, results: 'results' in r ? r.results : undefined } : { ok: false, error: 'error' in r ? r.error : '' };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

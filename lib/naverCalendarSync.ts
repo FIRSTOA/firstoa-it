@@ -242,5 +242,6 @@ export async function syncNaverCalendars(
     }
   }
 
+  results._dup = { collided: collided.length, hrefs: collided.map((c) => c.uid).slice(0, 10) };
   return { ok: true, results };
 }
