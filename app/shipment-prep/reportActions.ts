@@ -47,17 +47,27 @@ async function ensureReport(eventId: string): Promise<ReportRow> {
   return created as ReportRow;
 }
 
-export async function getPrepReport(eventId: string): Promise<Result<{ report: PrepReport | null; photoItems: string[] }>> {
+export type CheckItem = { label: string; grp: string };
+
+export async function getPrepReport(eventId: string): Promise<Result<{ report: PrepReport | null; photoItems: CheckItem[] }>> {
   const supabase = createAdminClient();
   const [rep, items] = await Promise.all([
     supabase.from(REPORTS_TABLE).select('*').eq('event_id', eventId).maybeSingle(),
-    supabase.from(PHOTO_ITEMS_TABLE).select('label').order('sort_order').order('created_at'),
+    supabase
+      .from(PHOTO_ITEMS_TABLE)
+      .select('label,grp')
+      .order('sort_order')
+      .order('created_at')
+      .then(async (r) =>
+        // shipment_prep_checklist.sql 실행 전이면 grp 칸이 없어요 — 묶음 없이 읽기
+        r.error ? await supabase.from(PHOTO_ITEMS_TABLE).select('label').order('sort_order').order('created_at') : r,
+      ),
   ]);
   if (rep.error) return { ok: false, error: /it_prep_reports/.test(rep.error.message) ? 'supabase/shipment_prep_schema.sql 을 먼저 실행해주세요.' : rep.error.message };
   return {
     ok: true,
     report: rep.data ? toReport(rep.data as ReportRow) : null,
-    photoItems: ((items.data ?? []) as { label: string }[]).map((i) => i.label),
+    photoItems: ((items.data ?? []) as { label: string; grp?: string }[]).map((i) => ({ label: i.label, grp: i.grp || '기타' })),
   };
 }
 
@@ -253,12 +263,16 @@ export async function lookupSerialsByAsset(assetId: string): Promise<string[]> {
 
 // ── 사진 체크리스트 항목 ─────────────────────────────────────
 
-export async function addPhotoItem(label: string): Promise<Result> {
+export async function addPhotoItem(label: string, grp = '기타'): Promise<Result> {
   const l = label.trim();
   if (!l) return { ok: false, error: '항목 이름을 입력해주세요.' };
   const supabase = createAdminClient();
   const { count } = await supabase.from(PHOTO_ITEMS_TABLE).select('label', { count: 'exact', head: true });
-  const { error } = await supabase.from(PHOTO_ITEMS_TABLE).upsert({ label: l, sort_order: (count ?? 0) + 1 }, { onConflict: 'label' });
+  const base = grp === '데스크탑&노트북' ? 100 : grp === '모니터' ? 200 : 300;
+  let { error } = await supabase.from(PHOTO_ITEMS_TABLE).upsert({ label: l, grp, sort_order: base + 50 + (count ?? 0) }, { onConflict: 'label' });
+  if (error && /grp/.test(error.message)) {
+    ({ error } = await supabase.from(PHOTO_ITEMS_TABLE).upsert({ label: l, sort_order: (count ?? 0) + 1 }, { onConflict: 'label' }));
+  }
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 

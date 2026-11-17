@@ -11,6 +11,7 @@ import {
   savePrepReport,
   sendPrepReport,
   appendPrepPhotos,
+  type CheckItem,
 } from '@/app/shipment-prep/reportActions';
 import { resizeImageFile } from '@/lib/imageResize';
 import { countUnits, KAKAO_ROOM, shortDateLabel, type PrepPhoto, type PrepUnit } from '@/lib/shipmentPrep';
@@ -29,7 +30,17 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
   const [units, setUnits] = useState<PrepUnit[]>([]);
   const [note, setNote] = useState('');
   const [photos, setPhotos] = useState<PrepPhoto[]>([]);
-  const [photoItems, setPhotoItems] = useState<string[]>([]);
+  const [photoItems, setPhotoItems] = useState<CheckItem[]>([]);
+  const [newGrp, setNewGrp] = useState('데스크탑&노트북');
+  // 일정 품목에 맞는 묶음만 보여줌(모니터만 나가는 건이면 PC 항목 제외). '기타'는 항상.
+  const itemText = `${event.title} ${event.items.join(' ')}`;
+  const showPc = /노트북|데스크|PC|사노|사데|설노|설데|맥북|갤럭시북/i.test(itemText);
+  const showMon = /모니터/.test(itemText);
+  const visibleItems = photoItems.filter(
+    (it) =>
+      (it.grp === '데스크탑&노트북' && showPc) || (it.grp === '모니터' && showMon) || !['데스크탑&노트북', '모니터'].includes(it.grp),
+  );
+  const visibleLabels = visibleItems.map((it) => it.label);
   const [checked, setChecked] = useState<string[]>([]);
   const [newItem, setNewItem] = useState('');
   const [editItems, setEditItems] = useState(false);
@@ -69,7 +80,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     })();
   }, [event]);
 
-  const draft = () => ({ company, model, author, units, checkedItems: checked, note });
+  const draft = () => ({ company, model, author, units, checkedItems: checked.filter((c) => visibleLabels.includes(c)), note });
 
   function setUnit(i: number, patch: Partial<PrepUnit>) {
     setUnits((prev) => prev.map((u, k) => (k === i ? { ...u, ...patch } : u)));
@@ -169,7 +180,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     if (!confirm(`"${KAKAO_ROOM}" 카톡방으로 보고를 보낼까요?${event.kind !== '철수' ? '\n(자산번호가 있는 기기는 IT재고 위치가 임대중으로 바뀌어요)' : ''}`)) return;
     setBusy(true);
     setError('');
-    const res = await sendPrepReport(event.id, draft(), photoItems.length);
+    const res = await sendPrepReport(event.id, draft(), visibleItems.length);
     setBusy(false);
     if (!res.ok) {
       setError(res.error);
@@ -183,16 +194,17 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
   }
 
   async function addItem() {
-    const r = await addPhotoItem(newItem);
+    const label = newItem.trim();
+    const r = await addPhotoItem(label, newGrp);
     if (!r.ok) return setError(r.error);
-    setPhotoItems((p) => (p.includes(newItem.trim()) ? p : [...p, newItem.trim()]));
+    setPhotoItems((p) => (p.some((x) => x.label === label) ? p : [...p, { label, grp: newGrp }]));
     setNewItem('');
   }
   async function removeItem(label: string) {
     if (!confirm(`체크리스트에서 "${label}" 항목을 뺄까요? (모든 보고에 적용)`)) return;
     const r = await deletePhotoItem(label);
     if (!r.ok) return setError(r.error);
-    setPhotoItems((p) => p.filter((x) => x !== label));
+    setPhotoItems((p) => p.filter((x) => x.label !== label));
     setChecked((c) => c.filter((x) => x !== label));
   }
 
@@ -331,36 +343,92 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
             </div>
 
             <div className="detail-section-title">
-              사진 체크 {checked.filter((c) => photoItems.includes(c)).length}/{photoItems.length}
+              출고 체크리스트 {checked.filter((c) => visibleLabels.includes(c)).length}/{visibleItems.length}
               <button type="button" className="chip" style={{ marginLeft: 8 }} onClick={() => setEditItems(!editItems)}>
                 {editItems ? '편집 끝' : '항목 편집'}
               </button>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {photoItems.map((label) => {
-                const on = checked.includes(label);
-                return (
-                  <span key={label} style={{ display: 'inline-flex', gap: 2 }}>
+            {[...new Set(['데스크탑&노트북', '모니터', '기타', ...visibleItems.map((x) => x.grp)])].map((grp) => {
+              const items = visibleItems.filter((x) => x.grp === grp);
+              if (!items.length) return null;
+              const done = items.filter((x) => checked.includes(x.label)).length;
+              return (
+                <div key={grp} style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, margin: '4px 0 6px' }}>
+                    {grp}
+                    <span style={{ color: 'var(--ink-400)', fontWeight: 500 }}>
+                      {done}/{items.length}
+                    </span>
                     <button
                       type="button"
-                      className={`chip${on ? ' active' : ''}`}
-                      onClick={() => setChecked(on ? checked.filter((c) => c !== label) : [...checked, label])}
+                      className="chip"
+                      onClick={() =>
+                        setChecked(
+                          done === items.length
+                            ? checked.filter((c) => !items.some((x) => x.label === c))
+                            : [...new Set([...checked, ...items.map((x) => x.label)])],
+                        )
+                      }
                     >
-                      {on ? '✓ ' : ''}
-                      {label}
+                      {done === items.length ? '모두 해제' : '모두 체크'}
                     </button>
-                    {editItems && (
-                      <button type="button" className="icon-btn danger" onClick={() => removeItem(label)} title="항목 삭제">
-                        ×
-                      </button>
-                    )}
-                  </span>
-                );
-              })}
-            </div>
+                  </div>
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    {items.map(({ label }) => {
+                      const on = checked.includes(label);
+                      return (
+                        <label
+                          key={label}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            fontSize: 13,
+                            padding: '5px 8px',
+                            borderRadius: 6,
+                            background: on ? '#f0fdf4' : 'var(--ink-50, #f8fafc)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => setChecked(on ? checked.filter((c) => c !== label) : [...checked, label])}
+                          />
+                          <span style={{ flex: 1 }}>{label}</span>
+                          {editItems && (
+                            <button
+                              type="button"
+                              className="icon-btn danger"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                removeItem(label);
+                              }}
+                              title="항목 삭제"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
             {editItems && (
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                <input value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="새 체크 항목 (예: 바이오스 비밀번호 해제)" style={{ flex: 1 }} />
+              <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                <select value={newGrp} onChange={(e) => setNewGrp(e.target.value)}>
+                  <option>데스크탑&노트북</option>
+                  <option>모니터</option>
+                  <option>기타</option>
+                </select>
+                <input
+                  value={newItem}
+                  onChange={(e) => setNewItem(e.target.value)}
+                  placeholder="새 체크 항목 (예: 바이오스 비밀번호 해제)"
+                  style={{ flex: 1, minWidth: 180 }}
+                />
                 <button type="button" className="btn btn-ghost" onClick={addItem} disabled={!newItem.trim()}>
                   + 항목 추가
                 </button>

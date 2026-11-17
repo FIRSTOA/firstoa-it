@@ -184,7 +184,7 @@ export function buildPrepMessage(input: {
       (u, i) =>
         [`${i + 1}) ${u.assetId || '-'}`, u.model || '-', u.gubun || '-', u.spec || '-', u.serial || '-'].join(' / '),
     ),
-    `사진체크 : ${input.checked}/${input.totalItems}`,
+    `체크리스트 : ${input.checked}/${input.totalItems}`,
     `작성자 : ${input.author || '-'}`,
   ];
   if (input.note?.trim()) lines.push(`비고 : ${input.note.trim()}`);
