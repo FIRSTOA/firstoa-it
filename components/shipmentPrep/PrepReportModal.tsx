@@ -8,10 +8,9 @@ import {
   deletePrepPhotos,
   getPrepReport,
   lookupUnitByAsset,
-  ocrPrepPhoto,
   savePrepReport,
   sendPrepReport,
-  uploadPrepPhoto,
+  appendPrepPhotos,
 } from '@/app/shipment-prep/reportActions';
 import { resizeImageFile } from '@/lib/imageResize';
 import { countUnits, KAKAO_ROOM, shortDateLabel, type PrepPhoto, type PrepUnit } from '@/lib/shipmentPrep';
@@ -108,43 +107,38 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     setInfo(`${id}: ${found.source === 'inventory' ? 'IT재고' : '임대리스트'}에서 불러왔어요.`);
   }
 
+  // 사진은 저장만(OCR 없음) — 3장씩 동시에 올리고, 목록 저장은 끝에 한 번.
   async function onFiles(files: FileList | null) {
     if (!files?.length) return;
     setError('');
     const list = Array.from(files);
-    for (let n = 0; n < list.length; n++) {
-      setUploading(`사진 올리는 중… ${n + 1}/${list.length}`);
+    const added: PrepPhoto[] = [];
+    let done = 0;
+    setUploading(`사진 올리는 중… 0/${list.length}`);
+    const one = async (file: File) => {
       try {
-        const { base64, mediaType } = await resizeImageFile(list[n], 1600, 0.85);
-        const [up, ocr] = await Promise.all([uploadPrepPhoto(event.id, base64, mediaType), ocrPrepPhoto(base64, mediaType)]);
-        if (!up.ok) {
-          setError(up.error);
-          continue;
-        }
-        setPhotos((prev) => [...prev, up.photo]);
-        // OCR — 빈 시리얼·자산번호 칸만 채움(직접 친 값은 덮어쓰지 않음)
-        if (ocr.ok && (ocr.serial || ocr.assetId)) {
-          setUnits((prev) => {
-            const next = [...prev];
-            const already = next.some(
-              (u) => (ocr.serial && u.serial === ocr.serial) || (ocr.assetId && u.assetId === ocr.assetId),
-            );
-            if (already) return next;
-            const idx = next.findIndex((u) => !u.serial.trim() && !u.assetId.trim());
-            const target = idx >= 0 ? idx : next.findIndex((u) => (!u.serial.trim() && !!ocr.serial) || (!u.assetId.trim() && !!ocr.assetId));
-            if (target < 0) return next;
-            next[target] = {
-              ...next[target],
-              serial: next[target].serial || ocr.serial,
-              assetId: next[target].assetId || ocr.assetId,
-            };
-            return next;
-          });
-          setInfo(`사진에서 읽음: ${[ocr.serial && `시리얼 ${ocr.serial}`, ocr.assetId && `자산번호 ${ocr.assetId}`].filter(Boolean).join(' · ')}`);
-        }
+        const { base64, mediaType } = await resizeImageFile(file, 1600, 0.85);
+        const res = await fetch('/api/shipment-prep/photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId: event.id, base64, mediaType }),
+        });
+        const up = (await res.json()) as { ok: true; photo: PrepPhoto } | { ok: false; error: string };
+        if (up.ok) {
+          added.push(up.photo);
+          setPhotos((prev) => [...prev, up.photo]);
+        } else setError(up.error);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
+      done++;
+      setUploading(`사진 올리는 중… ${done}/${list.length}`);
+    };
+    for (let i = 0; i < list.length; i += 3) await Promise.all(list.slice(i, i + 3).map(one));
+    if (added.length) {
+      const saved = await appendPrepPhotos(event.id, added);
+      if (saved.ok) setPhotos(saved.photos);
+      else setError(saved.error);
     }
     setUploading('');
     if (fileRef.current) fileRef.current.value = '';

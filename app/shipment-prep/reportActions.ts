@@ -134,6 +134,34 @@ export async function uploadPrepPhoto(eventId: string, base64: string, mediaType
   }
 }
 
+/** 저장소에만 올림(DB 안 건드림) — 여러 장을 동시에 올릴 수 있게. 목록 저장은 appendPrepPhotos 한 번. */
+export async function storePrepPhotoFile(eventId: string, base64: string, mediaType: string): Promise<Result<{ photo: PrepPhoto }>> {
+  try {
+    await ensureBucket();
+    const supabase = createAdminClient();
+    const path = `${eventId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const { error } = await supabase.storage.from(BUCKET).upload(path, Buffer.from(base64, 'base64'), { contentType: mediaType, upsert: false });
+    if (error) return { ok: false, error: `사진 업로드 실패: ${error.message}` };
+    const url = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+    return { ok: true, photo: { path, url, at: new Date().toISOString() } };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** 올린 사진들을 보고서 목록에 한 번에 추가(최신 목록에 이어 붙임). */
+export async function appendPrepPhotos(eventId: string, added: PrepPhoto[]): Promise<Result<{ photos: PrepPhoto[] }>> {
+  const report = await ensureReport(eventId);
+  const supabase = createAdminClient();
+  const { data: fresh } = await supabase.from(REPORTS_TABLE).select('photos').eq('id', report.id).single();
+  const cur = (((fresh as { photos: PrepPhoto[] } | null)?.photos ?? []) as PrepPhoto[]);
+  const known = new Set(cur.map((p) => p.path));
+  const photos = [...cur, ...added.filter((p) => !known.has(p.path))];
+  const { error } = await supabase.from(REPORTS_TABLE).update({ photos, updated_at: new Date().toISOString() }).eq('id', report.id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, photos };
+}
+
 export async function deletePrepPhotos(eventId: string, paths: string[]): Promise<Result<{ photos: PrepPhoto[] }>> {
   const supabase = createAdminClient();
   const report = await ensureReport(eventId);
