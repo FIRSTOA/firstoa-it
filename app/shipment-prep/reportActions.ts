@@ -2,6 +2,7 @@
 
 import { headers } from 'next/headers';
 import { updateAsset } from '@/app/actions';
+import { findAssetBrief } from '@/lib/inventory/assetIndex';
 import { getAssetFromSheets } from '@/lib/inventory/sheets';
 import { logAssetMovement } from '@/lib/inventory/movements';
 import { extractSaleInfoFromImage, isOcrConfigured } from '@/lib/ocr';
@@ -165,23 +166,25 @@ export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
   const key = assetId.trim().toUpperCase();
   const empty: UnitLookup = { serials: [], model: '', gubun: '', spec: '', category: '', source: '' };
   if (!/^[A-Z0-9._-]{2,}$/.test(key)) return empty;
-  const asset = await getAssetFromSheets(key).catch(() => null);
-  if (asset) {
-    // 사양 = IT재고 시트의 합쳐진 사양 그대로(예: I7/12/16/512/X/4050). 없으면 칸들을 같은 형식으로.
-    const spec =
-      asset.specLabel?.trim() ||
-      [asset.cpu, asset.ram, asset.ssd ?? '', asset.hdd ?? '', asset.gpu ?? '']
-        .map((v) => String(v ?? '').trim())
-        .filter(Boolean)
-        .join('/');
-    const rentalSerials = await lookupSerialsByAsset(key).catch(() => []);
-    const serials = [...new Set([asset.serialNo, ...rentalSerials].map((s) => (s ?? '').trim()).filter(Boolean))];
+  // 공유 캐시 색인 먼저(시트 읽기 한도 회피), 실패하면 단건 조회.
+  const brief =
+    (await findAssetBrief(key).catch(() => null)) ??
+    (await getAssetFromSheets(key)
+      .then((a) =>
+        a ? { serialNo: a.serialNo, brand: a.brand, model: a.model, specLabel: a.specLabel ?? '', gubun: a.gubunCode || '', category: a.category } : null,
+      )
+      .catch(() => null));
+  if (brief) {
+    const { data: rental } = await createAdminClient().from(RENTAL_TABLE).select('serial_number').eq('asset_code', key).limit(20);
+    const rentalSerials = ((rental ?? []) as { serial_number: string | null }[]).map((r) => (r.serial_number ?? '').trim());
+    // IT재고 시트 시리얼을 맨 앞에(자동 입력), 임대리스트 시리얼은 후보로.
+    const serials = [...new Set([brief.serialNo, ...rentalSerials].map((x) => (x ?? '').trim()).filter(Boolean))];
     return {
       serials,
-      model: [asset.brand, asset.model].filter(Boolean).join(' '),
-      gubun: asset.gubunCode || asset.specLabel || asset.spec || '',
-      spec,
-      category: asset.category,
+      model: [brief.brand, brief.model].filter(Boolean).join(' '),
+      gubun: brief.gubun,
+      spec: brief.specLabel,
+      category: brief.category,
       source: 'inventory',
     };
   }
