@@ -50,6 +50,9 @@ export async function syncNaverCalendars(
     return { ok: false, error: calError.message };
   }
 
+  const probe = await supabase.from(CALENDAR_TABLE).select('naver_important').limit(1);
+  const hasImportantCol = !probe.error;
+
   const startYmd = todayPlus(-30);
   const endYmd = todayPlus(120);
   const results: Record<string, unknown> = {};
@@ -89,6 +92,14 @@ export async function syncNaverCalendars(
       let created = 0;
       let failed = 0;
 
+      // shipment_prep_schema.sql 실행 전이면 naver_important 칸이 없어요 — 그 칸만 빼고 저장.
+      const stripImportant = <T extends Record<string, unknown>>(row: T): T => {
+        if (hasImportantCol) return row;
+        const { naver_important: _omit, ...rest } = row;
+        void _omit;
+        return rest as T;
+      };
+
       async function processOne({ href, etag }: { href: string; etag: string }) {
         try {
           const ics = await getEventByHref(href);
@@ -97,9 +108,7 @@ export async function syncNaverCalendars(
 
           let error: { message: string } | null = null;
           if (parsed.uid.startsWith('it-')) {
-            ({ error } = await supabase
-              .from(CALENDAR_TABLE)
-              .update({
+            const patch = stripImportant({
                 title: parsed.title,
                 date: parsed.date,
                 time: parsed.time,
@@ -108,12 +117,12 @@ export async function syncNaverCalendars(
                 status: parsed.completed ? '완료' : '진행중',
                 naver_important: parsed.important,
                 naver_synced_at: new Date().toISOString(),
-              })
-              .eq('id', parsed.uid.slice(3)));
+              });
+            ({ error } = await supabase.from(CALENDAR_TABLE).update(patch).eq('id', parsed.uid.slice(3)));
             if (!error) updated++;
           } else {
             ({ error } = await supabase.from(CALENDAR_TABLE).upsert(
-              {
+              stripImportant({
                 title: parsed.title,
                 date: parsed.date,
                 time: parsed.time,
@@ -126,7 +135,7 @@ export async function syncNaverCalendars(
                 calendar_id: cal.id,
                 naver_important: parsed.important,
                 naver_synced_at: new Date().toISOString(),
-              },
+              }),
               { onConflict: 'naver_uid' },
             ));
             if (!error) created++;
