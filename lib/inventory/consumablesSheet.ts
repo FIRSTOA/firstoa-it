@@ -31,6 +31,8 @@ type HeaderMap = {
   marginCol: number;
   internetPriceCol: number;
   columnCount: number;
+  /** 제목줄의 실제 행 번호(1부터) — 위에 "책정날짜…" 같은 안내 줄이 끼어도 찾아냅니다. */
+  headerRow: number;
 };
 
 function findExact(header: string[], text: string): number {
@@ -46,10 +48,15 @@ async function readHeader(): Promise<HeaderMap> {
   const sheets = getSheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: requireSheetId(),
-    range: `${TAB}!1:1`,
+    range: `${TAB}!A1:Z10`,
   });
-  const header = (res.data.values?.[0] ?? []).map((v) => String(v ?? ''));
+  const top = (res.data.values ?? []).map((r) => (r as unknown[]).map((v) => String(v ?? '')));
+  // 맨 위 10줄 중 "품목"과 "판매단가"가 함께 있는 줄을 제목줄로 씁니다.
+  const idx = top.findIndex((r) => r.some((h) => h.trim() === '품목') && r.some((h) => h.trim() === '판매단가'));
+  const header = top[idx >= 0 ? idx : 0] ?? [];
+  const headerRow = (idx >= 0 ? idx : 0) + 1;
   return {
+    headerRow,
     gubunCol: findExact(header, '구분'),
     specCol: findExact(header, '사양'),
     vendorCol: findExact(header, '매입처'),
@@ -99,13 +106,14 @@ function buildRowArray(header: HeaderMap, input: ConsumableInput): string[] {
 export async function listConsumablesFromSheet(): Promise<ConsumableItem[]> {
   const header = await readHeader();
   const sheets = getSheetsClient();
+  const first = header.headerRow + 1;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: requireSheetId(),
-    range: `${TAB}!A2:Z`,
+    range: `${TAB}!A${first}:Z`,
   });
   const rows = res.data.values ?? [];
   return rows
-    .map((row, i) => mapRowToConsumable((row as unknown[]).map((v) => String(v ?? '')), header, i + 2))
+    .map((row, i) => mapRowToConsumable((row as unknown[]).map((v) => String(v ?? '')), header, i + first))
     .filter((c) => Object.values(c).some((v, idx) => idx > 0 && String(v).trim() !== ''));
 }
 
@@ -114,13 +122,14 @@ export async function listConsumablesFromSheet(): Promise<ConsumableItem[]> {
  * (listConsumablesFromSheet과 동일한 범위) 반환된 배열 길이로 판단 — 중간에 완전히 빈 행이
  * 있어도 배열엔 빈 행이 그대로 포함되므로(Sheets API가 폭 전체 기준으로 끝을 판단) 정확합니다.
  */
-async function getNextRowNumber(): Promise<number> {
+async function getNextRowNumber(headerRow: number): Promise<number> {
   const sheets = getSheetsClient();
+  const first = headerRow + 1;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: requireSheetId(),
-    range: `${TAB}!A2:Z`,
+    range: `${TAB}!A${first}:Z`,
   });
-  return (res.data.values?.length ?? 0) + 2;
+  return (res.data.values?.length ?? 0) + first;
 }
 
 /**
@@ -132,7 +141,7 @@ async function getNextRowNumber(): Promise<number> {
 export async function createConsumableInSheet(input: ConsumableInput): Promise<void> {
   const header = await readHeader();
   const row = buildRowArray(header, input);
-  const nextRow = await getNextRowNumber();
+  const nextRow = await getNextRowNumber(header.headerRow);
   const sheets = getSheetsClient();
   await sheets.spreadsheets.values.update({
     spreadsheetId: requireSheetId(),
