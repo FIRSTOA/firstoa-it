@@ -173,23 +173,30 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     else setError(res.error);
   }
 
-  async function send() {
+  async function send(mode: 'send' | 'resend' | 'fix') {
     if (!author.trim()) {
       setError('작성자를 골라주세요.');
       return;
     }
-    if (!confirm(`"${KAKAO_ROOM}" 카톡방으로 보고를 보낼까요?${event.kind !== '철수' ? '\n(자산번호가 있는 기기는 IT재고 위치가 임대중으로 바뀌어요)' : ''}`)) return;
+    const stockNote = event.kind !== '철수' ? '\n(자산번호가 있는 기기는 IT재고 위치가 임대중으로 바뀌어요)' : '';
+    const ask =
+      mode === 'fix'
+        ? '수정한 내용만 저장할까요? (카톡은 보내지 않아요)'
+        : mode === 'resend'
+          ? `수정한 내용을 "[수정]" 표시로 "${KAKAO_ROOM}" 카톡방에 다시 보낼까요?`
+          : `"${KAKAO_ROOM}" 카톡방으로 보고를 보낼까요?`;
+    if (!confirm(ask + stockNote)) return;
     setBusy(true);
     setError('');
-    const res = await sendPrepReport(event.id, draft(), visibleItems.length);
+    const res = await sendPrepReport(event.id, draft(), visibleItems.length, mode);
     setBusy(false);
     if (!res.ok) {
       setError(res.error);
       return;
     }
-    setSentAt(new Date().toISOString());
+    if (mode !== 'fix') setSentAt(new Date().toISOString());
     setInfo(
-      `카톡 발송 요청 완료 — "${KAKAO_ROOM}" 방으로 곧 보내져요.` +
+      (mode === 'fix' ? '수정 내용을 저장했어요(카톡은 안 보냈어요).' : `카톡 발송 요청 완료 — "${KAKAO_ROOM}" 방으로 곧 보내져요.`) +
         (res.stockWarnings.length ? `\n⚠️ 재고: ${res.stockWarnings.join(' / ')}` : ''),
     );
   }
@@ -453,8 +460,32 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
           <button type="button" className="btn btn-ghost" onClick={saveDraft} disabled={busy || loading}>
             임시 저장
           </button>
-          <button type="button" className="btn btn-primary" onClick={send} disabled={busy || loading || !!uploading}>
-            {busy ? '처리 중…' : sentAt ? '🔁 다시 보내기' : '✅ 완료 · 카톡 발송'}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => send('fix')}
+            disabled={busy || loading || !!uploading || !sentAt}
+            title={sentAt ? '' : '발송한 뒤에 쓸 수 있어요'}
+          >
+            ✏️ 고치기만(카톡 안 보냄)
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => send('resend')}
+            disabled={busy || loading || !!uploading || !sentAt}
+            title={sentAt ? '' : '발송한 뒤에 쓸 수 있어요'}
+          >
+            🔁 수정해서 다시 보내기
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => send('send')}
+            disabled={busy || loading || !!uploading || !!sentAt}
+            title={sentAt ? '이미 발송했어요 — 수정해서 다시 보내기를 써주세요' : ''}
+          >
+            {busy ? '처리 중…' : sentAt ? '✅ 발송 완료' : '✅ 완료 · 카톡 발송'}
           </button>
         </div>
       </div>

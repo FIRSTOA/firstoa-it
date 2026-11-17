@@ -313,6 +313,8 @@ export async function sendPrepReport(
   eventId: string,
   draft: ReportDraft,
   photoItemCount: number,
+  /** send = 처음 발송, resend = "[수정]" 붙여 다시 발송, fix = 고치기만(카톡 안 보냄) */
+  mode: 'send' | 'resend' | 'fix' = 'send',
 ): Promise<Result<{ message: string; stockWarnings: string[] }>> {
   const saved = await savePrepReport(eventId, draft);
   if (!saved.ok) return saved;
@@ -323,7 +325,7 @@ export async function sendPrepReport(
   const kind = evRow.title.includes('철수') ? '철수' : evRow.title.includes('교체') ? '교체' : '납품';
   const albumUrl = `${await siteOrigin()}/album?id=${report.id}`;
   const units = (report.units ?? []).filter((u) => u.serial || u.assetId);
-  const message = buildPrepMessage({
+  const built = buildPrepMessage({
     date: evRow.date,
     kind,
     company: report.company,
@@ -336,11 +338,14 @@ export async function sendPrepReport(
     albumUrl,
     note: report.note,
   });
+  const message = mode === 'resend' ? `[수정] ${built}` : built;
 
-  try {
-    await enqueueOutbox(KAKAO_ROOM, message);
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  if (mode !== 'fix') {
+    try {
+      await enqueueOutbox(KAKAO_ROOM, message);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   // 재고 위치 변경 — 철수는 장비가 돌아오는 건이라 제외.
@@ -378,7 +383,12 @@ export async function sendPrepReport(
 
   await supabase
     .from(REPORTS_TABLE)
-    .update({ message, sent_at: new Date().toISOString(), stock_applied: [...applied], updated_at: new Date().toISOString() })
+    .update({
+      message,
+      ...(mode === 'fix' ? {} : { sent_at: new Date().toISOString() }),
+      stock_applied: [...applied],
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', report.id);
   return { ok: true, message, stockWarnings };
 }
