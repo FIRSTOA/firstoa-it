@@ -167,18 +167,13 @@ export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
   if (!/^[A-Z0-9._-]{2,}$/.test(key)) return empty;
   const asset = await getAssetFromSheets(key).catch(() => null);
   if (asset) {
-    // 스펙 = CPU / RAM / SSD / HDD / VGA (값 있는 것만)
-    const spec = [
-      ['CPU', asset.cpu],
-      ['RAM', asset.ram],
-      ['SSD', asset.ssd ?? ''],
-      ['HDD', asset.hdd ?? ''],
-      ['VGA', asset.gpu ?? ''],
-    ]
-      .map(([k, v]) => [k, String(v ?? '').trim()])
-      .filter(([, v]) => v && v.toUpperCase() !== 'X' && v !== '-')
-      .map(([k, v]) => `${k} ${v}`)
-      .join(' / ');
+    // 사양 = IT재고 시트의 합쳐진 사양 그대로(예: I7/12/16/512/X/4050). 없으면 칸들을 같은 형식으로.
+    const spec =
+      asset.specLabel?.trim() ||
+      [asset.cpu, asset.ram, asset.ssd ?? '', asset.hdd ?? '', asset.gpu ?? '']
+        .map((v) => String(v ?? '').trim())
+        .filter(Boolean)
+        .join('/');
     const rentalSerials = await lookupSerialsByAsset(key).catch(() => []);
     const serials = [...new Set([asset.serialNo, ...rentalSerials].map((s) => (s ?? '').trim()).filter(Boolean))];
     return {
@@ -204,19 +199,10 @@ export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
     model: [r.manufacturer, r.model_name].map((v) => (v ?? '').trim()).filter(Boolean).join(' '),
     gubun: '',
     spec: (() => {
-      // 옵션1=CPU, 옵션2="램/SSD/HDD", 옵션3=그래픽
-      const [ram, ssd, hdd] = (r.option2 ?? '').split('/').map((v) => v.trim());
-      return [
-        ['CPU', r.option1 ?? ''],
-        ['RAM', ram ?? ''],
-        ['SSD', ssd ?? ''],
-        ['HDD', hdd ?? ''],
-        ['VGA', r.option3 ?? ''],
-      ]
-        .map(([k, v]) => [k, v.trim()])
-        .filter(([, v]) => v && v.toUpperCase() !== 'X' && v !== '-')
-        .map(([k, v]) => `${k} ${v}`)
-        .join(' / ');
+      // 임대리스트 옵션 → IT재고 사양과 같은 "I7/12/16/512/X/4050" 형식
+      const cpu = (r.option1 ?? '').trim().replace(/[-\s]+/g, '/');
+      const parts = (r.option2 ?? '').split('/').map((v) => v.trim().replace(/\s*(GB|G|TB|T)$/i, ''));
+      return [cpu, ...parts, (r.option3 ?? '').trim()].filter(Boolean).join('/');
     })(),
     category: /데스크|desktop/i.test(`${r.model_name}`) ? '데스크탑' : '',
     source: 'rental',

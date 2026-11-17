@@ -179,7 +179,7 @@ export function buildPrepMessage(input: {
     `[출고준비 완료] ${shortDateLabel(input.date)} ${input.kind || '납품'}`,
     `업체명 : ${input.company || '-'}`,
     `모델명 : ${input.model || '-'}`,
-    `기기 : ${input.units.length}대 (자산번호 / 모델 / 구분 / 스펙 / 시리얼)`,
+    `기기 : ${input.units.length}대 (자산번호 / 모델 / 구분 / 사양 / 시리얼)`,
     ...input.units.map(
       (u, i) =>
         [`${i + 1}) ${u.assetId || '-'}`, u.model || '-', u.gubun || '-', u.spec || '-', u.serial || '-'].join(' / '),

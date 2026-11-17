@@ -277,8 +277,8 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
                   </button>
                   <div style={{ width: '100%', display: 'flex', gap: 6, paddingLeft: 28, flexWrap: 'wrap' }}>
                     <input style={{ flex: '2 1 160px', minWidth: 0 }} placeholder="모델명" value={u.model ?? ''} onChange={(e) => setUnit(i, { model: e.target.value })} />
-                    <input style={{ flex: '1 1 100px', minWidth: 0 }} placeholder="구분값" value={u.gubun ?? ''} onChange={(e) => setUnit(i, { gubun: e.target.value })} />
-                    <input style={{ flex: '3 1 200px', minWidth: 0 }} placeholder="스펙(CPU/RAM/SSD/HDD/VGA)" value={u.spec ?? ''} onChange={(e) => setUnit(i, { spec: e.target.value })} />
+                    <input style={{ flex: '1 1 100px', minWidth: 0 }} placeholder="구분(예: I5고사노)" value={u.gubun ?? ''} onChange={(e) => setUnit(i, { gubun: e.target.value })} />
+                    <input style={{ flex: '3 1 200px', minWidth: 0 }} placeholder="사양(예: I7/12/16/512/X/4050)" value={u.spec ?? ''} onChange={(e) => setUnit(i, { spec: e.target.value })} />
                   </div>
                   {serialChoices[i] && !u.serial && (
                     <div style={{ width: '100%', fontSize: 11.5, color: 'var(--ink-400)', paddingLeft: 28 }}>
