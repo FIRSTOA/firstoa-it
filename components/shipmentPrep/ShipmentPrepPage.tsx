@@ -52,6 +52,7 @@ export default function ShipmentPrepPage() {
   const [busyKey, setBusyKey] = useState('');
   const [showPeople, setShowPeople] = useState(false);
   const [reportEvent, setReportEvent] = useState<PrepEventRow | null>(null);
+  const [detailEvent, setDetailEvent] = useState<PrepEventRow | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -281,7 +282,9 @@ export default function ShipmentPrepPage() {
             <div key={ev.id} style={{ padding: 12, borderTop: '1px solid var(--ink-100)', background: isPrepared(ev) ? '#f0fdf4' : '#fff' }}>
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                 {kindBadge(ev.kind)}
-                <span style={{ flex: 1, fontSize: 15, fontWeight: 700, wordBreak: 'keep-all' }}>{ev.company}</span>
+                <span style={{ flex: 1, fontSize: 15, fontWeight: 700, wordBreak: 'keep-all', color: 'var(--indigo-600)' }} onClick={() => setDetailEvent(ev)}>
+                  {ev.company} ›
+                </span>
                 <span style={{ fontSize: 12, color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>
                   {shortDateLabel(ev.date)} {ev.time || '종일'}
                 </span>
@@ -335,8 +338,8 @@ export default function ShipmentPrepPage() {
                     <div style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>{ev.time || '종일'}</div>
                   </td>
                   <td>{kindBadge(ev.kind)}</td>
-                  <td style={{ wordBreak: 'break-all' }}>
-                    <div style={{ fontWeight: 700 }}>{ev.company}</div>
+                  <td style={{ wordBreak: 'break-all', cursor: 'pointer' }} onClick={() => setDetailEvent(ev)} title="캘린더 내용 보기">
+                    <div style={{ fontWeight: 700, color: 'var(--indigo-600)' }}>{ev.company} ›</div>
                     <div style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>{ev.title}</div>
                   </td>
                   <td style={{ wordBreak: 'break-all', fontSize: 12.5 }}>
@@ -369,6 +372,43 @@ export default function ShipmentPrepPage() {
           void reload();
         }}
       />
+      {detailEvent && (
+        <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && setDetailEvent(null)}>
+          <div className="modal" style={{ width: 640, maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
+            <h2>{detailEvent.company}</h2>
+            <div className="sub">
+              {shortDateLabel(detailEvent.date)} {detailEvent.time || '종일'} · {detailEvent.kind}
+            </div>
+            <div className="detail-section-title">일정 제목</div>
+            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 13.5 }}>{detailEvent.title}</div>
+            {detailEvent.location && (
+              <>
+                <div className="detail-section-title">장소</div>
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 13.5 }}>{detailEvent.location}</div>
+              </>
+            )}
+            <div className="detail-section-title">캘린더 메모</div>
+            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontSize: 13.5, lineHeight: 1.6 }}>
+              {detailEvent.description || '메모가 없어요.'}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={() => setDetailEvent(null)}>
+                닫기
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setReportEvent(detailEvent);
+                  setDetailEvent(null);
+                }}
+              >
+                📷 완료 보고
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {reportEvent && (
         <PrepReportModal
           event={reportEvent}

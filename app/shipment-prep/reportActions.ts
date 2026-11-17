@@ -78,7 +78,14 @@ export async function savePrepReport(eventId: string, draft: ReportDraft): Promi
         company: draft.company.trim(),
         model: draft.model.trim(),
         author: draft.author.trim(),
-        units: draft.units.map((u) => ({ serial: u.serial.trim(), assetId: u.assetId.trim().toUpperCase(), grade: u.grade })),
+        units: draft.units.map((u) => ({
+          serial: u.serial.trim(),
+          assetId: u.assetId.trim().toUpperCase(),
+          grade: u.grade,
+          model: (u.model ?? '').trim(),
+          gubun: (u.gubun ?? '').trim(),
+          spec: (u.spec ?? '').trim(),
+        })),
         checked_items: draft.checkedItems,
         note: draft.note,
         updated_at: new Date().toISOString(),
@@ -146,6 +153,50 @@ export async function ocrPrepPhoto(base64: string, mediaType: string): Promise<R
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+export type UnitLookup = { serials: string[]; model: string; gubun: string; spec: string; source: 'inventory' | 'rental' | '' };
+
+/**
+ * 자산번호 → 시리얼·모델명·구분값·스펙. IT재고(구글시트)가 구분값/스펙까지 있어 우선,
+ * 없으면 임대리스트(firstoa-works 사본)의 모델명·시리얼·옵션.
+ */
+export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
+  const key = assetId.trim().toUpperCase();
+  const empty: UnitLookup = { serials: [], model: '', gubun: '', spec: '', source: '' };
+  if (!/^[A-Z0-9._-]{2,}$/.test(key)) return empty;
+  const asset = await getAssetFromSheets(key).catch(() => null);
+  if (asset) {
+    const spec = [asset.cpu, asset.ram && `${asset.ram}${/\D/.test(asset.ram) ? '' : 'GB'}`, asset.storage, asset.screen]
+      .map((v) => String(v ?? '').trim())
+      .filter(Boolean)
+      .join(' / ');
+    const rentalSerials = await lookupSerialsByAsset(key).catch(() => []);
+    const serials = [...new Set([asset.serialNo, ...rentalSerials].map((s) => (s ?? '').trim()).filter(Boolean))];
+    return {
+      serials,
+      model: [asset.brand, asset.model].filter(Boolean).join(' '),
+      gubun: asset.gubunCode || asset.specLabel || asset.spec || '',
+      spec,
+      source: 'inventory',
+    };
+  }
+  const { data } = await createAdminClient()
+    .from(RENTAL_TABLE)
+    .select('serial_number,model_name,manufacturer,option1,option2,option3,option4,contract_date')
+    .eq('asset_code', key)
+    .order('contract_date', { ascending: false })
+    .limit(50);
+  const rows = (data ?? []) as Record<string, string | null>[];
+  if (!rows.length) return empty;
+  const r = rows[0];
+  return {
+    serials: [...new Set(rows.map((x) => (x.serial_number ?? '').trim()).filter(Boolean))],
+    model: [r.manufacturer, r.model_name].map((v) => (v ?? '').trim()).filter(Boolean).join(' '),
+    gubun: '',
+    spec: [r.option1, r.option2, r.option3, r.option4].map((v) => (v ?? '').trim()).filter((v) => v && v !== 'X').join(' / '),
+    source: 'rental',
+  };
 }
 
 /** 자산번호 → 시리얼 후보(임대리스트 = firstoa-works 사본, 없으면 IT재고). */

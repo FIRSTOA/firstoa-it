@@ -21,11 +21,34 @@ const IT_TOKEN = /(^|[^A-Za-z])IT([^A-Za-z]|$)/;
 const LEAVE_KEYWORDS = /(연차|반차|월차|휴가|경조사|교육)/;
 const DIRECT_DELIVERY_KEYWORDS = ['직송', '고인돌', '신성씨앤에스', '이엠데이타', '후지필름', '네오정보'];
 
-/** IT 출고 준비 대상인지 — IT 키워드가 제목·메모에 있고, 휴가·직송이 아닌 일정. */
-export function isItPrepTarget(title: string, description: string): boolean {
+/**
+ * IT 출고 준비 대상인지 — **제목**에 IT 표시/키워드가 있고, 휴가·직송이 아닌 일정.
+ * 메모(물품 줄)는 보지 않습니다: 같은 현장의 복합기 일정 메모에 노트북이 같이 적혀 있어
+ * 한 현장이 두 번 뜨던 문제(광명엔지니어링) 때문.
+ */
+export function isItPrepTarget(title: string, _description: string): boolean {
+  void _description;
   if (LEAVE_KEYWORDS.test(title)) return false;
   if (DIRECT_DELIVERY_KEYWORDS.some((k) => title.includes(k))) return false;
-  return IT_TOKEN.test(title) || IT_KEYWORDS.test(title) || IT_KEYWORDS.test(description);
+  return IT_TOKEN.test(title) || IT_KEYWORDS.test(title);
+}
+
+const KIND_SEG = /(납품|교체|철수|회수)(\([^)]*\))?\s*$/;
+const ITEM_NOISE = /^(소모품|전자|확인서\S*|확인서서명필수)$/;
+
+/**
+ * 네이버 일정 제목 구조 — "…-IT/납품(현장)/퍼스트/운영팀/증설/거래처-현장/품목 2대, 소모품/확인서서명필수".
+ * 구분(납품/교체/철수) 칸에서 4칸 뒤가 거래처, 5칸 뒤가 품목입니다.
+ */
+export function parseEventTitle(title: string): { company: string; items: string[] } {
+  const parts = title.split('/').map((p) => p.trim());
+  const k = parts.findIndex((p) => KIND_SEG.test(p));
+  if (k < 0 || !parts[k + 4]) return { company: '', items: [] };
+  const items = (parts[k + 5] ?? '')
+    .split(/\s*,\s*/)
+    .map((s) => s.trim())
+    .filter((s) => s && !ITEM_NOISE.test(s));
+  return { company: parts[k + 4], items };
 }
 
 /** 일정 설명의 "물품 : A 2대, B 1대" 줄을 쉼표로 나눔. */
@@ -50,6 +73,8 @@ export function countUnits(items: string[]): number {
 
 /** 일정 제목에서 업체명 추정 — "★IT/납품/업체명/..." 같은 슬래시 구분 제목의 가장 그럴듯한 칸. */
 export function guessCompany(title: string): string {
+  const parsed = parseEventTitle(title).company;
+  if (parsed) return parsed;
   const cleaned = title.replace(/^[^가-힣A-Za-z0-9(]+/, '');
   const parts = cleaned.split('/').map((p) => p.trim()).filter(Boolean);
   const skip = /^(IT|납품|교체|철수|위탁납품|일반|현장|익일|당일|오전|오후|\S*(준비중|완료|오버홀))/;
@@ -102,7 +127,15 @@ export function prepTitleTags(checks: PrepChecks): string[] {
 
 export const APPEARANCE_GRADES = ['A', 'B', 'C'] as const;
 
-export type PrepUnit = { serial: string; assetId: string; grade: string };
+export type PrepUnit = {
+  serial: string;
+  assetId: string;
+  grade: string;
+  /** 자산번호로 자동 조회(IT재고 → 임대리스트) */
+  model?: string;
+  gubun?: string; // 구분값(예: I7고설노)
+  spec?: string; // CPU/RAM/SSD 등
+};
 export type PrepPhoto = { path: string; url: string; at: string };
 
 export type PrepReport = {
@@ -145,8 +178,11 @@ export function buildPrepMessage(input: {
     `[출고준비 완료] ${shortDateLabel(input.date)} ${input.kind || '납품'}`,
     `업체명 : ${input.company || '-'}`,
     `모델명 : ${input.model || '-'}`,
-    `기기 : ${input.units.length}대 (시리얼 / 자산번호 / 외관)`,
-    ...input.units.map((u, i) => `${i + 1}) ${u.serial || '-'} / ${u.assetId || '-'} / ${u.grade || '-'}`),
+    `기기 : ${input.units.length}대 (자산번호 / 모델 / 구분 / 스펙 / 시리얼 / 외관)`,
+    ...input.units.map(
+      (u, i) =>
+        `${i + 1}) ${u.assetId || '-'} / ${u.model || '-'} / ${u.gubun || '-'} / ${u.spec || '-'} / ${u.serial || '-'} / ${u.grade || '-'}`,
+    ),
     `사진체크 : ${input.checked}/${input.totalItems}`,
     `작성자 : ${input.author || '-'}`,
   ];

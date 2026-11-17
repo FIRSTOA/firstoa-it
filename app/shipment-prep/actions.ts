@@ -7,6 +7,7 @@ import {
   eventKindOf,
   guessCompany,
   isItPrepTarget,
+  parseEventTitle,
   parseItemsFromMemo,
   prepTitleTags,
   type PrepChecks,
@@ -98,7 +99,10 @@ export async function listPrepEvents(): Promise<PrepListResult> {
         location: r.location ?? '',
         company: guessCompany(r.title),
         kind: eventKindOf(r.title),
-        items: parseItemsFromMemo(r.description ?? ''),
+        items: (() => {
+          const fromTitle = parseEventTitle(r.title).items;
+          return fromTitle.length ? fromTitle : parseItemsFromMemo(r.description ?? '');
+        })(),
         naverUid: r.naver_uid,
         prepChecks: checksById.get(r.id) ?? {},
         reportSent: !!rep?.sent_at,

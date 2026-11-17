@@ -7,7 +7,7 @@ import {
   deletePhotoItem,
   deletePrepPhotos,
   getPrepReport,
-  lookupSerialsByAsset,
+  lookupUnitByAsset,
   ocrPrepPhoto,
   savePrepReport,
   sendPrepReport,
@@ -79,12 +79,28 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
   async function onAssetBlur(i: number) {
     const id = units[i]?.assetId.trim();
     if (!id) return;
-    const serials = await lookupSerialsByAsset(id);
-    if (serials.length === 1) {
-      setUnits((prev) => prev.map((u, k) => (k === i && !u.serial.trim() && !touchedSerial.current.has(i) ? { ...u, serial: serials[0] } : u)));
-    } else if (serials.length > 1) {
-      setSerialChoices((prev) => ({ ...prev, [i]: serials }));
+    setInfo(`${id} 조회 중…`);
+    const found = await lookupUnitByAsset(id);
+    if (!found.source) {
+      setInfo(`${id}: IT재고·임대리스트에서 못 찾았어요 — 직접 입력해주세요.`);
+      return;
     }
+    // 빈 칸만 채움 — 직접 친 값은 덮어쓰지 않음
+    setUnits((prev) =>
+      prev.map((u, k) =>
+        k === i
+          ? {
+              ...u,
+              serial: !u.serial.trim() && !touchedSerial.current.has(i) && found.serials.length === 1 ? found.serials[0] : u.serial,
+              model: u.model?.trim() ? u.model : found.model,
+              gubun: u.gubun?.trim() ? u.gubun : found.gubun,
+              spec: u.spec?.trim() ? u.spec : found.spec,
+            }
+          : u,
+      ),
+    );
+    if (found.serials.length > 1) setSerialChoices((prev) => ({ ...prev, [i]: found.serials }));
+    setInfo(`${id}: ${found.source === 'inventory' ? 'IT재고' : '임대리스트'}에서 불러왔어요.`);
   }
 
   async function onFiles(files: FileList | null) {
@@ -222,7 +238,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
             </div>
             <div style={{ display: 'grid', gap: 6 }}>
               {units.map((u, i) => (
-                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', paddingBottom: 8, borderBottom: '1px dashed var(--ink-100)' }}>
                   <span style={{ width: 22, color: 'var(--ink-400)' }}>{i + 1})</span>
                   <input
                     style={{ flex: '1 1 110px', minWidth: 0 }}
@@ -258,6 +274,11 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
                   <button type="button" className="icon-btn danger" onClick={() => setUnits(units.filter((_, k) => k !== i))} title="줄 삭제">
                     ×
                   </button>
+                  <div style={{ width: '100%', display: 'flex', gap: 6, paddingLeft: 28, flexWrap: 'wrap' }}>
+                    <input style={{ flex: '2 1 160px', minWidth: 0 }} placeholder="모델명" value={u.model ?? ''} onChange={(e) => setUnit(i, { model: e.target.value })} />
+                    <input style={{ flex: '1 1 100px', minWidth: 0 }} placeholder="구분값" value={u.gubun ?? ''} onChange={(e) => setUnit(i, { gubun: e.target.value })} />
+                    <input style={{ flex: '3 1 200px', minWidth: 0 }} placeholder="스펙(CPU/RAM/SSD)" value={u.spec ?? ''} onChange={(e) => setUnit(i, { spec: e.target.value })} />
+                  </div>
                   {serialChoices[i] && !u.serial && (
                     <div style={{ width: '100%', fontSize: 11.5, color: 'var(--ink-400)', paddingLeft: 28 }}>
                       시리얼 후보 {serialChoices[i].length}개 — 시리얼 칸을 눌러 골라주세요.
