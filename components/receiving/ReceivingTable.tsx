@@ -320,7 +320,7 @@ export default function ReceivingTable({
             </th>
             <th style={{ width: '50px' }}>순번</th>
             <th style={{ width: '85px' }}>등록일</th>
-            <th style={{ width: '110px' }}>유형</th>
+            <th style={{ width: '150px' }}>유형</th>
             <th style={{ width: '86px' }}>상태</th>
             <th style={{ width: '145px' }}>품목</th>
             <th style={{ width: '110px' }}>브랜드</th>
