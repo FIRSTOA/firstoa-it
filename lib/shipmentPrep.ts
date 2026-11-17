@@ -134,7 +134,8 @@ export type PrepUnit = {
   /** 자산번호로 자동 조회(IT재고 → 임대리스트) */
   model?: string;
   gubun?: string; // 구분값(예: I7고설노)
-  spec?: string; // CPU/RAM/SSD 등
+  spec?: string; // CPU/RAM/SSD/HDD/VGA
+  category?: string; // 데스크탑이면 외관 등급 안 받음
 };
 export type PrepPhoto = { path: string; url: string; at: string };
 
@@ -181,7 +182,7 @@ export function buildPrepMessage(input: {
     `기기 : ${input.units.length}대 (자산번호 / 모델 / 구분 / 스펙 / 시리얼 / 외관)`,
     ...input.units.map(
       (u, i) =>
-        `${i + 1}) ${u.assetId || '-'} / ${u.model || '-'} / ${u.gubun || '-'} / ${u.spec || '-'} / ${u.serial || '-'} / ${u.grade || '-'}`,
+        [`${i + 1}) ${u.assetId || '-'}`, u.model || '-', u.gubun || '-', u.spec || '-', u.serial || '-', ...(u.grade ? [u.grade] : [])].join(' / '),
     ),
     `사진체크 : ${input.checked}/${input.totalItems}`,
     `작성자 : ${input.author || '-'}`,

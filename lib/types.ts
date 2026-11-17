@@ -50,6 +50,8 @@ export type Asset = {
   os?: string;
   motherboard?: string; // 메인보드
   gpu?: string; // 그래픽카드
+  ssd?: string; // SSD 원문(storage는 SSD/HDD 합친 값)
+  hdd?: string; // HDD 원문
   power?: string; // POWER
   caseName?: string; // 케이스
   usageClass?: string; // 용도구분 원문(예: "2.사무용") — spec(분류값)과는 다른 시트 원문

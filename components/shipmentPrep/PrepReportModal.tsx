@@ -76,9 +76,11 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     setUnits((prev) => prev.map((u, k) => (k === i ? { ...u, ...patch } : u)));
   }
 
-  async function onAssetBlur(i: number) {
-    const id = units[i]?.assetId.trim();
-    if (!id) return;
+  const lookedUp = useRef<Record<number, string>>({});
+  async function onAssetBlur(i: number, value?: string) {
+    const id = (value ?? units[i]?.assetId ?? '').trim().toUpperCase();
+    if (!id || lookedUp.current[i] === id) return;
+    lookedUp.current[i] = id;
     setInfo(`${id} 조회 중…`);
     const found = await lookupUnitByAsset(id);
     if (!found.source) {
@@ -95,6 +97,8 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
               model: u.model?.trim() ? u.model : found.model,
               gubun: u.gubun?.trim() ? u.gubun : found.gubun,
               spec: u.spec?.trim() ? u.spec : found.spec,
+              category: found.category || u.category,
+              grade: found.category === '데스크탑' ? '' : u.grade || 'A',
             }
           : u,
       ),
@@ -244,8 +248,13 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
                     style={{ flex: '1 1 110px', minWidth: 0 }}
                     placeholder="자산번호"
                     value={u.assetId}
-                    onChange={(e) => setUnit(i, { assetId: e.target.value.toUpperCase() })}
+                    onChange={(e) => {
+                      const v = e.target.value.toUpperCase();
+                      setUnit(i, { assetId: v });
+                      if (/^[A-Z]\d{4}$/.test(v)) void onAssetBlur(i, v);
+                    }}
                     onBlur={() => onAssetBlur(i)}
+                    onKeyDown={(e) => e.key === 'Enter' && onAssetBlur(i)}
                   />
                   <input
                     style={{ flex: '2 1 160px', minWidth: 0 }}
@@ -265,7 +274,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
                     </datalist>
                   )}
                   <div style={{ display: 'flex', gap: 3 }}>
-                    {APPEARANCE_GRADES.map((g) => (
+                    {u.category !== '데스크탑' && APPEARANCE_GRADES.map((g) => (
                       <button key={g} type="button" className={`chip${u.grade === g ? ' active' : ''}`} onClick={() => setUnit(i, { grade: g })}>
                         {g}
                       </button>
@@ -277,7 +286,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
                   <div style={{ width: '100%', display: 'flex', gap: 6, paddingLeft: 28, flexWrap: 'wrap' }}>
                     <input style={{ flex: '2 1 160px', minWidth: 0 }} placeholder="모델명" value={u.model ?? ''} onChange={(e) => setUnit(i, { model: e.target.value })} />
                     <input style={{ flex: '1 1 100px', minWidth: 0 }} placeholder="구분값" value={u.gubun ?? ''} onChange={(e) => setUnit(i, { gubun: e.target.value })} />
-                    <input style={{ flex: '3 1 200px', minWidth: 0 }} placeholder="스펙(CPU/RAM/SSD)" value={u.spec ?? ''} onChange={(e) => setUnit(i, { spec: e.target.value })} />
+                    <input style={{ flex: '3 1 200px', minWidth: 0 }} placeholder="스펙(CPU/RAM/SSD/HDD/VGA)" value={u.spec ?? ''} onChange={(e) => setUnit(i, { spec: e.target.value })} />
                   </div>
                   {serialChoices[i] && !u.serial && (
                     <div style={{ width: '100%', fontSize: 11.5, color: 'var(--ink-400)', paddingLeft: 28 }}>

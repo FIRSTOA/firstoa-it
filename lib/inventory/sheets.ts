@@ -238,6 +238,8 @@ function mapRowToAsset(row: unknown[], header: HeaderMap, category: string): Ass
     os: cell(row, header.osCol),
     motherboard: cell(row, header.motherboardCol),
     gpu: cell(row, header.gpuCol),
+    ssd,
+    hdd,
     power: cell(row, header.powerCol),
     caseName: cell(row, header.caseCol),
     usageClass: cell(row, header.usageClassCol),

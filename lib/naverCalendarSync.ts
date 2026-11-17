@@ -69,7 +69,6 @@ export async function syncNaverCalendars(
   const claimed = new Map<string, string>(); // 기본 uid → 그 키를 가진 href
   const hrefsByUid = new Map<string, SyncStateRow[]>();
   for (const r of allState) {
-    if (r.uid.startsWith('it-')) continue;
     if (!r.uid.includes('#')) claimed.set(r.uid, r.href);
     const base = r.uid.split('#')[0];
     hrefsByUid.set(base, [...(hrefsByUid.get(base) ?? []), r]);
@@ -153,8 +152,9 @@ export async function syncNaverCalendars(
           if (!parsed) return;
 
           let error: { message: string } | null = null;
-          const rowKey = parsed.uid.startsWith('it-') ? parsed.uid : rowKeyFor(parsed.uid, href, prevByHref.get(href));
-          if (parsed.uid.startsWith('it-')) {
+          const rowKey = rowKeyFor(parsed.uid, href, prevByHref.get(href));
+          // 앱이 만든 일정(it-…)의 원본 href만 그 행을 고치고, 네이버에서 복사된 사본은 별도 행.
+          if (rowKey.startsWith('it-') && !rowKey.includes('#')) {
             const patch = stripImportant({
                 title: parsed.title,
                 date: parsed.date,
@@ -216,7 +216,7 @@ export async function syncNaverCalendars(
         const winStart = `${startYmd.slice(0, 4)}-${startYmd.slice(4, 6)}-${startYmd.slice(6, 8)}`;
         const winEnd = `${endYmd.slice(0, 4)}-${endYmd.slice(4, 6)}-${endYmd.slice(6, 8)}`;
         for (const stale of staleStates) {
-          const byId = stale.uid.startsWith('it-');
+          const byId = stale.uid.startsWith('it-') && !stale.uid.includes('#');
           const { data: local } = await supabase
             .from(CALENDAR_TABLE)
             .select('id,date')

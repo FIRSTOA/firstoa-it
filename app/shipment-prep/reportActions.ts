@@ -155,7 +155,7 @@ export async function ocrPrepPhoto(base64: string, mediaType: string): Promise<R
   }
 }
 
-export type UnitLookup = { serials: string[]; model: string; gubun: string; spec: string; source: 'inventory' | 'rental' | '' };
+export type UnitLookup = { serials: string[]; model: string; gubun: string; spec: string; category: string; source: 'inventory' | 'rental' | '' };
 
 /**
  * 자산번호 → 시리얼·모델명·구분값·스펙. IT재고(구글시트)가 구분값/스펙까지 있어 우선,
@@ -163,13 +163,21 @@ export type UnitLookup = { serials: string[]; model: string; gubun: string; spec
  */
 export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
   const key = assetId.trim().toUpperCase();
-  const empty: UnitLookup = { serials: [], model: '', gubun: '', spec: '', source: '' };
+  const empty: UnitLookup = { serials: [], model: '', gubun: '', spec: '', category: '', source: '' };
   if (!/^[A-Z0-9._-]{2,}$/.test(key)) return empty;
   const asset = await getAssetFromSheets(key).catch(() => null);
   if (asset) {
-    const spec = [asset.cpu, asset.ram && `${asset.ram}${/\D/.test(asset.ram) ? '' : 'GB'}`, asset.storage, asset.screen]
-      .map((v) => String(v ?? '').trim())
-      .filter(Boolean)
+    // 스펙 = CPU / RAM / SSD / HDD / VGA (값 있는 것만)
+    const spec = [
+      ['CPU', asset.cpu],
+      ['RAM', asset.ram],
+      ['SSD', asset.ssd ?? ''],
+      ['HDD', asset.hdd ?? ''],
+      ['VGA', asset.gpu ?? ''],
+    ]
+      .map(([k, v]) => [k, String(v ?? '').trim()])
+      .filter(([, v]) => v && v.toUpperCase() !== 'X' && v !== '-')
+      .map(([k, v]) => `${k} ${v}`)
       .join(' / ');
     const rentalSerials = await lookupSerialsByAsset(key).catch(() => []);
     const serials = [...new Set([asset.serialNo, ...rentalSerials].map((s) => (s ?? '').trim()).filter(Boolean))];
@@ -178,6 +186,7 @@ export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
       model: [asset.brand, asset.model].filter(Boolean).join(' '),
       gubun: asset.gubunCode || asset.specLabel || asset.spec || '',
       spec,
+      category: asset.category,
       source: 'inventory',
     };
   }
@@ -194,7 +203,22 @@ export async function lookupUnitByAsset(assetId: string): Promise<UnitLookup> {
     serials: [...new Set(rows.map((x) => (x.serial_number ?? '').trim()).filter(Boolean))],
     model: [r.manufacturer, r.model_name].map((v) => (v ?? '').trim()).filter(Boolean).join(' '),
     gubun: '',
-    spec: [r.option1, r.option2, r.option3, r.option4].map((v) => (v ?? '').trim()).filter((v) => v && v !== 'X').join(' / '),
+    spec: (() => {
+      // 옵션1=CPU, 옵션2="램/SSD/HDD", 옵션3=그래픽
+      const [ram, ssd, hdd] = (r.option2 ?? '').split('/').map((v) => v.trim());
+      return [
+        ['CPU', r.option1 ?? ''],
+        ['RAM', ram ?? ''],
+        ['SSD', ssd ?? ''],
+        ['HDD', hdd ?? ''],
+        ['VGA', r.option3 ?? ''],
+      ]
+        .map(([k, v]) => [k, v.trim()])
+        .filter(([, v]) => v && v.toUpperCase() !== 'X' && v !== '-')
+        .map(([k, v]) => `${k} ${v}`)
+        .join(' / ');
+    })(),
+    category: /데스크|desktop/i.test(`${r.model_name}`) ? '데스크탑' : '',
     source: 'rental',
   };
 }
