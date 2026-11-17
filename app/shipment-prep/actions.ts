@@ -114,13 +114,13 @@ export async function listPrepEvents(): Promise<PrepListResult> {
 
 export type TitleTagResult = { ok: true; title?: string; skipped?: string } | { ok: false; error: string };
 
-/** 담당자 단계 체크 저장 → 네이버 제목 태그 반영(실패해도 체크는 저장됨). */
+/** 담당자 단계 체크 저장(DB만 — 빠르게). */
 export async function setPrepStage(
   eventId: string,
   person: string,
   stage: PrepStage,
   on: boolean,
-): Promise<{ ok: true; checks: PrepChecks; tag: TitleTagResult } | { ok: false; error: string }> {
+): Promise<{ ok: true; checks: PrepChecks } | { ok: false; error: string }> {
   const supabase = createAdminClient();
   const { data: cur } = await supabase.from(PREP_EVENTS_TABLE).select('prep_checks').eq('event_id', eventId).maybeSingle();
   const checks = applyPrepStage(((cur as { prep_checks?: PrepChecks } | null)?.prep_checks ?? {}) as PrepChecks, person, stage, on, new Date().toISOString());
@@ -128,8 +128,8 @@ export async function setPrepStage(
     .from(PREP_EVENTS_TABLE)
     .upsert({ event_id: eventId, prep_checks: checks, updated_at: new Date().toISOString() }, { onConflict: 'event_id' });
   if (error) return { ok: false, error: `저장 실패: ${error.message}` };
-  const tag = await syncPrepTitleTag(eventId);
-  return { ok: true, checks, tag };
+  // 네이버 제목 태그는 /api/shipment-prep/title-tag 로 따로(버튼 응답을 붙잡지 않게).
+  return { ok: true, checks };
 }
 
 /** 네이버 일정 제목 앞에 "이름오버홀/준비중/완료" 반영 — 원본 Edge Function prep_tag 이식. */

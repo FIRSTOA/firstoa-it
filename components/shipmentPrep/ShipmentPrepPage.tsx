@@ -5,13 +5,17 @@ import {
   listPrepEvents,
   listPrepPeople,
   setPrepStage,
-  syncPrepTitleTag,
-  triggerPrepSync,
   type PrepEventRow,
   type PrepPerson,
   type TitleTagResult,
 } from '@/app/shipment-prep/actions';
-import { isPrepDone, isPrepInProgress, isPrepOverhaul, shortDateLabel, type PrepStage } from '@/lib/shipmentPrep';
+import { applyPrepStage, isPrepDone, isPrepInProgress, isPrepOverhaul, shortDateLabel, type PrepStage } from '@/lib/shipmentPrep';
+
+async function postJson<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+  return (await res.json()) as T;
+}
+const requestTitleTag = (eventId: string) => postJson<TitleTagResult>('/api/shipment-prep/title-tag', { eventId }).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
 import PrepPeopleModal from './PrepPeopleModal';
 import PrepReportModal from './PrepReportModal';
 
@@ -77,7 +81,7 @@ export default function ShipmentPrepPage() {
     let alive = true;
     const run = async () => {
       setSyncing(true);
-      await triggerPrepSync().catch(() => null);
+      await postJson('/api/shipment-prep/sync').catch(() => null);
       if (alive) {
         setSyncing(false);
         await reload();
@@ -112,23 +116,27 @@ export default function ShipmentPrepPage() {
 
   async function toggle(ev: PrepEventRow, person: string, stage: PrepStage, on: boolean) {
     const key = `${ev.id}|${person}|${stage}`;
+    const before = ev.prepChecks;
+    // 누르는 즉시 화면에 반영(낙관적) → DB 저장 → 네이버 제목 태그는 따로.
+    setEvents((prev) =>
+      prev.map((e) => (e.id === ev.id ? { ...e, prepChecks: applyPrepStage(e.prepChecks, person, stage, on, new Date().toISOString()) } : e)),
+    );
     setBusyKey(key);
-    setBanner({ state: 'busy', eventId: ev.id, text: '네이버 일정 제목 바꾸는 중…' });
     const res = await setPrepStage(ev.id, person, stage, on);
     setBusyKey('');
     if (!res.ok) {
+      setEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...e, prepChecks: before } : e)));
       setBanner({ state: 'error', eventId: ev.id, text: res.error });
       return;
     }
     setEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...e, prepChecks: res.checks } : e)));
-    showTag(ev.id, res.tag);
-    void reload();
+    setBanner({ state: 'busy', eventId: ev.id, text: '네이버 일정 제목 바꾸는 중…' });
+    showTag(ev.id, await requestTitleTag(ev.id));
   }
 
   async function retryTag(eventId: string) {
     setBanner({ state: 'busy', eventId, text: '네이버 일정 제목 바꾸는 중…' });
-    showTag(eventId, await syncPrepTitleTag(eventId));
-    void reload();
+    showTag(eventId, await requestTitleTag(eventId));
   }
 
   function personButtons(ev: PrepEventRow, p: string, big: boolean) {
