@@ -178,7 +178,25 @@ export async function triggerPrepSync(): Promise<{ ok: boolean; error?: string; 
     const full = Date.now() - lastFullSync > 5 * 60_000;
     if (full) lastFullSync = Date.now();
     const r = await syncNaverCalendars(full);
-    return r.ok ? { ok: true, results: 'results' in r ? r.results : undefined } : { ok: false, error: 'error' in r ? r.error : '' };
+    // 임시 진단: 영화사집 16대 일정 원문 구조
+    let debug: unknown = null;
+    try {
+      const supabase = createAdminClient();
+      const { data: st } = await supabase.from(SYNC_STATE_TABLE).select('href,uid').like('uid', 'it-9395%');
+      debug = await Promise.all(
+        ((st ?? []) as { href: string; uid: string }[]).map(async (row) => {
+          const { ics } = await getEventWithEtag(row.href);
+          return {
+            uid: row.uid,
+            vevents: (ics.match(/BEGIN:VEVENT/g) || []).length,
+            lines: ics.split(/\r?\n/).filter((l) => /^(UID|SUMMARY|DTSTART|RECURRENCE-ID|PRIORITY|X-NAVER|CATEGORIES|RRULE|BEGIN:VEVENT)/.test(l)).map((l) => l.slice(0, 90)),
+          };
+        }),
+      );
+    } catch (e) {
+      debug = String(e);
+    }
+    return r.ok ? { ok: true, results: 'results' in r ? { ...r.results, _debug: debug } : undefined } : { ok: false, error: 'error' in r ? r.error : '' };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
