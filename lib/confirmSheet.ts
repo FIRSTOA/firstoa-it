@@ -252,6 +252,23 @@ export function deliverySpecFromUnits(units: ConfirmUnit[]): string {
   return [...new Set(units.map((u) => (u.spec ?? '').trim()).filter(Boolean))].join('\n');
 }
 
+/**
+ * 요청사항 칸(B{r+2})에 적을 모델명 — 손으로 쓰던 방식대로 모델명만(예: "S27HG314EK").
+ * 제조사 칸과 같은 브랜드 머리말은 떼고, 모델이 여러 개면 줄마다 "모델 ×대수".
+ */
+export function requestModelsFromUnits(units: ConfirmUnit[], manufacturer = ''): string {
+  const mf = manufacturer.trim();
+  const counts = new Map<string, number>();
+  for (const u of units) {
+    let m = (u.model ?? '').trim();
+    if (!m) continue;
+    if (mf && m.startsWith(`${mf} `)) m = m.slice(mf.length + 1).trim();
+    counts.set(m, (counts.get(m) ?? 0) + 1);
+  }
+  if (counts.size <= 1) return [...counts.keys()].join('');
+  return [...counts].map(([m, n]) => (n > 1 ? `${m} ×${n}` : m)).join('\n');
+}
+
 export function filledCount(doc: Pick<ConfirmDoc, 'blocks'>): { filled: number; total: number } {
   let filled = 0;
   let total = 0;
@@ -262,7 +279,10 @@ export function filledCount(doc: Pick<ConfirmDoc, 'blocks'>): { filled: number; 
   return { filled, total };
 }
 
-/** 시트/인쇄에 쓸 출고시(기재사항) 칸 값 — 행·열(0부터)별. */
+/** 요청사항 칸(B{r+2}) 위치 — 시트에 쓰기 전 A{r+2}가 "요청사항"인지 확인할 때 씀 */
+export const REQUEST_CELL = { dr: 2, c: 1 } as const;
+
+/** 시트/인쇄에 쓸 칸 값 — 출고시(기재사항) 4칸 + 요청사항(모델명) 칸. 행·열(0부터)별. */
 export function blockCells(b: ConfirmBlock): { r: number; c: number; v: string }[] {
   const r = b.row - 1;
   const ids = b.units.map((u) => u.assetId.trim()).filter(Boolean);
@@ -272,5 +292,6 @@ export function blockCells(b: ConfirmBlock): { r: number; c: number; v: string }
     { r, c: 7, v: ids.join('\n') },
     { r: r + 1, c: 5, v: serials.join('\n') },
     { r: r + 2, c: 5, v: buildHardwareCell(b.requestHardware, b.deliverySpec) },
+    { r: r + REQUEST_CELL.dr, c: REQUEST_CELL.c, v: b.request.trim() },
   ];
 }

@@ -13,6 +13,7 @@ import { lookupUnitByAsset } from '@/app/shipment-prep/reportActions';
 import {
   allocateUnits,
   deliverySpecFromUnits,
+  requestModelsFromUnits,
   type ConfirmBlock,
   type ConfirmDoc,
   type ConfirmUnit,
@@ -41,22 +42,34 @@ function hasAssets(doc: ConfirmDoc) {
   return doc.blocks.some((b) => b.units.some((u) => u.assetId.trim()));
 }
 
-/** 완료 보고 기기를 품목 묶음에 나눠 넣기(제조사·[납품사양]도 채움) */
-function applyUnits(doc: ConfirmDoc, units: ConfirmUnit[]): ConfirmDoc {
+/** 완료 보고 기기를 품목 묶음에 나눠 넣기(제조사·[납품사양]·요청사항 모델명도 채움) */
+function applyUnits(doc: ConfirmDoc, units: ConfirmUnit[], modelAuto: Record<number, boolean>): ConfirmDoc {
   const alloc = allocateUnits(doc.blocks, units);
   return padBlocks({
     ...doc,
     blocks: doc.blocks.map((b, i) => {
       if (!alloc[i].length) return b;
       const brands = [...new Set(alloc[i].map((u) => u.brand).filter(Boolean))];
+      const manufacturer = b.manufacturer || brands.join('/');
       return {
         ...b,
         units: alloc[i],
-        manufacturer: b.manufacturer || brands.join('/'),
+        manufacturer,
         deliverySpec: deliverySpecFromUnits(alloc[i]) || b.deliverySpec,
+        request: modelAuto[i] ? requestModelsFromUnits(alloc[i], manufacturer) : b.request,
       };
     }),
   });
+}
+
+/**
+ * 요청사항 칸을 모델명으로 자동으로 채울지 — 비어 있거나 이미 모델명만 적혀 있으면 자동,
+ * 영업이 다른 내용(예: 자산번호 목록)을 적어 뒀으면 그대로 둠.
+ */
+function modelAutoOf(doc: ConfirmDoc): Record<number, boolean> {
+  return Object.fromEntries(
+    doc.blocks.map((b, i) => [i, !b.request.trim() || b.request.trim() === requestModelsFromUnits(b.units, b.manufacturer)]),
+  );
 }
 
 export default function ConfirmSheetEditor({
@@ -78,6 +91,7 @@ export default function ConfirmSheetEditor({
   const [info, setInfo] = useState<Record<number, string>>({});
   const [serialOptions, setSerialOptions] = useState<Record<string, string[]>>({});
   const [specTouched, setSpecTouched] = useState<Record<number, boolean>>({});
+  const [modelAuto, setModelAuto] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState('');
   const [printGrid, setPrintGrid] = useState<PrintGrid | null>(null);
@@ -92,6 +106,7 @@ export default function ConfirmSheetEditor({
     setError('');
     setInfo({});
     setSpecTouched({});
+    setModelAuto({});
     setSerialOptions({});
     looked.current = {};
     const load = async () => {
@@ -108,9 +123,16 @@ export default function ConfirmSheetEditor({
         setOpened(r);
         setAppId(r.appId);
         let d = padBlocks(r.doc);
+        const auto = modelAutoOf(d);
+        setModelAuto(auto);
+        // 이미 자산번호가 있는데 요청사항이 비어 있으면 바로 모델명으로
+        d = {
+          ...d,
+          blocks: d.blocks.map((b, i) => (auto[i] ? { ...b, request: requestModelsFromUnits(b.units, b.manufacturer) } : b)),
+        };
         // 확인서가 비어 있고 같은 건 완료 보고에 기기가 있으면 자동으로 채움
         if (!hasAssets(d) && r.linkedUnits.length) {
-          d = applyUnits(d, r.linkedUnits);
+          d = applyUnits(d, r.linkedUnits, auto);
           setInfo({ [-1]: `출고 준비 완료 보고의 ${r.linkedUnits.length}대로 채웠어요 — 확인하고 저장하세요.` });
         }
         setDoc(d);
@@ -162,6 +184,20 @@ export default function ConfirmSheetEditor({
     );
   }
 
+  /** 기기 목록·제조사가 바뀌면 [납품사양]·요청사항(모델명)을 다시 만듦(사람이 고친 칸은 그대로) */
+  function derived(blk: ConfirmBlock, bi: number, units: ConfirmUnit[], manufacturer = blk.manufacturer): ConfirmBlock {
+    return {
+      ...blk,
+      units,
+      manufacturer,
+      deliverySpec: specTouched[bi] ? blk.deliverySpec : deliverySpecFromUnits(units) || blk.deliverySpec,
+      request: modelAuto[bi] ? requestModelsFromUnits(units, manufacturer) : blk.request,
+    };
+  }
+  function updateBlock(bi: number, fn: (b: ConfirmBlock) => ConfirmBlock) {
+    setDoc((d) => (d ? { ...d, blocks: d.blocks.map((b, i) => (i === bi ? fn(b) : b)) } : d));
+  }
+
   async function lookup(bi: number, ui: number, raw: string) {
     const id = raw.trim().toUpperCase();
     const key = `${bi}:${ui}`;
@@ -175,26 +211,18 @@ export default function ConfirmSheetEditor({
     }
     const serial = (found.serials[0] ?? '').toUpperCase() === id ? '' : found.serials[0] ?? '';
     setSerialOptions((s) => ({ ...s, [key]: found.serials }));
-    setDoc((d) => {
-      if (!d) return d;
-      return {
-        ...d,
-        blocks: d.blocks.map((blk, i) => {
-          if (i !== bi) return blk;
-          const units = blk.units.map((u, k) =>
-            k === ui
-              ? { ...u, assetId: id, serial, spec: found.spec, brand: found.brand, model: found.model, gubun: found.gubun, category: found.category }
-              : u,
-          );
-          return {
-            ...blk,
-            units,
-            manufacturer: blk.manufacturer || found.brand || '',
-            deliverySpec: specTouched[bi] ? blk.deliverySpec : deliverySpecFromUnits(units) || blk.deliverySpec,
-          };
-        }),
-      };
-    });
+    updateBlock(bi, (blk) =>
+      derived(
+        blk,
+        bi,
+        blk.units.map((u, k) =>
+          k === ui
+            ? { ...u, assetId: id, serial, spec: found.spec, brand: found.brand, model: found.model, gubun: found.gubun, category: found.category }
+            : u,
+        ),
+        blk.manufacturer || found.brand || '',
+      ),
+    );
     setInfo((s) => ({
       ...s,
       [bi]:
@@ -213,11 +241,14 @@ export default function ConfirmSheetEditor({
       const units = await enrichConfirmUnits(ids.map((assetId) => ({ assetId, serial: '' })), `${b.item} ${b.request}`);
       ids.forEach((id, k) => (looked.current[`${bi}:${k}`] = id));
       const brands = [...new Set(units.map((u) => u.brand).filter(Boolean))];
-      setBlock(bi, {
-        units: [...units, ...Array.from({ length: Math.max(0, b.quantity - units.length) }, blankUnit)],
-        manufacturer: b.manufacturer || brands.join('/'),
-        deliverySpec: specTouched[bi] ? b.deliverySpec : deliverySpecFromUnits(units) || b.deliverySpec,
-      });
+      updateBlock(bi, (blk) =>
+        derived(
+          blk,
+          bi,
+          [...units, ...Array.from({ length: Math.max(0, b.quantity - units.length) }, blankUnit)],
+          blk.manufacturer || brands.join('/'),
+        ),
+      );
       setInfo((s) => ({ ...s, [bi]: `요청사항의 자산번호 ${ids.length}개를 넣었어요.` }));
     } finally {
       setBusy('');
@@ -228,7 +259,7 @@ export default function ConfirmSheetEditor({
     if (!doc || !opened?.linkedUnits.length) return;
     if (hasAssets(doc) && !confirm('지금 적힌 자산번호를 완료 보고 기기로 바꿀까요?')) return;
     looked.current = {};
-    setDoc(applyUnits({ ...doc, blocks: doc.blocks.map((b) => ({ ...b, units: [] })) }, opened.linkedUnits));
+    setDoc(applyUnits({ ...doc, blocks: doc.blocks.map((b) => ({ ...b, units: [] })) }, opened.linkedUnits, modelAuto));
     setInfo({ [-1]: `출고 준비 완료 보고의 ${opened.linkedUnits.length}대로 채웠어요.` });
   }
 
@@ -305,7 +336,10 @@ export default function ConfirmSheetEditor({
               <div style={{ maxHeight: '62vh', overflowY: 'auto', paddingRight: 4 }}>
                 {doc.blocks.length === 0 && <div className="sub">요청 품목이 없는 확인서예요.</div>}
                 {doc.blocks.map((b, bi) => {
-                  const reqIds = (`${b.request}\n${b.requestHardware}`.toUpperCase().match(/\b[A-Z]{1,2}\d{4,5}\b/g) ?? []).length;
+                  // 왼쪽(작성시)은 연 시점의 시트 값 — 오른쪽에서 요청사항 칸을 고쳐도 영업 원문은 보이게
+                  const origRequest = opened?.doc.blocks[bi]?.request ?? b.request;
+                  const reqIds = (`${origRequest}\n${b.requestHardware}`.toUpperCase().match(/\b[A-Z]{1,2}\d{4,5}\b/g) ?? []).length;
+                  const models = requestModelsFromUnits(b.units, b.manufacturer);
                   return (
                     <div key={b.row} style={{ border: '1px solid var(--ink-200)', borderRadius: 10, marginBottom: 10, display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 2fr' }}>
                       <div style={{ padding: 10, background: 'var(--ink-50, #f8fafc)', borderRight: '1px solid var(--ink-200)', borderRadius: '10px 0 0 10px' }}>
@@ -318,9 +352,9 @@ export default function ConfirmSheetEditor({
                             <b>하드웨어</b> {b.requestHardware}
                           </div>
                         )}
-                        {b.request && (
+                        {origRequest && (
                           <div style={{ fontSize: 12, whiteSpace: 'pre-wrap', color: 'var(--ink-700, #334155)' }}>
-                            <b>요청</b> {b.request}
+                            <b>요청</b> {origRequest}
                           </div>
                         )}
                         {reqIds > 0 && !b.units.some((u) => u.assetId.trim()) && (
@@ -333,15 +367,21 @@ export default function ConfirmSheetEditor({
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                           <div style={{ fontSize: 11, color: 'var(--ink-500)', fontWeight: 700, flex: 1 }}>출고시 (기재사항)</div>
                           <label style={{ fontSize: 12 }}>제조사</label>
-                          <input className="inline-cell-input" style={{ width: 140 }} value={b.manufacturer} onChange={(e) => setBlock(bi, { manufacturer: e.target.value })} />
+                          <input
+                            className="inline-cell-input"
+                            style={{ width: 140 }}
+                            value={b.manufacturer}
+                            onChange={(e) => updateBlock(bi, (blk) => derived(blk, bi, blk.units, e.target.value))}
+                          />
                         </div>
                         <table style={{ width: '100%' }}>
                           <thead>
                             <tr>
                               <th style={{ width: 28 }}>#</th>
-                              <th style={{ width: 110 }}>자산번호</th>
+                              <th style={{ width: 100 }}>자산번호</th>
                               <th>S/N</th>
-                              <th>사양</th>
+                              <th>모델명</th>
+                              <th style={{ width: 150 }}>사양</th>
                               <th style={{ width: 30 }} />
                             </tr>
                           </thead>
@@ -381,6 +421,18 @@ export default function ConfirmSheetEditor({
                                     )}
                                   </td>
                                   <td>
+                                    <input
+                                      className="inline-cell-input"
+                                      value={u.model ?? ''}
+                                      placeholder="S27HG314EK"
+                                      onChange={(e) =>
+                                        updateBlock(bi, (blk) =>
+                                          derived(blk, bi, blk.units.map((x, k) => (k === ui ? { ...x, model: e.target.value } : x))),
+                                        )
+                                      }
+                                    />
+                                  </td>
+                                  <td>
                                     <input className="inline-cell-input" value={u.spec ?? ''} onChange={(e) => setUnit(bi, ui, { spec: e.target.value })} />
                                   </td>
                                   <td>
@@ -390,7 +442,7 @@ export default function ConfirmSheetEditor({
                                       title="줄 삭제"
                                       onClick={() => {
                                         looked.current = {};
-                                        setBlock(bi, { units: b.units.filter((_, k) => k !== ui) });
+                                        updateBlock(bi, (blk) => derived(blk, bi, blk.units.filter((_, k) => k !== ui)));
                                       }}
                                     >
                                       ×
@@ -405,6 +457,41 @@ export default function ConfirmSheetEditor({
                           ＋ 줄 추가
                         </button>
                         {info[bi] && <div style={{ fontSize: 12, color: 'var(--ink-500)', marginTop: 4 }}>{info[bi]}</div>}
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <label style={{ fontSize: 12, fontWeight: 700 }}>요청사항 (모델명)</label>
+                            <span style={{ fontSize: 11, color: 'var(--ink-500)' }}>확인서 왼쪽 요청사항 칸에 들어가요</span>
+                            {!modelAuto[bi] && models && b.request.trim() !== models && (
+                              <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                                {b.request.trim() && !b.request.includes(models) && (
+                                  <button type="button" className="chip" onClick={() => setBlock(bi, { request: `${b.request.trim()}\n${models}` })}>
+                                    아래에 모델명 붙이기
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="chip"
+                                  onClick={() => {
+                                    setModelAuto((s) => ({ ...s, [bi]: true }));
+                                    setBlock(bi, { request: models });
+                                  }}
+                                >
+                                  모델명으로 바꾸기
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                          <textarea
+                            rows={Math.min(4, Math.max(1, b.request.split('\n').length))}
+                            value={b.request}
+                            placeholder="자산번호를 넣으면 모델명이 자동으로 들어가요"
+                            onChange={(e) => {
+                              setModelAuto((s) => ({ ...s, [bi]: false }));
+                              setBlock(bi, { request: e.target.value });
+                            }}
+                            style={{ width: '100%', fontFamily: 'inherit', fontSize: 13, padding: 6, border: '1px solid var(--ink-200)', borderRadius: 6 }}
+                          />
+                        </div>
                         <div style={{ marginTop: 8 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <label style={{ fontSize: 12, fontWeight: 700 }}>[납품사양]</label>

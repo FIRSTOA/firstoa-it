@@ -1,6 +1,6 @@
 import 'server-only';
 import { getSheetsClient } from '@/lib/googleAuth';
-import { blockCells, parseConfirmGrid, type ConfirmBlock, type ConfirmDoc } from '@/lib/confirmSheet';
+import { blockCells, parseConfirmGrid, REQUEST_CELL, type ConfirmBlock, type ConfirmDoc } from '@/lib/confirmSheet';
 
 /**
  * 확인서리스트 구글시트 읽기/쓰기 — 영업이 업체별 탭(예: "지니소프1118")으로 만든 확인서를 읽고,
@@ -86,7 +86,10 @@ export async function writeConfirmBlocks(tab: string, blocks: ConfirmBlock[]): P
     }
     const sheetBlock = fresh?.blocks.find((x) => x.row === b.row);
     const merged: ConfirmBlock = { ...b, requestHardware: sheetBlock ? sheetBlock.requestHardware : b.requestHardware };
+    // 요청사항(모델명) 칸은 A열 이름이 "요청사항"일 때만 — 양식을 고쳐 쓴 탭은 건드리지 않음
+    const requestOk = /^요청\s*사항$/.test(grid[r + REQUEST_CELL.dr]?.[0] ?? '');
     for (const c of blockCells(merged)) {
+      if (c.r === r + REQUEST_CELL.dr && c.c === REQUEST_CELL.c && !requestOk) continue;
       data.push({ range: `${q(tab)}!${String.fromCharCode(65 + c.c)}${c.r + 1}`, values: [[c.v]] });
     }
   }

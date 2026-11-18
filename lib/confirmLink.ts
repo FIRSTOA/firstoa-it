@@ -2,6 +2,7 @@ import 'server-only';
 import {
   allocateUnits,
   deliverySpecFromUnits,
+  requestModelsFromUnits,
   titleBody,
   type ConfirmBlock,
   type ConfirmDoc,
@@ -223,11 +224,14 @@ export async function syncPrepToConfirm(eventId: string): Promise<string> {
     if (!sheetIds.every((id) => newIds.includes(id))) return; // 사람이 다른 번호를 적어 둠
     if (sheetIds.length === newIds.length && newIds.every((id) => sheetIds.includes(id))) return; // 이미 같음
     const brands = [...new Set(alloc[i].map((u) => u.brand).filter(Boolean))];
+    const manufacturer = b.manufacturer || brands.join('/');
     changed.push({
       ...b,
       units: alloc[i],
-      manufacturer: b.manufacturer || brands.join('/'),
+      manufacturer,
       deliverySpec: deliverySpecFromUnits(alloc[i]) || b.deliverySpec,
+      // 요청사항 칸은 비어 있을 때만 모델명으로(영업이 적은 내용은 그대로)
+      request: b.request.trim() ? b.request : requestModelsFromUnits(alloc[i], manufacturer),
     });
   });
   if (!changed.length) return 'unchanged';
