@@ -103,7 +103,7 @@ export async function enrichUnits(units: ConfirmUnit[], hint = '', preferInvento
       const b = (await findAssetBriefs(id, hint).catch(() => []))[0];
       const pick = (mine: string | undefined, inv: string | undefined) =>
         (preferInventory ? inv || mine : mine || inv) || '';
-      const serialRaw = u.serial || b?.serialNo || '';
+      const serialRaw = (preferInventory ? b?.serialNo || u.serial : u.serial || b?.serialNo) || '';
       return {
         ...u,
         assetId: id,
