@@ -13,13 +13,16 @@ import { lookupUnitByAsset } from '@/app/shipment-prep/reportActions';
 import {
   allocateUnits,
   deliverySpecFromUnits,
+  needsAttachment,
   requestModelsFromUnits,
+  type CellMode,
   type ConfirmBlock,
   type ConfirmDoc,
   type ConfirmUnit,
 } from '@/lib/confirmSheet';
 import type { PrintGrid } from '@/lib/confirmSheetServer';
 import { shortDateLabel } from '@/lib/shipmentPrep';
+import ConfirmAttachment from './ConfirmAttachment';
 import ConfirmSheetDocument from './ConfirmSheetDocument';
 
 export type EditorTarget = { key: string } | { opened: OpenedConfirm };
@@ -55,7 +58,7 @@ function applyUnits(doc: ConfirmDoc, units: ConfirmUnit[], modelAuto: Record<num
         ...b,
         units: alloc[i],
         manufacturer,
-        deliverySpec: deliverySpecFromUnits(alloc[i]) || b.deliverySpec,
+        deliverySpec: deliverySpecFromUnits(alloc[i], doc.cellMode) || b.deliverySpec,
         request: modelAuto[i] ? requestModelsFromUnits(alloc[i], manufacturer) : b.request,
       };
     }),
@@ -96,6 +99,8 @@ export default function ConfirmSheetEditor({
   const [busy, setBusy] = useState('');
   const [printGrid, setPrintGrid] = useState<PrintGrid | null>(null);
   const [printing, setPrinting] = useState(false);
+  /** 별첨(대수별 출고 명세) 같이 인쇄 — null이면 자동(데스크탑이거나 3대 넘는 품목이 있을 때) */
+  const [attachPrint, setAttachPrint] = useState<boolean | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
   const looked = useRef<Record<string, string>>({});
 
@@ -107,6 +112,7 @@ export default function ConfirmSheetEditor({
     setInfo({});
     setSpecTouched({});
     setModelAuto({});
+    setAttachPrint(null);
     setSerialOptions({});
     looked.current = {};
     const load = async () => {
@@ -190,9 +196,24 @@ export default function ConfirmSheetEditor({
       ...blk,
       units,
       manufacturer,
-      deliverySpec: specTouched[bi] ? blk.deliverySpec : deliverySpecFromUnits(units) || blk.deliverySpec,
+      deliverySpec: specTouched[bi] ? blk.deliverySpec : deliverySpecFromUnits(units, doc?.cellMode) || blk.deliverySpec,
       request: modelAuto[bi] ? requestModelsFromUnits(units, manufacturer) : blk.request,
     };
+  }
+
+  /** 확인서 칸 적는 방식 바꾸기 — 사람이 안 고친 [납품사양]은 그 방식대로 다시 만듦 */
+  function setCellMode(mode: CellMode) {
+    setDoc((d) =>
+      d
+        ? {
+            ...d,
+            cellMode: mode,
+            blocks: d.blocks.map((b, i) =>
+              specTouched[i] ? b : { ...b, deliverySpec: deliverySpecFromUnits(b.units, mode) || b.deliverySpec },
+            ),
+          }
+        : d,
+    );
   }
   function updateBlock(bi: number, fn: (b: ConfirmBlock) => ConfirmBlock) {
     setDoc((d) => (d ? { ...d, blocks: d.blocks.map((b, i) => (i === bi ? fn(b) : b)) } : d));
@@ -328,6 +349,30 @@ export default function ConfirmSheetEditor({
                   </button>
                 )}
                 {doc.consumables && <span style={{ color: 'var(--ink-500)' }}>소모품: {doc.consumables}</span>}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', fontSize: 12.5, marginBottom: 8 }}>
+                <span style={{ fontWeight: 700 }}>확인서 칸</span>
+                <button
+                  type="button"
+                  className={`chip${doc.cellMode !== 'summary' ? ' active' : ''}`}
+                  onClick={() => setCellMode('full')}
+                  title="자산번호·S/N을 대수만큼 줄바꿈으로 다 적어요"
+                >
+                  다 넣기
+                </button>
+                <button
+                  type="button"
+                  className={`chip${doc.cellMode === 'summary' ? ' active' : ''}`}
+                  onClick={() => setCellMode('summary')}
+                  title="자산번호는 두 개씩 한 줄, S/N은 '별첨 참조', 사양은 '사양 ×대수' — 대수별 상세는 별첨 장"
+                >
+                  요약 + 별첨 참조
+                </button>
+                {needsAttachment(doc) && (
+                  <span style={{ color: 'var(--ink-500)' }}>
+                    데스크탑이거나 3대 넘는 품목이 있어서 인쇄할 때 <b>별첨(대수별 출고 명세)</b>이 2장째로 붙어요.
+                  </span>
+                )}
               </div>
               {(info[-1] || busy) && (
                 <div style={{ fontSize: 12.5, color: 'var(--indigo-600)', marginBottom: 8 }}>{busy || info[-1]}</div>
@@ -503,7 +548,7 @@ export default function ConfirmSheetEditor({
                                 style={{ marginLeft: 'auto' }}
                                 onClick={() => {
                                   setSpecTouched((s) => ({ ...s, [bi]: false }));
-                                  setBlock(bi, { deliverySpec: deliverySpecFromUnits(b.units) });
+                                  setBlock(bi, { deliverySpec: deliverySpecFromUnits(b.units, doc.cellMode) });
                                 }}
                               >
                                 사양에서 다시 만들기
@@ -530,6 +575,14 @@ export default function ConfirmSheetEditor({
                 <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
                   닫기
                 </button>
+                <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 4, marginRight: 'auto' }}>
+                  <input
+                    type="checkbox"
+                    checked={attachPrint ?? needsAttachment(doc)}
+                    onChange={(e) => setAttachPrint(e.target.checked)}
+                  />
+                  📎 별첨(출고 명세) 같이 인쇄
+                </label>
                 <button type="button" className="btn btn-ghost" onClick={print} disabled={saving || !!busy}>
                   🖨 인쇄
                 </button>
@@ -563,6 +616,12 @@ export default function ConfirmSheetEditor({
             <div ref={printRef} style={{ width: 'max-content' }}>
               <ConfirmSheetDocument doc={doc} grid={printGrid} />
             </div>
+            {(attachPrint ?? needsAttachment(doc)) && (
+              // 별첨은 새 장에서 — 위 여백은 여기서(@page 여백이 0이라)
+              <div style={{ breakBefore: 'page', paddingTop: '8mm' }}>
+                <ConfirmAttachment doc={doc} />
+              </div>
+            )}
           </div>,
           document.body,
         )}

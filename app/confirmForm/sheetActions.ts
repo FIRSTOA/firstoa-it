@@ -22,6 +22,7 @@ import {
 } from '@/lib/confirmLink';
 import {
   CONFIRM_SHEET_URL,
+  deleteConfirmTab,
   readConfirmDoc,
   readConfirmDocs,
   readPrintGrid,
@@ -140,6 +141,27 @@ async function withLink(raw: ConfirmDoc, appId: string | null): Promise<OpenedCo
   return { doc, appId, link: info, linkedUnits };
 }
 
+/**
+ * 시트에는 대수별 S/N·모델명·사양이 다 없을 수 있어서(요약 방식이면 S/N이 "별첨 참조") 앱 사본에
+ * 저장해 둔 기기 정보로 빈 칸을 채움 — 자산번호가 같은 기기만, 시트 값이 있으면 시트 우선.
+ */
+function withAppDetails(sheet: ConfirmDoc, app: ConfirmDoc): ConfirmDoc {
+  const saved = new Map(
+    (app.blocks ?? []).flatMap((b) => b.units ?? []).filter((u) => u.assetId?.trim()).map((u) => [u.assetId.trim().toUpperCase(), u]),
+  );
+  return {
+    ...sheet,
+    blocks: sheet.blocks.map((b) => ({
+      ...b,
+      units: b.units.map((u) => {
+        const s = saved.get(u.assetId.trim().toUpperCase());
+        if (!s) return u;
+        return { ...s, ...u, serial: u.serial || s.serial || '', model: u.model || s.model, spec: u.spec || s.spec, brand: u.brand || s.brand };
+      }),
+    })),
+  };
+}
+
 /** 확인서 열기 — 시트 탭은 최신 값을 다시 읽고, 앱 문서는 저장본을. */
 export async function openConfirmDoc(key: string): Promise<Result<OpenedConfirm>> {
   try {
@@ -147,8 +169,9 @@ export async function openConfirmDoc(key: string): Promise<Result<OpenedConfirm>
       const tab = key.slice(4);
       const doc = await readConfirmDoc(tab);
       if (!doc) return { ok: false, error: `"${tab}" 탭을 확인서로 읽지 못했어요.` };
-      const { data } = await createAdminClient().from(CONFIRM_DOCS_TABLE).select('id').eq('source_tab', tab).maybeSingle();
-      return { ok: true, ...(await withLink(doc, (data as { id: string } | null)?.id ?? null)) };
+      const { data } = await createAdminClient().from(CONFIRM_DOCS_TABLE).select('id,doc').eq('source_tab', tab).maybeSingle();
+      const app = data as { id: string; doc: ConfirmDoc } | null;
+      return { ok: true, ...(await withLink(app ? withAppDetails(doc, app.doc) : doc, app?.id ?? null)) };
     }
     const id = key.slice(4);
     const { data, error } = await createAdminClient().from(CONFIRM_DOCS_TABLE).select('*').eq('id', id).single();
@@ -231,7 +254,7 @@ export async function saveConfirmDoc(
       })),
     );
     const clean: ConfirmDoc = { ...doc, blocks };
-    if (opts.writeSheet && doc.tab) await writeConfirmBlocks(doc.tab, blocks.filter((b) => b.row > 0));
+    if (opts.writeSheet && doc.tab) await writeConfirmBlocks(doc.tab, blocks.filter((b) => b.row > 0), doc.cellMode);
 
     const saved = await upsertAppDoc(clean, { appId: opts.appId, eventId: opts.eventId, sheetWritten: opts.writeSheet && !!doc.tab });
     if (!saved.ok) {
@@ -262,6 +285,24 @@ export async function enrichConfirmUnits(units: ConfirmUnit[], hint: string): Pr
 export async function deleteAppConfirmDoc(appId: string): Promise<Result> {
   const { error } = await createAdminClient().from(CONFIRM_DOCS_TABLE).delete().eq('id', appId);
   return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+/**
+ * 목록에서 삭제 — 시트 탭이면 확인서리스트 시트에서 그 탭을 지우고(탭 이름을 똑같이 입력해야 함)
+ * 앱 사본도 지움. 붙여넣기로만 만든 문서는 앱 사본만.
+ */
+export async function deleteConfirmDoc(key: string, typedTab = ''): Promise<Result> {
+  try {
+    if (key.startsWith('app:')) return deleteAppConfirmDoc(key.slice(4));
+    const tab = key.slice(4);
+    if (typedTab.trim() !== tab) return { ok: false, error: '탭 이름이 달라서 지우지 않았어요.' };
+    await deleteConfirmTab(tab);
+    // 앱 사본은 표가 없거나(SQL 실행 전) 행이 없어도 괜찮음
+    await createAdminClient().from(CONFIRM_DOCS_TABLE).delete().eq('source_tab', tab);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errMsg(err) };
+  }
 }
 
 export async function getConfirmPrintGrid(tab: string): Promise<Result<{ grid: PrintGrid }>> {

@@ -50,9 +50,18 @@ export type ConfirmDoc = {
   blocks: ConfirmBlock[];
   /** 원본 칸 값(A~H) — 인쇄용 */
   grid: string[][];
+  /**
+   * 출고시(기재사항) 칸 적는 방식 — full: 대수만큼 줄바꿈으로 다 넣기(기본),
+   * summary: 자산번호는 두 개씩 한 줄, S/N은 "별첨 참조", 사양은 "사양 ×대수"(대수별 상세는 별첨 장).
+   */
+  cellMode?: CellMode;
 };
 
+export type CellMode = 'full' | 'summary';
+
 export const DELIVERY_SPEC_MARK = '[납품사양]';
+/** 요약 방식일 때 S/N 칸에 적는 말 — 다시 읽을 때 시리얼로 안 읽히게 이 말이 든 줄은 뺌 */
+export const ATTACHMENT_MARK = '별첨 참조';
 
 const cell = (g: string[][], r: number, c: number) => String(g[r]?.[c] ?? '').trim();
 const findRow = (g: string[][], col: number, re: RegExp, from = 0) => {
@@ -123,10 +132,13 @@ export function parseConfirmGrid(grid: unknown[][], tab = ''): ConfirmDoc | null
   }
 
   const blocks: ConfirmBlock[] = [];
+  let summary = false;
   for (let i = startRow + 1; i < g.length; i++) {
     if (!/^구\s*분$/.test(cell(g, i, 0)) || cell(g, i, 4) !== '제조사') continue;
     const assets = splitLines(cell(g, i, 7));
-    const serials = splitLines(cell(g, i + 1, 5));
+    const serialCell = cell(g, i + 1, 5);
+    if (serialCell.includes(ATTACHMENT_MARK)) summary = true;
+    const serials = splitLines(serialCell).filter((s) => !s.includes('별첨'));
     const item = cell(g, i + 1, 1);
     const quantity = parseInt(cell(g, i + 1, 3), 10) || 0;
     const manufacturer = cell(g, i, 5);
@@ -164,6 +176,7 @@ export function parseConfirmGrid(grid: unknown[][], tab = ''): ConfirmDoc | null
     prices,
     blocks,
     grid: trimGrid(g),
+    cellMode: summary ? 'summary' : 'full',
   };
 }
 
@@ -248,8 +261,28 @@ export function allocateUnits(blocks: Pick<ConfirmBlock, 'item' | 'request' | 'q
   return out;
 }
 
-export function deliverySpecFromUnits(units: ConfirmUnit[]): string {
-  return [...new Set(units.map((u) => (u.spec ?? '').trim()).filter(Boolean))].join('\n');
+/** [납품사양] — 다 넣기: 서로 다른 사양을 줄마다, 요약: "사양 ×대수" */
+export function deliverySpecFromUnits(units: ConfirmUnit[], mode: CellMode = 'full'): string {
+  const counts = new Map<string, number>();
+  for (const u of units) {
+    const s = (u.spec ?? '').trim();
+    if (s) counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  if (mode === 'full') return [...counts.keys()].join('\n');
+  return [...counts].map(([s, n]) => `${s} ×${n}`).join('\n');
+}
+
+const assetCount = (b: Pick<ConfirmBlock, 'units'>) => b.units.filter((u) => u.assetId.trim()).length;
+
+/** 확인서 칸에 다 안 들어가서 별첨(대수별 출고 명세)을 붙이는 게 좋은지 — 데스크탑이 있거나 3대 넘는 품목 */
+export function needsAttachment(doc: Pick<ConfirmDoc, 'blocks' | 'cellMode'>): boolean {
+  if (doc.cellMode === 'summary') return true;
+  return doc.blocks.some(
+    (b) =>
+      assetCount(b) > 3 ||
+      (assetCount(b) > 0 &&
+        (guessCategory(`${b.item} ${b.request}`) === '데스크탑' || b.units.some((u) => u.category === '데스크탑'))),
+  );
 }
 
 /**
@@ -283,14 +316,19 @@ export function filledCount(doc: Pick<ConfirmDoc, 'blocks'>): { filled: number; 
 export const REQUEST_CELL = { dr: 2, c: 1 } as const;
 
 /** 시트/인쇄에 쓸 칸 값 — 출고시(기재사항) 4칸 + 요청사항(모델명) 칸. 행·열(0부터)별. */
-export function blockCells(b: ConfirmBlock): { r: number; c: number; v: string }[] {
+export function blockCells(b: ConfirmBlock, mode: CellMode = 'full'): { r: number; c: number; v: string }[] {
   const r = b.row - 1;
   const ids = b.units.map((u) => u.assetId.trim()).filter(Boolean);
   const serials = b.units.map((u) => u.serial.trim()).filter(Boolean);
+  const summary = mode === 'summary' && ids.length > 0;
+  // 요약: 자산번호 칸(H열, 폭이 좁음)에 두 개씩 한 줄 — 다시 읽을 때도 쉼표·줄바꿈으로 나뉨
+  const idCell = summary
+    ? Array.from({ length: Math.ceil(ids.length / 2) }, (_, k) => ids.slice(k * 2, k * 2 + 2).join(', ')).join('\n')
+    : ids.join('\n');
   return [
     { r, c: 5, v: b.manufacturer.trim() },
-    { r, c: 7, v: ids.join('\n') },
-    { r: r + 1, c: 5, v: serials.join('\n') },
+    { r, c: 7, v: idCell },
+    { r: r + 1, c: 5, v: summary ? `${ATTACHMENT_MARK} (${ids.length}대)` : serials.join('\n') },
     { r: r + 2, c: 5, v: buildHardwareCell(b.requestHardware, b.deliverySpec) },
     { r: r + REQUEST_CELL.dr, c: REQUEST_CELL.c, v: b.request.trim() },
   ];

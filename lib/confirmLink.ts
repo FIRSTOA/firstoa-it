@@ -229,13 +229,13 @@ export async function syncPrepToConfirm(eventId: string): Promise<string> {
       ...b,
       units: alloc[i],
       manufacturer,
-      deliverySpec: deliverySpecFromUnits(alloc[i]) || b.deliverySpec,
+      deliverySpec: deliverySpecFromUnits(alloc[i], doc.cellMode) || b.deliverySpec,
       // 요청사항 칸은 비어 있을 때만 모델명으로(영업이 적은 내용은 그대로)
       request: b.request.trim() ? b.request : requestModelsFromUnits(alloc[i], manufacturer),
     });
   });
   if (!changed.length) return 'unchanged';
-  await writeConfirmBlocks(doc.tab, changed);
+  await writeConfirmBlocks(doc.tab, changed, doc.cellMode);
   const merged: ConfirmDoc = { ...doc, blocks: doc.blocks.map((b) => changed.find((c) => c.row === b.row) ?? b) };
   await upsertAppDoc(merged, { eventId, sheetWritten: true }).catch(() => null);
   return `written:${changed.length}`;

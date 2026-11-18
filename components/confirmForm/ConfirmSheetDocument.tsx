@@ -18,7 +18,7 @@ export default function ConfirmSheetDocument({ doc, grid }: { doc: ConfirmDoc; g
     : doc.grid.map((r) => Array.from({ length: 8 }, (_, c) => ({ v: r[c] ?? '', valign: 'middle' })));
   for (const b of doc.blocks) {
     if (b.row <= 0) continue;
-    for (const c of blockCells(b)) {
+    for (const c of blockCells(b, doc.cellMode)) {
       while (base.length <= c.r) base.push(Array.from({ length: 8 }, () => ({ v: '' })));
       base[c.r][c.c] = { ...base[c.r][c.c], v: c.v };
     }

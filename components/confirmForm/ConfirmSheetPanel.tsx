@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   confirmFromOcr,
+  deleteConfirmDoc,
   listConfirmDocs,
   parsePastedConfirm,
   type ConfirmListItem,
@@ -35,6 +36,7 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [reading, setReading] = useState('');
+  const [deleting, setDeleting] = useState('');
 
   function load() {
     setLoading(true);
@@ -63,6 +65,32 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
       return true;
     });
   }, [items, itOnly, range, search]);
+
+  async function remove(it: ConfirmListItem) {
+    let typed = '';
+    if (it.tab) {
+      // 시트 탭은 영업 확인서도 섞여 있어서, 탭 이름을 똑같이 입력해야 지움
+      const answer = window.prompt(
+        `확인서리스트 시트에서 "${it.tab}" 탭을 지워요(앱 사본도 같이).\n` +
+          `영업이 만든 확인서도 지워지니 테스트 탭만 지우세요. 잘못 지웠으면 구글시트 '버전 기록'에서 되살릴 수 있어요.\n\n` +
+          `지우려면 탭 이름을 그대로 입력하세요: ${it.tab}`,
+      );
+      if (answer == null) return;
+      typed = answer;
+    } else if (!window.confirm(`붙여넣기로 만든 "${it.company || '확인서'}"를 앱에서 지울까요?`)) return;
+    setDeleting(it.key);
+    try {
+      const r = await deleteConfirmDoc(it.key, typed);
+      if (!r.ok) {
+        onToast(r.error);
+        return;
+      }
+      setItems((list) => list.filter((x) => x.key !== it.key));
+      onToast(it.tab ? `"${it.tab}" 탭을 지웠어요.` : '지웠어요.');
+    } finally {
+      setDeleting('');
+    }
+  }
 
   async function readPastedText() {
     const grid = parseTsv(pasteText);
@@ -222,7 +250,7 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
                   <td style={{ fontSize: 12, color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>
                     {it.sheetWrittenAt ? '시트 기재됨' : it.savedAt ? '앱 저장' : '-'}
                   </td>
-                  <td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
                     <button
                       type="button"
                       className="btn btn-ghost"
@@ -233,6 +261,18 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
                       }}
                     >
                       열기
+                    </button>{' '}
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ whiteSpace: 'nowrap', color: '#dc2626' }}
+                      disabled={deleting === it.key}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove(it);
+                      }}
+                    >
+                      {deleting === it.key ? '지우는 중…' : '삭제'}
                     </button>
                   </td>
                 </tr>

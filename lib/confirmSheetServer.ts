@@ -1,6 +1,6 @@
 import 'server-only';
 import { getSheetsClient } from '@/lib/googleAuth';
-import { blockCells, parseConfirmGrid, REQUEST_CELL, type ConfirmBlock, type ConfirmDoc } from '@/lib/confirmSheet';
+import { blockCells, parseConfirmGrid, REQUEST_CELL, type CellMode, type ConfirmBlock, type ConfirmDoc } from '@/lib/confirmSheet';
 
 /**
  * 확인서리스트 구글시트 읽기/쓰기 — 영업이 업체별 탭(예: "지니소프1118")으로 만든 확인서를 읽고,
@@ -73,7 +73,7 @@ export async function readConfirmDoc(tab: string): Promise<ConfirmDoc | null> {
  * 다음 줄 "S/N")가 그대로인지 확인 — 그사이 영업이 줄을 넣거나 지웠으면 엉뚱한 칸에 쓰지 않게.
  * 하드웨어 칸의 요청 부분([납품사양] 앞)은 방금 읽은 시트 값을 그대로 둡니다.
  */
-export async function writeConfirmBlocks(tab: string, blocks: ConfirmBlock[]): Promise<void> {
+export async function writeConfirmBlocks(tab: string, blocks: ConfirmBlock[], mode: CellMode = 'full'): Promise<void> {
   const sheets = getSheetsClient();
   const res = await withRetry(() => sheets.spreadsheets.values.get({ spreadsheetId: CONFIRM_SHEET_ID, range: `${q(tab)}!${RANGE}` }));
   const grid = ((res.data.values ?? []) as unknown[][]).map((r) => (r ?? []).map((c) => String(c ?? '').trim()));
@@ -88,7 +88,7 @@ export async function writeConfirmBlocks(tab: string, blocks: ConfirmBlock[]): P
     const merged: ConfirmBlock = { ...b, requestHardware: sheetBlock ? sheetBlock.requestHardware : b.requestHardware };
     // 요청사항(모델명) 칸은 A열 이름이 "요청사항"일 때만 — 양식을 고쳐 쓴 탭은 건드리지 않음
     const requestOk = /^요청\s*사항$/.test(grid[r + REQUEST_CELL.dr]?.[0] ?? '');
-    for (const c of blockCells(merged)) {
+    for (const c of blockCells(merged, mode)) {
       if (c.r === r + REQUEST_CELL.dr && c.c === REQUEST_CELL.c && !requestOk) continue;
       data.push({ range: `${q(tab)}!${String.fromCharCode(65 + c.c)}${c.r + 1}`, values: [[c.v]] });
     }
@@ -96,6 +96,30 @@ export async function writeConfirmBlocks(tab: string, blocks: ConfirmBlock[]): P
   if (!data.length) return;
   await withRetry(() =>
     sheets.spreadsheets.values.batchUpdate({ spreadsheetId: CONFIRM_SHEET_ID, requestBody: { valueInputOption: 'RAW', data } }),
+  );
+  invalidateConfirmCache();
+}
+
+/**
+ * 확인서 탭 지우기(테스트 탭 정리용). 목록/템플릿 탭은 거부하고, 지우기 직전에 다시 읽어서
+ * 확인서 양식("작성시" 줄이 있는 탭)인지 확인합니다. 지운 탭은 구글시트 '버전 기록'으로 되살릴 수 있어요.
+ */
+export async function deleteConfirmTab(tab: string): Promise<void> {
+  if (!tab || SKIP_TABS.has(tab)) throw new Error(`"${tab}" 탭은 지울 수 없어요.`);
+  const sheets = getSheetsClient();
+  const meta = await withRetry(() =>
+    sheets.spreadsheets.get({ spreadsheetId: CONFIRM_SHEET_ID, fields: 'sheets.properties(title,sheetId)' }),
+  );
+  const all = (meta.data.sheets ?? []).map((s) => s.properties!);
+  const target = all.find((p) => p?.title === tab);
+  if (!target || target.sheetId == null) throw new Error(`"${tab}" 탭이 시트에 없어요(이미 지워졌을 수 있어요).`);
+  if (all.length <= 1) throw new Error('시트에 탭이 하나뿐이라 지울 수 없어요.');
+  if (!(await readConfirmDoc(tab))) throw new Error(`"${tab}" 탭은 확인서 양식이 아니라서 지우지 않았어요.`);
+  await withRetry(() =>
+    sheets.spreadsheets.batchUpdate({
+      spreadsheetId: CONFIRM_SHEET_ID,
+      requestBody: { requests: [{ deleteSheet: { sheetId: target.sheetId! } }] },
+    }),
   );
   invalidateConfirmCache();
 }
