@@ -2,20 +2,18 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 
 const SIDEBAR_SECTIONS = [
   {
     label: '재고관리',
     items: [
-      { label: '현황표', href: null },
       { label: 'IT 재고 리스트', href: '/' },
       { label: '입고', href: '/receiving' },
       { label: '출고', href: '/dispatch' },
       { label: '출고 준비 리스트', href: '/shipment-prep' },
       { label: '확인서/출고및반출준비', href: '/confirm-form' },
       { label: '판매리스트', href: '/sales' },
-      { label: '재고입력', href: null },
       { label: '자산 이력', href: '/asset-history' },
       { label: '실재고 조사', href: '/stocktake' },
       { label: '재고 현황판', href: '/inventory-status' },
@@ -33,15 +31,10 @@ const SIDEBAR_SECTIONS = [
 
 type SidebarItem = (typeof SIDEBAR_SECTIONS)[number]['items'][number];
 
-const TOP_TABS: { label: string; href: string | null }[] = [
+const TOP_TABS = [
   { label: '통합 캘린더', href: '/calendar' },
-  { label: '영업관리', href: null },
-  { label: '출고·현황', href: null },
-  { label: '고객서비스', href: null },
-  { label: '임대·청구', href: null },
-  { label: '재고관리', href: null },
-  { label: '관리', href: null },
-];
+  { label: '재고관리', href: '/' },
+] as const;
 
 type Props = {
   children: ReactNode;
@@ -54,18 +47,23 @@ type Props = {
 export default function Shell({ children, activeMenu, title, note }: Props) {
   const pathname = usePathname();
   const activeTab = pathname?.startsWith('/calendar') ? '통합 캘린더' : '재고관리';
-  const [toast, setToast] = useState({ msg: '', show: false });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 메뉴를 누른 뒤 다음 화면이 뜰 때까지(서버에서 화면을 만드느라 몇 초 걸림) 진행 막대 + 누른 메뉴 빙글 표시.
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
 
-  function showComingSoon(label: string) {
-    if (timer.current) clearTimeout(timer.current);
-    setToast({ msg: `${label} 화면은 준비 중이에요.`, show: true });
-    timer.current = setTimeout(() => setToast((t) => ({ ...t, show: false })), 1800);
+  useEffect(() => {
+    setPendingHref(null);
+  }, [pathname]);
+
+  function startNav(e: MouseEvent<HTMLAnchorElement>, href: string) {
+    // 새 탭으로 여는 클릭(Ctrl/⌘/Shift)이나 지금 보고 있는 화면이면 표시하지 않음
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || href === pathname) return;
+    setPendingHref(href);
   }
 
   return (
-    <div className="shell">
+    <div className={`shell${pendingHref ? ' navigating' : ''}`}>
+      {pendingHref && <div className="nav-progress" aria-hidden />}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-collapse" title="닫기" onClick={() => setSidebarOpen(false)}>
@@ -86,25 +84,24 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
           <div key={section.label}>
             <div className="sidebar-section-label">{section.label}</div>
             <ul className="sidebar-menu">
-              {section.items.map(({ label, href }) => (
-                <li
-                  key={label}
-                  className={label === activeMenu ? 'active' : undefined}
-                  onClick={href ? undefined : () => showComingSoon(label)}
-                >
-                  {href ? (
-                    <Link href={href} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'inherit', textDecoration: 'none', width: '100%' }}>
-                      <span className="dot" />
+              {section.items.map(({ label, href }) => {
+                const pending = pendingHref === href;
+                return (
+                  <li
+                    key={label}
+                    className={[label === activeMenu && 'active', pending && 'pending'].filter(Boolean).join(' ') || undefined}
+                  >
+                    <Link
+                      href={href}
+                      onClick={(e) => startNav(e, href)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'inherit', textDecoration: 'none', width: '100%' }}
+                    >
+                      {pending ? <span className="nav-spinner" aria-label="불러오는 중" /> : <span className="dot" />}
                       {label}
                     </Link>
-                  ) : (
-                    <>
-                      <span className="dot" />
-                      {label}
-                    </>
-                  )}
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}
@@ -129,22 +126,17 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
               </div>
             </div>
             <nav className="topnav-tabs">
-              {TOP_TABS.map(({ label, href }) =>
-                href ? (
-                  <Link
-                    key={label}
-                    href={href}
-                    className={`topnav-tab${label === activeTab ? ' active' : ''}`}
-                    style={{ textDecoration: 'none' }}
-                  >
-                    {label}
-                  </Link>
-                ) : (
-                  <div key={label} className={`topnav-tab${label === activeTab ? ' active' : ''}`}>
-                    {label}
-                  </div>
-                ),
-              )}
+              {TOP_TABS.map(({ label, href }) => (
+                <Link
+                  key={label}
+                  href={href}
+                  onClick={(e) => startNav(e, href)}
+                  className={`topnav-tab${label === activeTab ? ' active' : ''}`}
+                  style={{ textDecoration: 'none' }}
+                >
+                  {label}
+                </Link>
+              ))}
             </nav>
           </div>
           <div className="topnav-right">
@@ -167,15 +159,12 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
           <h1>{title}</h1>
           <div className="team-pills">
             <div className="team-pill active">IT팀</div>
-            <div className="team-pill">운영지원팀</div>
           </div>
           {note && <div className="breadcrumb-note">{note}</div>}
         </div>
 
         <div className="content-scroll">{children}</div>
       </div>
-
-      <div className={`toast${toast.show ? ' show' : ''}`}>{toast.msg}</div>
     </div>
   );
 }
