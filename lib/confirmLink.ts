@@ -61,11 +61,16 @@ export async function eventsAround(dates: string[]): Promise<CalEvent[]> {
   return (data ?? []) as CalEvent[];
 }
 
-export function findEventFor(doc: ConfirmDoc, events: CalEvent[]): CalEvent | null {
-  const hits = events.filter((e) => isSameJob(doc, e));
-  if (!hits.length) return null;
-  // 같은 제목 일정이 여러 개면 납품일에 가장 가까운 것
-  return hits.sort((a, b) => dayDiff(a.date, doc.deliveryDate || a.date) - dayDiff(b.date, doc.deliveryDate || b.date))[0];
+export function findEventsFor(doc: ConfirmDoc, events: CalEvent[]): CalEvent[] {
+  return events
+    .filter((e) => isSameJob(doc, e))
+    .sort((a, b) => dayDiff(a.date, doc.deliveryDate || a.date) - dayDiff(b.date, doc.deliveryDate || b.date));
+}
+
+/** 같은 제목 일정이 여러 개(다른 캘린더에 복사본 등)면 완료 보고가 있는 쪽 → 납품일 가까운 쪽 */
+export function pickLinked(hits: CalEvent[], infos: Record<string, LinkInfo>): CalEvent | null {
+  const score = (e: CalEvent) => ((infos[e.id]?.unitCount ?? 0) > 0 ? 2 : 0) + (infos[e.id]?.sentAt ? 1 : 0);
+  return hits.reduce<CalEvent | null>((best, e) => (!best || score(e) > score(best) ? e : best), null);
 }
 
 export async function linkInfoFor(events: CalEvent[]): Promise<Record<string, LinkInfo>> {

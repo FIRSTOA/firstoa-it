@@ -12,8 +12,9 @@ import {
   CONFIRM_DOCS_TABLE,
   enrichUnits,
   eventsAround,
-  findEventFor,
+  findEventsFor,
   linkInfoFor,
+  pickLinked,
   prepToConfirmUnits,
   pushDocToPrep,
   upsertAppDoc,
@@ -83,8 +84,9 @@ export async function listConfirmDocs(): Promise<Result<{ items: ConfirmListItem
       ...app.rows.filter((r) => !r.source_tab).map((r) => ({ doc: { ...r.doc, tab: '' }, row: r })),
     ];
     const events = await eventsAround(all.map((x) => x.doc.deliveryDate));
-    const matched = all.map((x) => findEventFor(x.doc, events));
-    const infos = await linkInfoFor(matched.filter((e): e is NonNullable<typeof e> => !!e));
+    const hits = all.map((x) => findEventsFor(x.doc, events));
+    const infos = await linkInfoFor([...new Map(hits.flat().map((e) => [e.id, e])).values()]);
+    const matched = hits.map((h) => pickLinked(h, infos));
     const items: ConfirmListItem[] = all.map(({ doc, row }, i) => {
       const { filled, total } = filledCount(doc);
       const ev = matched[i];
@@ -120,11 +122,18 @@ export type OpenedConfirm = {
   linkedUnits: ConfirmUnit[];
 };
 
-async function withLink(doc: ConfirmDoc, appId: string | null): Promise<OpenedConfirm> {
+async function withLink(raw: ConfirmDoc, appId: string | null): Promise<OpenedConfirm> {
+  // 시트엔 대수별 사양이 없어서 IT재고 색인(캐시)으로 사양·제조사를 보충해서 보여줌
+  const doc: ConfirmDoc = {
+    ...raw,
+    blocks: await Promise.all(raw.blocks.map(async (b) => ({ ...b, units: await enrichUnits(b.units, b.item) }))),
+  };
   const events = await eventsAround([doc.deliveryDate || new Date().toISOString().slice(0, 10)]);
-  const ev = findEventFor(doc, events);
+  const hits = findEventsFor(doc, events);
+  const infos = await linkInfoFor(hits);
+  const ev = pickLinked(hits, infos);
   if (!ev) return { doc, appId, link: null, linkedUnits: [] };
-  const info = (await linkInfoFor([ev]))[ev.id] ?? null;
+  const info = infos[ev.id] ?? null;
   const { data: rep } = await createAdminClient().from('it_prep_reports').select('units').eq('event_id', ev.id).maybeSingle();
   const units = prepToConfirmUnits(((rep as { units?: PrepUnit[] } | null)?.units ?? []) as PrepUnit[]);
   const linkedUnits = units.length ? await enrichUnits(units, doc.blocks.map((b) => b.item).join(' ')) : [];

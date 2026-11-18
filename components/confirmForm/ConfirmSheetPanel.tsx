@@ -179,12 +179,12 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
         <table>
           <thead>
             <tr>
-              <th>납품일</th>
+              <th style={{ whiteSpace: 'nowrap' }}>납품일</th>
               <th>상호</th>
               <th>요청 품목</th>
-              <th>출고 기재</th>
-              <th>출고 준비</th>
-              <th>저장</th>
+              <th style={{ whiteSpace: 'nowrap' }}>출고 기재</th>
+              <th style={{ whiteSpace: 'nowrap' }}>출고 준비</th>
+              <th style={{ whiteSpace: 'nowrap' }}>저장</th>
               <th />
             </tr>
           </thead>
@@ -210,7 +210,7 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
                       {it.filled}/{it.total}
                     </span>
                   </td>
-                  <td style={{ fontSize: 12 }}>
+                  <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
                     {it.link ? (
                       <>
                         🔗 {shortDateLabel(it.link.date)} · 보고 {it.link.unitCount}대{it.link.sentAt ? ' · 카톡✅' : ''}
@@ -219,13 +219,14 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
                       <span style={{ color: 'var(--ink-500)' }}>-</span>
                     )}
                   </td>
-                  <td style={{ fontSize: 12, color: 'var(--ink-500)' }}>
+                  <td style={{ fontSize: 12, color: 'var(--ink-500)', whiteSpace: 'nowrap' }}>
                     {it.sheetWrittenAt ? '시트 기재됨' : it.savedAt ? '앱 저장' : '-'}
                   </td>
                   <td>
                     <button
                       type="button"
                       className="btn btn-ghost"
+                      style={{ whiteSpace: 'nowrap' }}
                       onClick={(e) => {
                         e.stopPropagation();
                         setTarget({ key: it.key });
