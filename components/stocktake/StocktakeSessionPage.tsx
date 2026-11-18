@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { useStreamedValue } from '@/lib/useStreamedValue';
 import {
   applyStocktakeReviewBatch,
   bulkUpdateStocktakeItems,
@@ -52,14 +53,23 @@ const REVIEW_BADGE: Record<ReviewStatus, string> = {
   인식실패: 'badge-기타',
 };
 
+const EMPTY_LOCATIONS: string[] = [];
+
 type Props = {
   session: StocktakeSession;
-  locations: string[];
+  /** IT재고 시트에서 뽑는 선반 위치 — 서버가 기다리지 않고 넘겨서 조금 뒤에 도착함 */
+  locations: Promise<string[]> | string[];
   staffNames: string[];
   completedTodayLocations: string[];
 };
 
-export default function StocktakeSessionPage({ session, locations, staffNames, completedTodayLocations }: Props) {
+export default function StocktakeSessionPage({
+  session,
+  locations: locationsSource,
+  staffNames,
+  completedTodayLocations,
+}: Props) {
+  const locations = useStreamedValue(locationsSource, EMPTY_LOCATIONS);
   const router = useRouter();
   const [toast, setToast] = useState({ msg: '', show: false });
   const [nextLocation, setNextLocation] = useState('');

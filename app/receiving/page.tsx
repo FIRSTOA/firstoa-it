@@ -20,15 +20,18 @@ export default async function Page() {
     );
   }
 
+  // 위치 목록(입고 등록·완료 창의 위치 고르기용)은 IT재고 시트 5개 탭을 읽어야 해서 느립니다.
+  // 기다리지 않고 대장부터 보낸 뒤, 도착하면 화면이 채웁니다(useStreamedValue).
+  const locations = listAllAssetsUnified()
+    .then((assets) => Array.from(new Set(assets.map((a) => a.location.trim()).filter(Boolean))).sort())
+    .catch(() => [] as string[]);
+
   const supabase = createAdminClient();
-  const [{ data, error }, assets] = await Promise.all([
-    supabase
-      .from(RECEIVING_TABLE)
-      .select('*')
-      .order('created_at', { ascending: false })
-      .order('seq', { ascending: false }),
-    listAllAssetsUnified().catch(() => []),
-  ]);
+  const { data, error } = await supabase
+    .from(RECEIVING_TABLE)
+    .select('*')
+    .order('created_at', { ascending: false })
+    .order('seq', { ascending: false });
 
   if (error) {
     return (
@@ -39,7 +42,6 @@ export default async function Page() {
   }
 
   const entries = ((data ?? []) as ReceivingRow[]).map(rowToReceiving);
-  const locations = Array.from(new Set(assets.map((a) => a.location.trim()).filter(Boolean))).sort();
 
   return (
     <Shell activeMenu="입고" title="📥 입고 대장" note="구매입고예정·렌탈입고예정 접수/완료 기록">

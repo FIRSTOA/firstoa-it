@@ -11,19 +11,23 @@ import {
 } from '@/lib/stocktake';
 import { addStaffNameIfNew } from '@/app/actions';
 import { deleteStocktakeSession, relocateMissingAsset, startStocktake } from '@/app/stocktake/actions';
+import { useStreamedValue } from '@/lib/useStreamedValue';
 
 const STARTED_BY_KEY = 'firstoa_stocktake_started_by';
+const EMPTY_LOCATIONS: string[] = [];
 const CUSTOM_OPTION = '__custom__';
 
 export default function StocktakeListPage({
   sessions,
-  locations,
+  locations: locationsSource,
   staffNames,
 }: {
   sessions: StocktakeSession[];
-  locations: string[];
+  /** IT재고 시트에서 뽑는 선반 위치 — 서버가 기다리지 않고 넘겨서 조금 뒤에 도착함 */
+  locations: Promise<string[]> | string[];
   staffNames: string[];
 }) {
+  const locations = useStreamedValue(locationsSource, EMPTY_LOCATIONS);
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [location, setLocation] = useState('');

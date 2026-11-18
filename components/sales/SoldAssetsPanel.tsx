@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { parseHistoryEntries } from '@/lib/inventory/history';
 import type { Asset } from '@/lib/types';
+import PageLoading from '../PageLoading';
 
 /**
  * IT재고 시트에서 위치값이 "판매"로 직접 기록된 자산 — 정식 판매 등록(it_sales_log) 없이
@@ -10,8 +11,13 @@ import type { Asset } from '@/lib/types';
  * 읽기 전용으로 보여줍니다. 이동 이력(비고)에 언제 어느 거래처로 나갔는지가 남아있어서,
  * 판매한 지 오래된 자산을 추려 교체영업 대상으로 삼는 용도예요.
  */
-export default function SoldAssetsPanel({ assets }: { assets: Asset[] }) {
+const NO_ASSETS: Asset[] = [];
+
+/** assets가 null이면 IT재고 시트를 아직 읽는 중(판매 페이지가 기다리지 않고 먼저 뜸). */
+export default function SoldAssetsPanel({ assets: loaded }: { assets: Asset[] | null }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const loading = loaded === null;
+  const assets = loaded ?? NO_ASSETS;
 
   const sorted = useMemo(
     () => [...assets].sort((a, b) => a.category.localeCompare(b.category, 'ko') || a.model.localeCompare(b.model, 'ko')),
@@ -27,7 +33,7 @@ export default function SoldAssetsPanel({ assets }: { assets: Asset[] }) {
   return (
     <div className="panel" style={{ marginTop: '18px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '4px' }}>
-        <div style={{ fontWeight: 700, fontSize: '14px' }}>📦 재고에서 판매로 표시된 자산 ({assets.length}건)</div>
+        <div style={{ fontWeight: 700, fontSize: '14px' }}>📦 재고에서 판매로 표시된 자산 ({loading ? '불러오는 중' : `${assets.length}건`})</div>
       </div>
       <div className="sub" style={{ marginBottom: '10px' }}>
         IT재고 시트에서 위치가 "판매"로 바로 기록된 자산이에요(정식 판매 등록과 별개). 이동 이력에
@@ -80,7 +86,8 @@ export default function SoldAssetsPanel({ assets }: { assets: Asset[] }) {
           </tbody>
         </table>
       </div>
-      {visible.length === 0 && (
+      {loading && <PageLoading label="IT 재고 시트를 읽는 중이에요" />}
+      {!loading && visible.length === 0 && (
         <div className="empty-state">
           <div>📦</div>
           <div>{assets.length === 0 ? '재고에 판매로 표시된 자산이 없어요.' : '조건에 맞는 자산이 없어요.'}</div>

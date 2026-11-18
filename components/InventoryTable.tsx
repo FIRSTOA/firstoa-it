@@ -1,9 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 import { parseHistoryEntries } from '@/lib/inventory/history';
 import { formatKstDateTime, type StocktakeConfirmation } from '@/lib/stocktake';
 import type { Asset } from '@/lib/types';
+
+// 2,800줄 가까이를 한 번에 그리면 화면이 1초쯤 멈춰서, 처음엔 앞부분만 그려 바로 보여 주고
+// 나머지는 이어서(startTransition — 그리는 동안에도 스크롤·클릭이 막히지 않게) 그립니다.
+// 필터·검색·전체 선택은 items(전체 데이터) 기준이라 영향 없음.
+const FIRST_PAINT_ROWS = 120;
 
 const SPEC_TAG_CLASS: Record<string, string> = {
   사무용: 'tag-spec-office',
@@ -93,6 +98,13 @@ export default function InventoryTable({
   onToast,
 }: Props) {
   const allSelected = items.length > 0 && items.every((it) => selectedKeys.has(selectionKey(it)));
+  const [renderAll, setRenderAll] = useState(false);
+  useEffect(() => {
+    if (renderAll) return;
+    const id = window.setTimeout(() => startTransition(() => setRenderAll(true)), 0);
+    return () => window.clearTimeout(id);
+  }, [renderAll]);
+  const rows = renderAll ? items : items.slice(0, FIRST_PAINT_ROWS);
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
       <table>
@@ -113,7 +125,7 @@ export default function InventoryTable({
           </tr>
         </thead>
         <tbody>
-          {items.map((item, index) => (
+          {rows.map((item, index) => (
             // 자산번호가 시트에 중복 입력돼 있거나("P1024"가 두 카테고리에 걸쳐 있는 등) 비어있는
             // 경우("없음" 같은 오입력 포함)가 실제로 있어서, index까지 합쳐 항상 고유한 key로 만듭니다.
             <tr key={`${item.category}-${item.assetId}-${index}`}>

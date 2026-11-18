@@ -16,6 +16,7 @@ import {
   type ReceivingInput,
 } from '@/lib/receiving';
 import { expandParsedGroup, type ParsedReceivingGroup } from '@/lib/receivingParser';
+import { useStreamedValue } from '@/lib/useStreamedValue';
 import BulkEditModal from './BulkEditModal';
 import PasteImportModal from './PasteImportModal';
 import PhotoBatchImportModal from './PhotoBatchImportModal';
@@ -25,6 +26,8 @@ import ReceivingFilters from './ReceivingFilters';
 import ReceivingModal from './ReceivingModal';
 import ReceivingStats from './ReceivingStats';
 import ReceivingTable from './ReceivingTable';
+
+const EMPTY_LOCATIONS: string[] = [];
 
 /**
  * 여러 건을 한꺼번에 처리할 때 하나씩 순서대로 기다리면(특히 구글시트 API 호출이 끼면) 너무
@@ -46,11 +49,13 @@ async function runWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 
 export default function ReceivingPage({
   entries,
-  locations,
+  locations: locationsSource,
 }: {
   entries: ReceivingEntry[];
-  locations: string[];
+  /** IT재고 시트에서 뽑는 위치 목록 — 서버가 기다리지 않고 넘겨서 조금 뒤에 도착함 */
+  locations: Promise<string[]> | string[];
 }) {
+  const locations = useStreamedValue(locationsSource, EMPTY_LOCATIONS);
   const [filters, setFilters] = useState(EMPTY_RECEIVING_FILTERS);
   const [searchTerm, setSearchTerm] = useState('');
   const [modalOpen, setModalOpen] = useState(false);

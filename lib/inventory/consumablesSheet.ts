@@ -50,7 +50,10 @@ async function readHeader(): Promise<HeaderMap> {
     spreadsheetId: requireSheetId(),
     range: `${TAB}!A1:Z10`,
   });
-  const top = (res.data.values ?? []).map((r) => (r as unknown[]).map((v) => String(v ?? '')));
+  return headerFromTop((res.data.values ?? []).map((r) => (r as unknown[]).map((v) => String(v ?? ''))));
+}
+
+function headerFromTop(top: string[][]): HeaderMap {
   // 맨 위 10줄 중 "품목"과 "판매단가"가 함께 있는 줄을 제목줄로 씁니다.
   const idx = top.findIndex((r) => r.some((h) => h.trim() === '품목') && r.some((h) => h.trim() === '판매단가'));
   const header = top[idx >= 0 ? idx : 0] ?? [];
@@ -102,18 +105,22 @@ function buildRowArray(header: HeaderMap, input: ConsumableInput): string[] {
   return row;
 }
 
-/** 데이터가 적어서(수십 건) 매번 전체를 다시 읽습니다 — 별도 캐시를 두지 않아요. */
+/**
+ * 데이터가 적어서(수십 건) 매번 전체를 다시 읽습니다 — 별도 캐시를 두지 않아요.
+ * 제목줄과 데이터를 한 번에 읽습니다(예전엔 제목줄 → 데이터 두 번 차례로 읽었음).
+ */
 export async function listConsumablesFromSheet(): Promise<ConsumableItem[]> {
-  const header = await readHeader();
   const sheets = getSheetsClient();
-  const first = header.headerRow + 1;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: requireSheetId(),
-    range: `${TAB}!A${first}:Z`,
+    range: `${TAB}!A1:Z`,
   });
-  const rows = res.data.values ?? [];
+  const all = (res.data.values ?? []).map((r) => (r as unknown[]).map((v) => String(v ?? '')));
+  const header = headerFromTop(all.slice(0, 10));
+  const first = header.headerRow + 1;
+  const rows = all.slice(header.headerRow);
   return rows
-    .map((row, i) => mapRowToConsumable((row as unknown[]).map((v) => String(v ?? '')), header, i + first))
+    .map((row, i) => mapRowToConsumable(row, header, i + first))
     .filter((c) => Object.values(c).some((v, idx) => idx > 0 && String(v).trim() !== ''));
 }
 

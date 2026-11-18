@@ -3,13 +3,22 @@
 import { useMemo, useState, useTransition } from 'react';
 import { createSale, createSalesBatch, deleteSale, updateSale } from '@/app/sales/actions';
 import { filterSaleEntries, type SaleEntry, type SaleInput } from '@/lib/sales';
+import { useStreamedValue } from '@/lib/useStreamedValue';
 import type { Asset } from '@/lib/types';
 import PasteImportModal from './PasteImportModal';
 import SalesModal from './SalesModal';
 import SalesTable from './SalesTable';
 import SoldAssetsPanel from './SoldAssetsPanel';
 
-export default function SalesPage({ entries, soldFromInventory }: { entries: SaleEntry[]; soldFromInventory: Asset[] }) {
+export default function SalesPage({
+  entries,
+  soldFromInventory: soldSource,
+}: {
+  entries: SaleEntry[];
+  /** IT재고 시트에서 뽑는 목록 — 서버가 기다리지 않고 넘겨서 조금 뒤에 도착함(도착 전엔 null) */
+  soldFromInventory: Promise<Asset[]> | Asset[];
+}) {
+  const soldFromInventory = useStreamedValue<Asset[] | null>(soldSource, null);
   const [searchTerm, setSearchTerm] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [pasteModalOpen, setPasteModalOpen] = useState(false);

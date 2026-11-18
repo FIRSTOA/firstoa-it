@@ -104,16 +104,7 @@ function findExact(header: string[], text: string): number {
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const cacheByCategory = new Map<string, SheetCache>();
 
-async function buildCache(category: string): Promise<SheetCache> {
-  const tab = requireTab(category);
-  const sheets = getSheetsClient();
-
-  const headerRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: requireSheetId(),
-    range: `${tab}!1:1`,
-  });
-  const header = (headerRes.data.values?.[0] ?? []).map((v) => String(v ?? ''));
-
+function buildHeaderMap(tab: string, header: string[]): HeaderMap {
   const headerMap: HeaderMap = {
     assetIdCol: findIncludes(header, '자산번호'),
     modelCol: findIncludes(header, '모델명'),
@@ -149,6 +140,18 @@ async function buildCache(category: string): Promise<SheetCache> {
   if (headerMap.assetIdCol === -1) {
     throw new Error(`"${tab}" 시트에서 "자산번호" 헤더를 찾지 못했어요.`);
   }
+  return headerMap;
+}
+
+async function buildCache(category: string): Promise<SheetCache> {
+  const tab = requireTab(category);
+  const sheets = getSheetsClient();
+
+  const headerRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: requireSheetId(),
+    range: `${tab}!1:1`,
+  });
+  const headerMap = buildHeaderMap(tab, (headerRes.data.values?.[0] ?? []).map((v) => String(v ?? '')));
 
   const idColLetter = columnLetter(headerMap.assetIdCol);
   const idRes = await sheets.spreadsheets.values.get({
@@ -246,24 +249,33 @@ function mapRowToAsset(row: unknown[], header: HeaderMap, category: string): Ass
   };
 }
 
-/** 카테고리 하나의 시트를 전부 읽어 Asset[] 로 변환합니다. */
+/**
+ * 카테고리 하나의 시트를 전부 읽어 Asset[] 로 변환합니다.
+ * 머리줄과 데이터를 한 번에 읽습니다(예전엔 머리줄 → 자산번호 열 → 전체를 차례로 세 번 읽어서
+ * 서버가 새로 뜬 직후 탭마다 1.5~2초씩 걸렸음). 읽은 김에 쓰기용 자산번호→행 번호 색인도
+ * 방금 읽은 최신 값으로 갈아 둡니다(buildCache와 같은 규칙 — 같은 번호가 여러 줄이면 마지막 줄).
+ */
 export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
   const tab = requireTab(category);
-  const { header } = await getCache(category);
   const sheets = getSheetsClient();
 
-  const lastCol = columnLetter(Math.max(header.columnCount - 1, 0));
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: requireSheetId(),
-    range: `${tab}!A2:${lastCol}`,
+    range: tab,
   });
-  const rows = res.data.values ?? [];
+  const values = res.data.values ?? [];
+  const header = buildHeaderMap(tab, (values[0] ?? []).map((v) => String(v ?? '')));
 
+  const rowByAssetId = new Map<string, number>();
   const assets: Asset[] = [];
-  for (const row of rows) {
-    if (!cell(row, header.assetIdCol)) continue;
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const id = cell(row, header.assetIdCol);
+    if (!id) continue;
+    rowByAssetId.set(id, i + 1); // values[0]이 1행(머리줄)
     assets.push(mapRowToAsset(row, header, category));
   }
+  cacheByCategory.set(category, { header, rowByAssetId, builtAt: Date.now() });
   return assets;
 }
 
