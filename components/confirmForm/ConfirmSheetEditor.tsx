@@ -301,7 +301,7 @@ export default function ConfirmSheetEditor({
   return (
     <>
       <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && !saving && onClose()}>
-        <div className="modal" style={{ width: 980, maxWidth: '96vw' }}>
+        <div className="modal" style={{ width: 1140, maxWidth: '96vw' }}>
           {loading || !doc ? (
             <div style={{ padding: 24, color: 'var(--ink-500)' }}>{error || '확인서를 불러오는 중…'}</div>
           ) : (
@@ -341,7 +341,7 @@ export default function ConfirmSheetEditor({
                   const reqIds = (`${origRequest}\n${b.requestHardware}`.toUpperCase().match(/\b[A-Z]{1,2}\d{4,5}\b/g) ?? []).length;
                   const models = requestModelsFromUnits(b.units, b.manufacturer);
                   return (
-                    <div key={b.row} style={{ border: '1px solid var(--ink-200)', borderRadius: 10, marginBottom: 10, display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) 2fr' }}>
+                    <div key={b.row} style={{ border: '1px solid var(--ink-200)', borderRadius: 10, marginBottom: 10, display: 'grid', gridTemplateColumns: 'minmax(190px, 0.7fr) 2.6fr' }}>
                       <div style={{ padding: 10, background: 'var(--ink-50, #f8fafc)', borderRight: '1px solid var(--ink-200)', borderRadius: '10px 0 0 10px' }}>
                         <div style={{ fontSize: 11, color: 'var(--ink-500)', fontWeight: 700 }}>작성시 (요청사항)</div>
                         <div style={{ fontWeight: 700, margin: '4px 0' }}>
@@ -374,15 +374,15 @@ export default function ConfirmSheetEditor({
                             onChange={(e) => updateBlock(bi, (blk) => derived(blk, bi, blk.units, e.target.value))}
                           />
                         </div>
-                        <table style={{ width: '100%' }}>
+                        <table style={{ width: '100%', tableLayout: 'fixed' }}>
                           <thead>
                             <tr>
                               <th style={{ width: 28 }}>#</th>
-                              <th style={{ width: 100 }}>자산번호</th>
-                              <th>S/N</th>
+                              <th style={{ width: 92 }}>자산번호</th>
+                              <th style={{ width: '27%' }}>S/N</th>
                               <th>모델명</th>
-                              <th style={{ width: 150 }}>사양</th>
-                              <th style={{ width: 30 }} />
+                              <th style={{ width: '22%' }}>사양</th>
+                              <th style={{ width: 36 }} />
                             </tr>
                           </thead>
                           <tbody>
