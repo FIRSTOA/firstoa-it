@@ -295,7 +295,9 @@ export function requestModelsFromUnits(units: ConfirmUnit[], manufacturer = ''):
   for (const u of units) {
     let m = (u.model ?? '').trim();
     if (!m) continue;
-    if (mf && m.startsWith(`${mf} `)) m = m.slice(mf.length + 1).trim();
+    const brand = (u.brand ?? '').trim();
+    if (brand && m.startsWith(`${brand} `)) m = m.slice(brand.length + 1).trim();
+    else if (mf && m.startsWith(`${mf} `)) m = m.slice(mf.length + 1).trim();
     counts.set(m, (counts.get(m) ?? 0) + 1);
   }
   if (counts.size <= 1) return [...counts.keys()].join('');

@@ -23,11 +23,20 @@ import {
 import type { PrintGrid } from '@/lib/confirmSheetServer';
 import { shortDateLabel } from '@/lib/shipmentPrep';
 import ConfirmAttachment from './ConfirmAttachment';
-import ConfirmSheetDocument from './ConfirmSheetDocument';
+import ConfirmSheetDocument, { type PrintLayout } from './ConfirmSheetDocument';
 
 export type EditorTarget = { key: string } | { opened: OpenedConfirm };
 
 const ASSET_RE = /^[A-Z]{1,2}\d{4,5}$/;
+const LAYOUT_KEY = 'confirm-print-layout';
+
+function savedLayout(): PrintLayout {
+  try {
+    return localStorage.getItem(LAYOUT_KEY) === 'sheet' ? 'sheet' : 'table';
+  } catch {
+    return 'table';
+  }
+}
 const blankUnit = (): ConfirmUnit => ({ assetId: '', serial: '' });
 
 /** 열 때 품목 수량만큼 빈 줄을 맞춰 둠 */
@@ -101,6 +110,8 @@ export default function ConfirmSheetEditor({
   const [printing, setPrinting] = useState(false);
   /** 별첨(대수별 출고 명세) 같이 인쇄 — null이면 자동(데스크탑이거나 3대 넘는 품목이 있을 때) */
   const [attachPrint, setAttachPrint] = useState<boolean | null>(null);
+  /** 인쇄 양식 — 표(대수별 제조사·모델명·자산번호·시리얼·사양) / 시트 그대로 */
+  const [printLayout, setPrintLayout] = useState<PrintLayout>('table');
   const printRef = useRef<HTMLDivElement>(null);
   const looked = useRef<Record<string, string>>({});
 
@@ -115,6 +126,7 @@ export default function ConfirmSheetEditor({
     setAttachPrint(null);
     setSerialOptions({});
     looked.current = {};
+    setPrintLayout(savedLayout());
     const load = async () => {
       if ('opened' in target) return { ok: true as const, ...target.opened };
       return openConfirmDoc(target.key);
@@ -142,9 +154,64 @@ export default function ConfirmSheetEditor({
           setInfo({ [-1]: `출고 준비 완료 보고의 ${r.linkedUnits.length}대로 채웠어요 — 확인하고 저장하세요.` });
         }
         setDoc(d);
+        void fillUnitDetails(d);
       })
       .finally(() => setLoading(false));
   }, [target]);
+
+  /**
+   * 시트에서만 읽은 기기는 모델명·사양이 없어서 IT재고에서 채움(빈 칸만, S/N은 안 건드림) —
+   * 편집 화면 모델명 칸과 표 양식 인쇄에 씀. 요청사항이 그 모델명과 같으면 자동(모델명) 칸으로.
+   */
+  async function fillUnitDetails(d: ConfirmDoc) {
+    const jobs = d.blocks.map(async (b) => {
+      const need = b.units.filter((u) => u.assetId.trim() && !(u.model ?? '').trim());
+      return need.length ? enrichConfirmUnits(need, `${b.item} ${b.request} ${b.requestHardware}`).catch(() => []) : [];
+    });
+    const found = (await Promise.all(jobs)).map((us) => new Map(us.map((u) => [u.assetId.trim().toUpperCase(), u])));
+    if (!found.some((m) => m.size)) return;
+    const fill = (u: ConfirmUnit, m: Map<string, ConfirmUnit> | undefined): ConfirmUnit => {
+      const f = m?.get(u.assetId.trim().toUpperCase());
+      if (!f) return u;
+      return {
+        ...u,
+        brand: u.brand || f.brand,
+        model: u.model || f.model,
+        spec: u.spec || f.spec,
+        gubun: u.gubun || f.gubun,
+        category: u.category || f.category,
+      };
+    };
+    // 연 시점 값으로 판단 — 요청사항이 비었거나 채운 모델명과 같으면 자동(모델명) 칸
+    const auto: Record<number, boolean> = {};
+    d.blocks.forEach((b, bi) => {
+      const models = requestModelsFromUnits(b.units.map((u) => fill(u, found[bi])), b.manufacturer);
+      if (models && (!b.request.trim() || b.request.trim() === models)) auto[bi] = true;
+    });
+    setDoc((cur) => {
+      if (!cur || cur.tab !== d.tab) return cur;
+      return {
+        ...cur,
+        blocks: cur.blocks.map((b, bi) => {
+          if (!found[bi]?.size) return b;
+          const units = b.units.map((u) => fill(u, found[bi]));
+          // 그사이 사람이 요청사항을 고쳤으면 그대로
+          const untouched = b.request === (d.blocks[bi]?.request ?? '');
+          return auto[bi] && untouched ? { ...b, units, request: requestModelsFromUnits(units, b.manufacturer) } : { ...b, units };
+        }),
+      };
+    });
+    setModelAuto((a) => ({ ...a, ...auto }));
+  }
+
+  function chooseLayout(l: PrintLayout) {
+    setPrintLayout(l);
+    try {
+      localStorage.setItem(LAYOUT_KEY, l);
+    } catch {
+      /* 저장 못 해도 이번 인쇄엔 적용 */
+    }
+  }
 
   useEffect(() => {
     if (!printing) return;
@@ -368,7 +435,7 @@ export default function ConfirmSheetEditor({
                 >
                   요약 + 별첨 참조
                 </button>
-                {needsAttachment(doc) && (
+                {printLayout === 'sheet' && needsAttachment(doc) && (
                   <span style={{ color: 'var(--ink-500)' }}>
                     데스크탑이거나 3대 넘는 품목이 있어서 인쇄할 때 <b>별첨(대수별 출고 명세)</b>이 2장째로 붙어요.
                   </span>
@@ -575,10 +642,21 @@ export default function ConfirmSheetEditor({
                 <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
                   닫기
                 </button>
+                <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 4 }} title="인쇄할 때 출고시(기재사항) 부분 모양">
+                  인쇄 양식
+                  <select
+                    value={printLayout}
+                    onChange={(e) => chooseLayout(e.target.value as PrintLayout)}
+                    style={{ fontSize: 12.5, padding: '3px 4px', border: '1px solid var(--ink-200)', borderRadius: 6 }}
+                  >
+                    <option value="table">표(모델명·자산번호·시리얼·사양)</option>
+                    <option value="sheet">시트 그대로</option>
+                  </select>
+                </label>
                 <label style={{ fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 4, marginRight: 'auto' }}>
                   <input
                     type="checkbox"
-                    checked={attachPrint ?? needsAttachment(doc)}
+                    checked={attachPrint ?? (printLayout === 'sheet' && needsAttachment(doc))}
                     onChange={(e) => setAttachPrint(e.target.checked)}
                   />
                   📎 별첨(출고 명세) 같이 인쇄
@@ -614,9 +692,9 @@ export default function ConfirmSheetEditor({
             {/* 여백 0 → 브라우저가 날짜·주소 머리글/바닥글을 안 붙임(여백은 안쪽 padding 8mm로) */}
             <style>{'@page { size: A4 portrait; margin: 0; }'}</style>
             <div ref={printRef} style={{ width: 'max-content' }}>
-              <ConfirmSheetDocument doc={doc} grid={printGrid} />
+              <ConfirmSheetDocument doc={doc} grid={printGrid} layout={printLayout} />
             </div>
-            {(attachPrint ?? needsAttachment(doc)) && (
+            {(attachPrint ?? (printLayout === 'sheet' && needsAttachment(doc))) && (
               // 별첨은 새 장에서 — 위 여백은 여기서(@page 여백이 0이라)
               <div style={{ breakBefore: 'page', paddingTop: '8mm' }}>
                 <ConfirmAttachment doc={doc} />
