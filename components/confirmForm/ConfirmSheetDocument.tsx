@@ -102,7 +102,8 @@ export default function ConfirmSheetDocument({
                       textAlign: (c.align === 'center' || c.align === 'right' ? c.align : grid ? 'left' : 'center') as 'left' | 'center' | 'right',
                       fontSize: c.size ? `${c.size}pt` : undefined,
                       color: c.color,
-                      whiteSpace: c.nowrap ? 'pre' : 'pre-wrap',
+                      // 시트에선 옆 칸으로 넘쳐 보이는(넘침·자르기) 칸도 종이에선 잘리니 전부 칸 안에서 줄바꿈
+                      whiteSpace: 'pre-wrap',
                       // 한글은 단어 단위로 줄바꿈(시트처럼), 너무 긴 단어만 칸 안에서 끊음
                       wordBreak: 'keep-all',
                       overflowWrap: 'anywhere',
