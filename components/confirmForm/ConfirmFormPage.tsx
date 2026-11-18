@@ -17,11 +17,12 @@ import { resizeImageFile } from '@/lib/imageResize';
 import type { WithdrawalFormFields, WithdrawalFormItem } from '@/lib/ocr';
 import { scanWithdrawalFormImage } from '@/lib/ocrClient';
 import { CATEGORIES } from '@/lib/types';
+import ConfirmSheetPanel from './ConfirmSheetPanel';
 import DeliveryConfirmFormDetail from './DeliveryConfirmFormDetail';
 import DeliveryConfirmFormEditor from './DeliveryConfirmFormEditor';
 
 const PC_ITEMS = ['모니터', '데스크탑', '노트북'];
-type EntryMode = 'simple' | 'delivery';
+type EntryMode = 'sheet' | 'simple' | 'delivery';
 
 const BLANK_FIELDS: WithdrawalFormFields = { companyName: '', date: '', requester: '', reason: '', items: [] };
 const BLANK_ITEM: WithdrawalFormItem = { category: CATEGORIES[0], model: '', serialNumber: '', assetId: '' };
@@ -35,7 +36,7 @@ const STATUS_FILTER_CHIPS: { label: string; value: 'all' | string }[] = [
 
 export default function ConfirmFormPage({ initialEntries }: { initialEntries: DispatchEntry[] }) {
   const [entries, setEntries] = useState(initialEntries);
-  const [entryMode, setEntryMode] = useState<EntryMode>('simple');
+  const [entryMode, setEntryMode] = useState<EntryMode>('sheet');
   const [tab, setTab] = useState<ConfirmFormTab>('철수');
   const [historyFilter, setHistoryFilter] = useState<'all' | 'pc' | string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | string>('all');
@@ -204,6 +205,13 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
       <div className="chip-group" style={{ marginBottom: '14px' }}>
         <button
           type="button"
+          className={`chip${entryMode === 'sheet' ? ' active' : ''}`}
+          onClick={() => setEntryMode('sheet')}
+        >
+          📄 확인서 출고 기재 (자산번호·S/N 적기)
+        </button>
+        <button
+          type="button"
           className={`chip${entryMode === 'simple' ? ' active' : ''}`}
           onClick={() => setEntryMode('simple')}
         >
@@ -217,6 +225,8 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
           정식 납품확인서 작성
         </button>
       </div>
+
+      {entryMode === 'sheet' && <ConfirmSheetPanel onToast={showToast} />}
 
       {entryMode === 'delivery' && (
         <div className="panel" style={{ marginBottom: '14px' }}>
@@ -383,6 +393,7 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
         </>
       )}
 
+      {entryMode !== 'sheet' && (
       <div className="panel" style={{ marginTop: '14px' }}>
         <h2 style={{ fontSize: '15px', margin: '0 0 10px' }}>이 도구로 등록한 내역 ({entries.length}건)</h2>
         <div className="chip-group" style={{ marginBottom: '8px' }}>
@@ -482,6 +493,7 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
           </table>
         </div>
       </div>
+      )}
 
       <DeliveryConfirmFormDetail
         form={deliveryDetail}

@@ -323,6 +323,8 @@ tbody tr:hover{background:var(--indigo-50);}
   #print-labels-root{display:flex!important; position:fixed; inset:0; flex-wrap:wrap; gap:8px; padding:10mm; background:#fff;}
   #print-confirm-form-root, #print-confirm-form-root *{visibility:visible;}
   #print-confirm-form-root{display:block!important; position:fixed; inset:0; padding:12mm; background:#fff; overflow:visible;}
+  /* 확인서 시트 양식의 초록 배경색이 그대로 나오게 */
+  #print-confirm-form-root *{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
 }
 .toast{
   position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--ink-900); color:#fff;

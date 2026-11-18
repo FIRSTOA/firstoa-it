@@ -2,6 +2,7 @@
 
 import { headers } from 'next/headers';
 import { after } from 'next/server';
+import { syncPrepToConfirm } from '@/lib/confirmLink';
 import { findAssetBriefs } from '@/lib/inventory/assetIndex';
 import { getAssetFromSheets, updateAssetInSheet } from '@/lib/inventory/sheets';
 import { logAssetMovement } from '@/lib/inventory/movements';
@@ -103,6 +104,12 @@ export async function savePrepReport(eventId: string, draft: ReportDraft): Promi
       })
       .eq('event_id', eventId);
     if (error) return { ok: false, error: error.message };
+    // 같은 건 확인서(확인서리스트 시트 탭)의 출고시 기재 칸도 채움 — 응답 뒤에
+    after(() =>
+      syncPrepToConfirm(eventId)
+        .then((r) => r.startsWith('written') && console.log('[prep→확인서]', eventId, r))
+        .catch((e) => console.error('[prep→확인서] 실패:', eventId, e)),
+    );
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -196,6 +203,8 @@ export async function ocrPrepPhoto(base64: string, mediaType: string): Promise<R
 
 export type UnitLookup = {
   serials: string[];
+  /** 제조사(예: 삼성, 조립PC, MSI) */
+  brand?: string;
   model: string;
   gubun: string;
   spec: string;
@@ -229,6 +238,7 @@ export async function lookupUnitByAsset(assetId: string, hint = ''): Promise<Uni
     const serials = [...new Set([brief.serialNo, ...rentalSerials].map((x) => (x ?? '').trim()).filter(Boolean))];
     return {
       serials,
+      brand: brief.brand,
       model: [brief.brand, brief.model].filter(Boolean).join(' '),
       gubun: brief.gubun,
       spec: brief.specLabel,
@@ -248,6 +258,7 @@ export async function lookupUnitByAsset(assetId: string, hint = ''): Promise<Uni
   const r = rows[0];
   return {
     serials: [...new Set(rows.map((x) => (x.serial_number ?? '').trim()).filter(Boolean))],
+    brand: (r.manufacturer ?? '').trim(),
     model: [r.manufacturer, r.model_name].map((v) => (v ?? '').trim()).filter(Boolean).join(' '),
     gubun: '',
     spec: (() => {
