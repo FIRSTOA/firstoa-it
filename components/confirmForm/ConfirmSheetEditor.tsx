@@ -129,7 +129,7 @@ export default function ConfirmSheetEditor({
         const mm = 96 / 25.4;
         const fitW = ((210 - 16) * mm) / Math.max(1, width);
         const fitH = ((297 - 16) * mm) / Math.max(1, height);
-        const z = Math.min(1.2, fitW, Math.max(fitH, Math.min(fitW, 0.55))) * 0.98;
+        const z = Math.min(1.2, fitW, Math.max(fitH, Math.min(fitW, 0.5))) * 0.98;
         el.style.zoom = String(z);
       }
       window.print();

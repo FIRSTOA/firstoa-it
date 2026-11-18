@@ -56,7 +56,7 @@ export default function ConfirmSheetDocument({ doc, grid }: { doc: ConfirmDoc; g
       </colgroup>
       <tbody>
         {base.map((row, r) => (
-          <tr key={r} style={{ height: grid?.rowH?.[r] ?? 21 }}>
+          <tr key={r} style={{ height: grid?.rowH?.[r] ?? 21, breakInside: 'avoid' }}>
             {row.map((c, ci) => {
               const k = `${r}:${ci}`;
               if (covered.has(k)) return null;
