@@ -1,7 +1,8 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { createAndCompleteReceivingBatch } from '@/app/receiving/actions';
+import PasteDropZone from '@/components/PasteDropZone';
 import { normalizeWonInput } from '@/lib/currency';
 import { resizeImageFile } from '@/lib/imageResize';
 import { scanLabelImage } from '@/lib/ocrClient';
@@ -61,8 +62,6 @@ export default function PhotoBatchImportModal({
   const [pastedText, setPastedText] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -88,35 +87,6 @@ export default function PhotoBatchImportModal({
     }
     setRows((prev) => [...prev, ...next]);
     setProgress(null);
-  }
-
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length > 0) scanFiles(files);
-    e.target.value = '';
-  }
-
-  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(false);
-    const files = Array.from(e.dataTransfer.files ?? []).filter((f) => f.type.startsWith('image/'));
-    if (files.length > 0) scanFiles(files);
-  }
-
-  function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const files: File[] = [];
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) files.push(file);
-      }
-    }
-    if (files.length > 0) {
-      e.preventDefault();
-      scanFiles(files);
-    }
   }
 
   function applyPastedText() {
@@ -255,37 +225,12 @@ export default function PhotoBatchImportModal({
           </div>
         </div>
 
-        <div
-          onPaste={handlePaste}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
-          style={{
-            marginTop: '12px',
-            border: `2px dashed ${dragOver ? 'var(--indigo-600)' : 'var(--ink-200)'}`,
-            borderRadius: '12px',
-            padding: '16px',
-            textAlign: 'center',
-            cursor: 'pointer',
-          }}
-        >
-          <div style={{ color: 'var(--ink-500)', fontSize: '13px' }}>
-            {progress
-              ? `인식 중… (${progress.done}/${progress.total})`
-              : '📎 여기를 클릭해서 사진 여러 장 선택, 드래그, 또는 Ctrl+V로 붙여넣기'}
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
+        <div style={{ marginTop: '12px' }}>
+          <PasteDropZone
             multiple
-            style={{ display: 'none' }}
-            onChange={handleFileSelect}
+            onFiles={scanFiles}
+            disabled={!!progress}
+            status={progress ? `인식 중… (${progress.done}/${progress.total})` : undefined}
           />
         </div>
 

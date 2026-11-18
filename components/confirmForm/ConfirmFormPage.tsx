@@ -1,7 +1,8 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { lookupKnownAsset } from '@/app/actions';
+import PasteDropZone from '@/components/PasteDropZone';
 import {
   getDeliveryConfirmForm,
   listRecentConfirmFormEntries,
@@ -43,10 +44,8 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
   const [fields, setFields] = useState<WithdrawalFormFields>(BLANK_FIELDS);
   const [scanning, setScanning] = useState(false);
   const [registering, setRegistering] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const [toast, setToast] = useState({ msg: '', show: false });
   const [deliveryDetail, setDeliveryDetail] = useState<DeliveryConfirmForm | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function showToast(msg: string) {
     setToast({ msg, show: true });
@@ -130,28 +129,6 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
     } finally {
       setScanning(false);
     }
-  }
-
-  function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) {
-          e.preventDefault();
-          scanFile(file);
-          return;
-        }
-      }
-    }
-  }
-
-  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) scanFile(file);
   }
 
   function updateField<K extends keyof WithdrawalFormFields>(key: K, value: WithdrawalFormFields[K]) {
@@ -272,45 +249,20 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
             : `${tab} 확인서는 등록하면 출고 대장에 반영돼요.`}
         </div>
 
-        <div
-          onPaste={handlePaste}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          tabIndex={0}
-          style={{
-            border: `2px dashed ${dragOver ? 'var(--indigo-600)' : 'var(--ink-200)'}`,
-            borderRadius: '12px',
-            padding: '20px',
-            textAlign: 'center',
-            cursor: 'pointer',
-            background: dragOver ? 'var(--indigo-50, #eef2ff)' : 'transparent',
-          }}
-          onClick={() => fileInputRef.current?.click()}
+        <PasteDropZone
+          onFiles={(files) => scanFile(files[0])}
+          disabled={scanning}
+          status={scanning ? '사진을 읽는 중…' : undefined}
         >
-          {imagePreview ? (
+          {imagePreview && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imagePreview} alt="확인서 미리보기" style={{ maxHeight: '220px', maxWidth: '100%' }} />
-          ) : (
-            <div style={{ color: 'var(--ink-500)', fontSize: '13px' }}>
-              📎 여기를 클릭해서 파일 선택, 사진을 드래그, 또는 Ctrl+V로 붙여넣기
-            </div>
+            <img
+              src={imagePreview}
+              alt="확인서 미리보기"
+              style={{ maxHeight: '220px', maxWidth: '100%', borderRadius: 8 }}
+            />
           )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) scanFile(file);
-              e.target.value = '';
-            }}
-          />
-        </div>
+        </PasteDropZone>
 
         <div className="form-field full" style={{ marginTop: '12px' }}>
           <label>또는 텍스트로 붙여넣기</label>
