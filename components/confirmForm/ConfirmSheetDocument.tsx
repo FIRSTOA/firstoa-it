@@ -61,7 +61,9 @@ export default function ConfirmSheetDocument({ doc, grid }: { doc: ConfirmDoc; g
               const k = `${r}:${ci}`;
               if (covered.has(k)) return null;
               const span = spanAt.get(k);
-              const valign = c.valign === 'top' ? 'top' : c.valign === 'middle' ? 'middle' : 'bottom';
+              // 시트 기본값(아래)은 줄 높이가 낮아 티가 안 나지만, 여기선 칸이 내용만큼 커져서
+              // 항목명이 바닥에 붙어 보임 → 위로 지정한 칸만 위, 나머지는 가운데
+              const valign = c.valign === 'top' ? 'top' : 'middle';
               return (
                 <td
                   key={ci}
