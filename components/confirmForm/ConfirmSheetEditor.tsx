@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   enrichConfirmUnits,
   getConfirmPrintGrid,
@@ -81,6 +82,7 @@ export default function ConfirmSheetEditor({
   const [busy, setBusy] = useState('');
   const [printGrid, setPrintGrid] = useState<PrintGrid | null>(null);
   const [printing, setPrinting] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
   const looked = useRef<Record<string, string>>({});
 
   useEffect(() => {
@@ -118,7 +120,20 @@ export default function ConfirmSheetEditor({
 
   useEffect(() => {
     if (!printing) return;
-    const timer = setTimeout(() => window.print(), 80);
+    const timer = setTimeout(() => {
+      // 시트 크기 그대로 그린 걸 재서 A4 한 장(여백 8mm)에 들어가게 줄임 — 너무 길면 폭만 맞추고 다음 장으로
+      const el = printRef.current;
+      if (el) {
+        el.style.zoom = '1';
+        const { width, height } = el.getBoundingClientRect();
+        const mm = 96 / 25.4;
+        const fitW = ((210 - 16) * mm) / Math.max(1, width);
+        const fitH = ((297 - 16) * mm) / Math.max(1, height);
+        const z = Math.min(1.2, fitW, Math.max(fitH, Math.min(fitW, 0.55))) * 0.98;
+        el.style.zoom = String(z);
+      }
+      window.print();
+    }, 80);
     const done = () => setPrinting(false);
     window.addEventListener('afterprint', done);
     return () => {
@@ -451,11 +466,19 @@ export default function ConfirmSheetEditor({
           )}
         </div>
       </div>
-      {printing && doc && (
-        <div id="print-confirm-form-root">
-          <ConfirmSheetDocument doc={doc} grid={printGrid} />
-        </div>
-      )}
+      {printing &&
+        doc &&
+        createPortal(
+          // body 바로 아래에 붙여야 인쇄할 때 나머지 화면을 통째로 빼고 여러 장으로도 나뉨
+          <div id="print-confirm-sheet-root">
+            {/* 여백 0 → 브라우저가 날짜·주소 머리글/바닥글을 안 붙임(여백은 안쪽 padding 8mm로) */}
+            <style>{'@page { size: A4 portrait; margin: 0; }'}</style>
+            <div ref={printRef} style={{ width: 'max-content' }}>
+              <ConfirmSheetDocument doc={doc} grid={printGrid} />
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

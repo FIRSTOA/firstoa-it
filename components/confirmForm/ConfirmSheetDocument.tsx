@@ -3,14 +3,19 @@
 import { blockCells, type ConfirmDoc } from '@/lib/confirmSheet';
 import type { PrintCell, PrintGrid } from '@/lib/confirmSheetServer';
 
+const DEFAULT_COL_W = [100, 100, 100, 100, 139, 100, 176, 100];
+const FONT = '"맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+
 /**
- * 확인서 인쇄 화면 — 시트 탭의 칸 값·배경색·병합·폭을 그대로 그리고, 출고시(기재사항) 칸은
- * 지금 편집 중인 값으로 덮어씁니다. 시트 탭이 없는(붙여넣기) 문서는 칸 값만 테두리 표로.
+ * 확인서 인쇄 화면 — 시트 탭의 칸 값·배경색·병합·폭·글자 크기를 **시트와 같은 크기(px·pt)**로
+ * 그리고, 출고시(기재사항) 칸은 지금 편집 중인 값으로 덮어씁니다. 종이에 맞추는 축소는 인쇄 직전에
+ * 바깥에서 zoom으로 합니다(폭을 줄여 그리면 글자가 잘게 줄바꿈돼서).
+ * 시트 탭이 없는(붙여넣기) 문서는 칸 값만 테두리 표로.
  */
 export default function ConfirmSheetDocument({ doc, grid }: { doc: ConfirmDoc; grid: PrintGrid | null }) {
   const base: PrintCell[][] = grid
     ? grid.rows.map((r) => r.map((c) => ({ ...c })))
-    : doc.grid.map((r) => Array.from({ length: 8 }, (_, c) => ({ v: r[c] ?? '' })));
+    : doc.grid.map((r) => Array.from({ length: 8 }, (_, c) => ({ v: r[c] ?? '', valign: 'middle' })));
   for (const b of doc.blocks) {
     if (b.row <= 0) continue;
     for (const c of blockCells(b)) {
@@ -25,7 +30,7 @@ export default function ConfirmSheetDocument({ doc, grid }: { doc: ConfirmDoc; g
     spanAt.set(`${m.r0}:${m.c0}`, { rs: m.r1 - m.r0, cs: m.c1 - m.c0 });
     for (let r = m.r0; r < m.r1; r++) for (let c = m.c0; c < m.c1; c++) if (r !== m.r0 || c !== m.c0) covered.add(`${r}:${c}`);
   }
-  const colW = grid?.colW?.length === 8 ? grid.colW : [90, 160, 140, 140, 140, 140, 140, 130];
+  const colW = grid?.colW?.length === 8 ? grid.colW : DEFAULT_COL_W;
   const totalW = colW.reduce((a, b) => a + b, 0);
 
   if (!base.length) {
@@ -35,43 +40,48 @@ export default function ConfirmSheetDocument({ doc, grid }: { doc: ConfirmDoc; g
   return (
     <table
       style={{
-        width: '100%',
+        width: totalW,
         borderCollapse: 'collapse',
         tableLayout: 'fixed',
-        fontSize: 11,
-        color: '#111',
+        fontFamily: FONT,
+        fontSize: '10pt',
+        color: '#000',
         background: '#fff',
       }}
     >
       <colgroup>
         {colW.map((w, i) => (
-          <col key={i} style={{ width: `${(w / totalW) * 100}%` }} />
+          <col key={i} style={{ width: w }} />
         ))}
       </colgroup>
       <tbody>
         {base.map((row, r) => (
-          <tr key={r} style={{ height: grid?.rowH?.[r] ? Math.max(18, grid.rowH[r] * 0.85) : undefined }}>
+          <tr key={r} style={{ height: grid?.rowH?.[r] ?? 21 }}>
             {row.map((c, ci) => {
               const k = `${r}:${ci}`;
               if (covered.has(k)) return null;
               const span = spanAt.get(k);
+              const valign = c.valign === 'top' ? 'top' : c.valign === 'middle' ? 'middle' : 'bottom';
               return (
                 <td
                   key={ci}
                   rowSpan={span?.rs}
                   colSpan={span?.cs}
                   style={{
-                    border: '1px solid #333',
-                    padding: '2px 4px',
+                    border: '1px solid #000',
+                    padding: '1px 3px',
                     background: c.bg ?? '#fff',
                     fontWeight: c.bold ? 700 : 400,
                     textAlign: (c.align === 'center' || c.align === 'right' ? c.align : grid ? 'left' : 'center') as 'left' | 'center' | 'right',
-                    fontSize: c.size ? Math.max(8, Math.min(20, c.size * 1.15)) : undefined,
+                    fontSize: c.size ? `${c.size}pt` : undefined,
                     color: c.color,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-all',
-                    verticalAlign: 'middle',
-                    lineHeight: 1.3,
+                    whiteSpace: c.nowrap ? 'pre' : 'pre-wrap',
+                    // 한글은 단어 단위로 줄바꿈(시트처럼), 너무 긴 단어만 칸 안에서 끊음
+                    wordBreak: 'keep-all',
+                    overflowWrap: 'anywhere',
+                    verticalAlign: valign,
+                    lineHeight: 1.25,
+                    overflow: 'hidden',
                   }}
                 >
                   {c.v}

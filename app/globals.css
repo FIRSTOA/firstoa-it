@@ -326,6 +326,13 @@ tbody tr:hover{background:var(--indigo-50);}
   /* 확인서 시트 양식의 초록 배경색이 그대로 나오게 */
   #print-confirm-form-root *{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
 }
+/* 확인서 출고 기재 인쇄 — body 바로 아래에 붙고(포털), 화면에선 밖으로 빼 둔 채 크기만 잼 */
+#print-confirm-sheet-root{position:fixed; left:-20000px; top:0; visibility:hidden; pointer-events:none;}
+@media print{
+  body:has(> #print-confirm-sheet-root) > :not(#print-confirm-sheet-root){display:none!important;}
+  #print-confirm-sheet-root{position:static!important; left:auto; padding:8mm; background:#fff; visibility:visible!important;}
+  #print-confirm-sheet-root *{visibility:visible!important; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+}
 .toast{
   position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--ink-900); color:#fff;
   padding:11px 14px 11px 20px; border-radius:10px; font-size:13px; font-weight:600; opacity:0; pointer-events:none; transition:.2s all; z-index:60;

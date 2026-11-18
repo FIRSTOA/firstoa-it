@@ -97,7 +97,19 @@ export async function writeConfirmBlocks(tab: string, blocks: ConfirmBlock[]): P
   invalidateConfirmCache();
 }
 
-export type PrintCell = { v: string; bg?: string; bold?: boolean; align?: string; size?: number; color?: string };
+export type PrintCell = {
+  v: string;
+  bg?: string;
+  bold?: boolean;
+  align?: string;
+  /** top | middle | bottom (시트 기본은 bottom) */
+  valign?: string;
+  /** 글자 크기(pt) — 시트 기본 10 */
+  size?: number;
+  color?: string;
+  /** 줄바꿈 안 하는 칸(넘침/자르기) */
+  nowrap?: boolean;
+};
 export type PrintGrid = {
   rows: PrintCell[][];
   merges: { r0: number; r1: number; c0: number; c1: number }[];
@@ -119,7 +131,7 @@ export async function readPrintGrid(tab: string): Promise<PrintGrid> {
       spreadsheetId: CONFIRM_SHEET_ID,
       ranges: [`${q(tab)}!${RANGE}`],
       fields:
-        'sheets(merges,data(rowMetadata(pixelSize),columnMetadata(pixelSize),rowData(values(formattedValue,effectiveFormat(backgroundColor,horizontalAlignment,textFormat(bold,fontSize,foregroundColor))))))',
+        'sheets(merges,data(rowMetadata(pixelSize),columnMetadata(pixelSize),rowData(values(formattedValue,effectiveFormat(backgroundColor,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat(bold,fontSize,foregroundColor))))))',
     }),
   );
   const sh = res.data.sheets?.[0];
@@ -133,7 +145,9 @@ export async function readPrintGrid(tab: string): Promise<PrintGrid> {
         bg: hex(f?.backgroundColor),
         bold: !!f?.textFormat?.bold,
         align: (f?.horizontalAlignment ?? '').toLowerCase() || undefined,
+        valign: (f?.verticalAlignment ?? '').toLowerCase() || undefined,
         size: f?.textFormat?.fontSize ?? undefined,
+        nowrap: f?.wrapStrategy === 'OVERFLOW_CELL' || f?.wrapStrategy === 'CLIP' || undefined,
         color: hex(f?.textFormat?.foregroundColor) === '#000000' ? undefined : hex(f?.textFormat?.foregroundColor),
       };
     }),
