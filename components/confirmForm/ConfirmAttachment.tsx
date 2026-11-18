@@ -4,7 +4,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { ConfirmDoc } from '@/lib/confirmSheet';
 
 const FONT = '"맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-const th: CSSProperties = { border: '1px solid #000', padding: '4px 6px', background: '#f4cccc', fontWeight: 700, textAlign: 'center' };
+const th: CSSProperties = { border: '1px solid #000', padding: '4px 6px', background: '#f4cccc', fontWeight: 700, textAlign: 'center', color: '#000', fontSize: '9.5pt', textTransform: 'none', letterSpacing: 0 };
 const td: CSSProperties = { border: '1px solid #000', padding: '3px 6px', verticalAlign: 'middle', wordBreak: 'break-all' };
 
 /**
