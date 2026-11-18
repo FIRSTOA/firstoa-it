@@ -245,11 +245,17 @@ function BlockRows({ b, base, pal }: { b: ConfirmBlock; base: PrintCell[][]; pal
   const n = Math.max(filled.length, b.quantity, 1);
   const rows: (ConfirmUnit | null)[] = [...filled, ...Array.from({ length: n - filled.length }, () => null)];
   const singleBrand = /[\n/]/.test(b.manufacturer) ? '' : b.manufacturer.trim();
-  const specLines = b.deliverySpec
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const fallbackSpec = specLines.length === 1 ? specLines[0] : '';
+  // [납품사양]이 한 가지면(요약의 "×대수"는 떼고) 그게 확인서에 적은 사양 — 지금 IT재고 사양보다 우선
+  // (지난 확인서를 다시 뽑을 때 그사이 바뀐 재고 사양이 나오지 않게). 여러 가지면 기기별 사양.
+  const specLines = [
+    ...new Set(
+      b.deliverySpec
+        .split('\n')
+        .map((s) => s.replace(/\s*×\s*\d+\s*$/, '').trim())
+        .filter(Boolean),
+    ),
+  ];
+  const blockSpec = specLines.length === 1 ? specLines[0] : '';
   // 요청사항 칸에 우리가 적은 모델명은 오른쪽 모델명 칸과 겹치니 빼고, 영업이 적은 것만
   const request = isOwnModelList(b) ? '' : b.request.trim();
   const hw = b.requestHardware.trim();
@@ -281,7 +287,7 @@ function BlockRows({ b, base, pal }: { b: ConfirmBlock; base: PrintCell[][]; pal
         <td style={cellStyle({ background: pal.out })}>{u ? modelOnly(u.model ?? '', brand) : ''}</td>
         <td style={cellStyle({ background: pal.out, fontWeight: 700 })}>{u?.assetId ?? ''}</td>
         <td style={cellStyle({ background: pal.out })}>{u?.serial ?? ''}</td>
-        <td style={cellStyle({ background: pal.out })}>{u ? (u.spec ?? '').trim() || fallbackSpec : ''}</td>
+        <td style={cellStyle({ background: pal.out })}>{u ? blockSpec || (u.spec ?? '').trim() : ''}</td>
       </>
     );
   };
