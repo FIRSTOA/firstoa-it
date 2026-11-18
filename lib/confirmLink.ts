@@ -91,23 +91,28 @@ export async function linkInfoFor(events: CalEvent[]): Promise<Record<string, Li
   );
 }
 
-/** 자산번호로 IT재고 색인에서 제조사·사양·품목 보충(캐시라 빠름). 조립PC처럼 시리얼=자산번호면 시리얼은 비움. */
-export async function enrichUnits(units: ConfirmUnit[], hint = ''): Promise<ConfirmUnit[]> {
+/**
+ * 자산번호로 IT재고 색인에서 제조사·사양·품목 보충(캐시라 빠름). 조립PC처럼 시리얼=자산번호면 시리얼은 비움.
+ * preferInventory: 완료 보고에 저장된 값보다 IT재고 값을 우선(예전에 P1024가 모니터 정보로 저장된 보고).
+ */
+export async function enrichUnits(units: ConfirmUnit[], hint = '', preferInventory = false): Promise<ConfirmUnit[]> {
   return Promise.all(
     units.map(async (u) => {
       const id = u.assetId.trim().toUpperCase();
       if (!id) return u;
       const b = (await findAssetBriefs(id, hint).catch(() => []))[0];
+      const pick = (mine: string | undefined, inv: string | undefined) =>
+        (preferInventory ? inv || mine : mine || inv) || '';
       const serialRaw = u.serial || b?.serialNo || '';
       return {
         ...u,
         assetId: id,
         serial: serialRaw.trim().toUpperCase() === id ? '' : serialRaw.trim(),
-        brand: u.brand || b?.brand || '',
-        model: u.model || (b ? [b.brand, b.model].filter(Boolean).join(' ') : ''),
-        gubun: u.gubun || b?.gubun || '',
-        spec: u.spec || b?.specLabel || '',
-        category: u.category || b?.category || '',
+        brand: pick(u.brand, b?.brand),
+        model: pick(u.model, b ? [b.brand, b.model].filter(Boolean).join(' ') : ''),
+        gubun: pick(u.gubun, b?.gubun),
+        spec: pick(u.spec, b?.specLabel),
+        category: pick(u.category, b?.category),
       };
     }),
   );
@@ -130,23 +135,26 @@ export async function pushDocToPrep(doc: ConfirmDoc, eventId: string): Promise<n
   const supabase = createAdminClient();
   const { data: rep } = await supabase.from(REPORTS_TABLE).select('id,units').eq('event_id', eventId).maybeSingle();
   const cur = (((rep as { units?: PrepUnit[] } | null)?.units ?? []) as PrepUnit[]).filter((u) => u.assetId?.trim() || u.serial?.trim());
-  const curIds = cur.map((u) => u.assetId.trim().toUpperCase()).filter(Boolean);
-  const docIds = units.map((u) => u.assetId.trim().toUpperCase());
-  const toPrep = (u: ConfirmUnit): PrepUnit => ({
-    serial: u.serial,
-    assetId: u.assetId.trim().toUpperCase(),
-    grade: cur.find((c) => c.assetId.trim().toUpperCase() === u.assetId.trim().toUpperCase())?.grade ?? '',
-    model: u.model ?? '',
-    gubun: u.gubun ?? '',
-    spec: u.spec ?? '',
-    category: u.category,
-  });
+  const up = (s: string) => s.trim().toUpperCase();
+  const curIds = cur.map((u) => up(u.assetId)).filter(Boolean);
+  const docIds = units.map((u) => up(u.assetId));
+  // 보고에 이미 있는 기기는 보고 값을 그대로 두고 빈 칸만 확인서 값으로 채움
+  const toPrep = (u: ConfirmUnit): PrepUnit => {
+    const c = cur.find((x) => up(x.assetId) === up(u.assetId));
+    return {
+      serial: c?.serial || u.serial,
+      assetId: up(u.assetId),
+      grade: c?.grade ?? '',
+      model: c?.model || u.model || '',
+      gubun: c?.gubun || u.gubun || '',
+      spec: c?.spec || u.spec || '',
+      category: c ? c.category : u.category,
+    };
+  };
   const next = curIds.every((id) => docIds.includes(id))
     ? units.map(toPrep)
-    : [...cur, ...units.filter((u) => !curIds.includes(u.assetId.trim().toUpperCase())).map(toPrep)];
-  const same =
-    next.length === cur.length && next.every((u, i) => u.assetId === cur[i].assetId && u.serial === cur[i].serial && (u.spec ?? '') === (cur[i].spec ?? ''));
-  if (same) return 0;
+    : [...cur, ...units.filter((u) => !curIds.includes(up(u.assetId))).map(toPrep)];
+  if (JSON.stringify(next) === JSON.stringify(cur)) return 0;
   if (rep) {
     await supabase.from(REPORTS_TABLE).update({ units: next, updated_at: new Date().toISOString() }).eq('id', (rep as { id: string }).id);
   } else {
@@ -205,7 +213,7 @@ export async function syncPrepToConfirm(eventId: string): Promise<string> {
   if (!doc || !doc.blocks.length) return 'no-blocks';
 
   const hint = doc.blocks.map((b) => b.item).join(' ');
-  const units = await enrichUnits(prepUnits, hint);
+  const units = await enrichUnits(prepUnits, hint, true);
   const alloc = allocateUnits(doc.blocks, units);
   const changed: ConfirmBlock[] = [];
   doc.blocks.forEach((b, i) => {

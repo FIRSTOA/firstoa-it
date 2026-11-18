@@ -136,7 +136,7 @@ async function withLink(raw: ConfirmDoc, appId: string | null): Promise<OpenedCo
   const info = infos[ev.id] ?? null;
   const { data: rep } = await createAdminClient().from('it_prep_reports').select('units').eq('event_id', ev.id).maybeSingle();
   const units = prepToConfirmUnits(((rep as { units?: PrepUnit[] } | null)?.units ?? []) as PrepUnit[]);
-  const linkedUnits = units.length ? await enrichUnits(units, doc.blocks.map((b) => b.item).join(' ')) : [];
+  const linkedUnits = units.length ? await enrichUnits(units, doc.blocks.map((b) => b.item).join(' '), true) : [];
   return { doc, appId, link: info, linkedUnits };
 }
 
