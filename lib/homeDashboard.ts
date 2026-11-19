@@ -155,6 +155,20 @@ export async function loadPrepOverview(today: string): Promise<PrepOverview> {
   }
 }
 
+/**
+ * Supabase 는 한 번에 최대 1000줄만 돌려줌(.limit 을 더 크게 줘도) — 끝까지 페이지로 읽음.
+ * 건수만 필요하면 이것 말고 count: 'exact', head: true 로.
+ */
+async function readAllPages<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) throw error;
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) return out;
+  }
+}
+
 /** 입고 — 대기·지연(예상입고일 지남)·오늘 예정·이번 달 완료 */
 export async function loadReceivingCard(today: string): Promise<WorkCard> {
   const href = '/receiving';
@@ -195,17 +209,20 @@ export async function loadStocktakeCard(today: string): Promise<WorkCard> {
   if (!isSupabaseConfigured()) return errorCard('stocktake', '실재고 조사', '📋', href, 'Supabase 설정이 필요해요.');
   try {
     const supabase = createAdminClient();
-    const { data, error } = await supabase
-      .from(STOCKTAKE_TABLE)
-      .select('location,status,started_at,completed_at')
-      .order('started_at', { ascending: false })
-      .limit(300);
-    if (error) throw error;
-    const rows = (data ?? []) as { location: string; status: string; started_at: string; completed_at: string | null }[];
-    const open = rows.filter((r) => r.status === '진행중');
+    const monthStart = `${today.slice(0, 8)}01T00:00:00+09:00`;
+    // 완료 건수는 DB에서 셈 — 최근 몇백 줄만 읽어 세면 그 수에서 잘림(배포 직후 "297"이 그랬음)
+    const [openRes, doneRes, lastRes] = await Promise.all([
+      supabase.from(STOCKTAKE_TABLE).select('started_at').eq('status', '진행중'),
+      supabase.from(STOCKTAKE_TABLE).select('id', { count: 'exact', head: true }).eq('status', '완료').gte('completed_at', monthStart),
+      supabase.from(STOCKTAKE_TABLE).select('location,started_at').order('started_at', { ascending: false }).limit(1),
+    ]);
+    if (openRes.error) throw openRes.error;
+    if (doneRes.error) throw doneRes.error;
+    if (lastRes.error) throw lastRes.error;
+    const open = (openRes.data ?? []) as { started_at: string }[];
     const stale = open.filter((r) => Date.now() - new Date(r.started_at).getTime() > 24 * 3600_000).length;
-    const monthDone = rows.filter((r) => r.status === '완료' && (r.completed_at ?? '').slice(0, 7) === today.slice(0, 7)).length;
-    const last = rows[0];
+    const monthDone = doneRes.count ?? 0;
+    const last = (lastRes.data?.[0] ?? null) as { location: string; started_at: string } | null;
     return {
       key: 'stocktake',
       title: '실재고 조사',
@@ -237,13 +254,23 @@ export async function loadBillingCard(today: string): Promise<WorkCard> {
   try {
     const supabase = createAdminClient();
     const monthStart = `${today.slice(0, 8)}01`;
-    const [reviewRes, monthRes] = await Promise.all([
+    // 이번 달 청구는 1000줄을 넘음 — 건수는 DB에서 세고, 금액은 페이지로 끝까지 읽어 더함
+    const thisMonth = () =>
+      supabase.from(BILLING_LINES_TABLE).select('amount').gte('billing_date', monthStart).lte('billing_date', today).neq('status', '취소');
+    const [reviewRes, countRes, amounts] = await Promise.all([
       supabase.from(BILLING_LINES_TABLE).select('id', { count: 'exact', head: true }).eq('allocation_status', 'needs_review'),
-      supabase.from(BILLING_LINES_TABLE).select('amount,status').gte('billing_date', monthStart).lte('billing_date', today).limit(5000),
+      supabase
+        .from(BILLING_LINES_TABLE)
+        .select('id', { count: 'exact', head: true })
+        .gte('billing_date', monthStart)
+        .lte('billing_date', today)
+        .neq('status', '취소'),
+      readAllPages<{ amount: number | string }>((from, to) => thisMonth().order('id').range(from, to)),
     ]);
-    if (monthRes.error) throw monthRes.error;
-    const lines = ((monthRes.data ?? []) as { amount: number | string; status: string }[]).filter((l) => l.status !== '취소');
-    const sum = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    if (reviewRes.error) throw reviewRes.error;
+    if (countRes.error) throw countRes.error;
+    const monthCount = countRes.count ?? amounts.length;
+    const sum = amounts.reduce((s, l) => s + Number(l.amount || 0), 0);
     const review = reviewRes.count ?? 0;
     return {
       key: 'billing',
@@ -252,7 +279,7 @@ export async function loadBillingCard(today: string): Promise<WorkCard> {
       href,
       metrics: [
         { label: '배분 확인 필요', value: review, tone: review ? 'warn' : 'good' },
-        { label: '이번 달 건수', value: lines.length },
+        { label: '이번 달 건수', value: monthCount },
         { label: '이번 달 금액', value: `${shortWon(sum)}원` },
       ],
       alert: review ? `자산번호 배분 확인이 필요한 청구 ${review}건` : null,

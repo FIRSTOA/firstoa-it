@@ -109,6 +109,8 @@ PC 화면은 그대로 두고 `app/globals.css` 맨 끝 "핸드폰 화면" 블�
 - 데이터: `lib/homeDashboard.ts`(server-only). 함수마다 예외를 안 던지고 실패하면 그 카드만 "못 읽었어요" — 화면 전체가 죽지 않게.
   - 업무 현황 카드: 출고 준비(`listPrepEvents` — 오늘 준비할 것 = 다음 영업일 출고분, 오늘 출고분은 카톡 보고 여부)·입고·실재고·청구는
     Supabase라 바로, 확인서(`listConfirmDocs`)·IT 재고(`listAllAssets`)는 구글시트라 `<Suspense>`로 나중에 채움.
+  - Supabase는 한 번에 최대 1000줄(`.limit(5000)`도 1000에서 잘림) — 건수는 `count: 'exact', head: true`, 합계는 `readAllPages`로 끝까지.
+    (첫 배포 때 청구 "이번 달 983건"·실재고 "이번 달 완료 297"이 잘린 숫자였음)
   - 카드 띠 색 tone: bad(빨강, 오늘 손봐야 함) / warn(주황) / good(초록) / muted(못 읽음). 맨 위 오른쪽엔 bad·warn 카드의 한 줄만 모아 보여 줌.
   - 운영·시스템: DB·구글시트 응답 시간은 화면 만들 때 실제로 잰 값, 네이버 반영 = `it_calendar_events.naver_synced_at` 최댓값,
     카톡 발송 대기 = 메신저 Supabase `outbox` 남은 줄 수(봇이 보내면 지움 — anon 키로 읽기가 막혀 있으면 0으로 보일 수 있음, 아직 실제로 확인 못 함).
