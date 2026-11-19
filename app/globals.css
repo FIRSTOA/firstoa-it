@@ -826,3 +826,235 @@ a.home-card:hover{box-shadow:0 10px 24px -14px rgba(15,23,42,.3); transform:tran
   .home-feedback-list ul{max-height:none;}
 }
 .home-new{font-size:10px; font-weight:800; color:#fff; background:var(--red-600); border-radius:999px; padding:1px 7px; letter-spacing:.03em;}
+
+/* =====================================================================================
+   홈 "IT AI 에이전트 팀" 카드 — components/home/AgentTeamCard.tsx (명단 lib/agentTeam.ts)
+   부서 색은 style 의 --accent, 모델 색은 .am-opus/.am-sonnet/.am-haiku 의 --m.
+   카드 폭 <900px: 왼쪽 줄기 나무 + 고른 부서 바로 아래 펼침 / ≥900px: 가로 조직도 + 아래 직원 카드(컨테이너 쿼리)
+   ===================================================================================== */
+.agent-team{
+  container-type:inline-size; container-name:agentteam;
+  position:relative; overflow:hidden; padding:0;
+  background:
+    radial-gradient(420px circle at 0% 0%, rgba(192,38,211,.07), transparent 60%),
+    radial-gradient(380px circle at 100% 8%, rgba(14,165,233,.07), transparent 60%),
+    #fff;
+}
+.agent-team::before{ /* 청사진 격자 — 위쪽만 보이게 */
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background-image:linear-gradient(rgba(15,23,42,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,.04) 1px, transparent 1px);
+  background-size:22px 22px;
+  -webkit-mask-image:radial-gradient(ellipse 85% 50% at 50% 0%, #000 25%, transparent 75%);
+  mask-image:radial-gradient(ellipse 85% 50% at 50% 0%, #000 25%, transparent 75%);
+}
+.agent-team > *{position:relative;}
+
+.agent-head{display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:12px; padding:16px 18px 14px;}
+.agent-head-text{min-width:0; flex:1 1 320px;}
+.agent-eyebrow{font-size:10.5px; font-weight:900; letter-spacing:.2em; color:#a21caf;}
+.agent-title{margin:6px 0 0; font-size:21px; font-weight:900; letter-spacing:-.02em; color:var(--ink-900);}
+.agent-lead{margin:4px 0 0; font-size:12.5px; font-weight:600; color:var(--ink-500); line-height:1.55;}
+.agent-work-chip{
+  display:inline-flex; align-items:center; gap:5px; margin-top:9px; max-width:100%; border:1px solid var(--ink-200); background:var(--slate-50);
+  border-radius:999px; padding:4px 11px; font-size:11.5px; font-weight:700; color:var(--ink-700);
+}
+.agent-work-chip .muted{color:var(--ink-400);}
+.agent-work-chip b{font-weight:900; color:var(--ink-900);}
+.agent-work-chip.busy{border-color:var(--green-100); background:var(--green-50);}
+.agent-stats{list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(3,minmax(84px,auto)); gap:8px;}
+.agent-stats li{border:1px solid var(--ink-200); background:#fff; border-radius:12px; padding:8px 10px; text-align:center; box-shadow:0 4px 0 -1px var(--ink-100), 0 10px 22px -18px rgba(15,23,42,.45);}
+.agent-stats .l{font-size:11px; font-weight:700; color:var(--ink-500);}
+.agent-stats b{font-size:22px; font-weight:900; color:var(--ink-900); line-height:1;}
+.agent-stats .s{display:block; margin-top:4px; font-size:10.5px; font-weight:700; color:var(--ink-400);}
+.agent-stats .s.live{color:var(--green-600);}
+.agent-stats .s.live::before{content:""; display:inline-block; width:6px; height:6px; margin-right:4px; vertical-align:1px; border-radius:50%; background:#10b981; box-shadow:0 0 0 3px var(--green-100);}
+
+.agent-block{border-top:1px solid var(--ink-100); padding:12px 18px 14px;}
+.agent-block-head{display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:2px 12px; margin-bottom:10px;}
+.agent-eyebrow2{font-size:10.5px; font-weight:900; letter-spacing:.14em; color:var(--ink-400);}
+.agent-note{font-size:11px; font-weight:700; color:var(--ink-400);}
+.agent-note.strong{color:var(--ink-500);}
+
+/* 팀장 */
+.agent-leader{
+  display:flex; align-items:center; gap:12px; max-width:480px; margin:0 auto; padding:10px 12px; border-radius:14px; border:1px solid #f5d0fe;
+  background:linear-gradient(135deg, #fdf4ff, #f0f9ff 60%, #fff); box-shadow:0 4px 0 -1px #fae8ff, 0 16px 30px -22px rgba(192,38,211,.7);
+}
+.agent-leader-icon{
+  position:relative; flex:0 0 auto; width:46px; height:46px; display:grid; place-items:center; font-size:27px; line-height:1;
+  border-radius:12px; background:#fff; border:1px solid #f5d0fe; box-shadow:0 6px 14px -8px rgba(192,38,211,.7);
+}
+.agent-leader-text{display:flex; flex-direction:column; min-width:0;}
+.agent-leader-role{font-size:10px; font-weight:900; letter-spacing:.14em; color:#a21caf;}
+.agent-leader-text b{font-size:14px; font-weight:900; color:var(--ink-900);}
+.agent-leader-desc{font-size:11.5px; font-weight:600; color:var(--ink-500);}
+.agent-live-dot{position:absolute; top:-3px; right:-3px; width:10px; height:10px; border-radius:50%; background:#10b981; border:2px solid #fff;}
+.agent-live-dot.ping::after{content:""; position:absolute; inset:-2px; border-radius:50%; background:#10b981; opacity:.5; animation:agent-ping 1.6s cubic-bezier(0,0,.2,1) infinite;}
+@keyframes agent-ping{75%,100%{transform:scale(2.2); opacity:0;}}
+
+/* 부서 — 기본(좁은 카드): 왼쪽 줄기에서 가지가 뻗는 나무 */
+.agent-stem{width:2px; height:12px; margin-left:30px; background:#f0abfc;}
+.agent-depts{list-style:none; margin:0; padding:0;}
+.agent-depts > li{position:relative; padding:0 0 8px 48px;}
+.agent-depts > li:last-child{padding-bottom:0;}
+.agent-depts > li::before{content:""; position:absolute; left:30px; top:0; bottom:0; width:2px; background:var(--ink-200);}
+.agent-depts > li:last-child::before{bottom:auto; height:27px;}
+.agent-depts > li::after{content:""; position:absolute; left:32px; top:26px; width:14px; height:2px; background:color-mix(in srgb, var(--accent) 45%, transparent);}
+.agent-depts > li.open::after{background:var(--accent);}
+.agent-dept{
+  display:flex; align-items:center; gap:10px; width:100%; min-height:48px; padding:8px 12px; text-align:left; font:inherit; color:inherit; cursor:pointer;
+  border:1px solid var(--ink-200); border-radius:12px; background:#fff;
+  box-shadow:0 4px 0 -1px var(--ink-100), 0 10px 20px -18px rgba(15,23,42,.5); transition:transform .15s, box-shadow .15s, border-color .15s;
+}
+.agent-dept:hover{transform:translateY(-1px);}
+.agent-depts > li.open > .agent-dept{
+  border-color:color-mix(in srgb, var(--accent) 55%, white); background:color-mix(in srgb, var(--accent) 6%, white); transform:translateY(-2px);
+  box-shadow:0 4px 0 -1px color-mix(in srgb, var(--accent) 22%, white), 0 14px 26px -16px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.agent-dept:focus-visible{outline:2px solid var(--indigo-600); outline-offset:2px;}
+.agent-dept-emojis{display:flex; flex:0 0 auto; font-size:24px; line-height:1;}
+.agent-dept-emojis span + span{margin-left:-6px;}
+.agent-dept-body{display:flex; flex-direction:column; gap:3px; min-width:0; flex:1;}
+.agent-dept-name{font-size:13.5px; font-weight:900; color:var(--ink-900);}
+.agent-dept-name small{font-size:11px; font-weight:700; color:var(--ink-400);}
+.agent-dept-meta{display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px;}
+.agent-stage{font-size:10.5px; font-weight:900; color:var(--accent);}
+.agent-model-dots{display:inline-flex; gap:3px;}
+.agent-model-dots i{width:6px; height:6px; border-radius:50%;}
+.agent-count{font-size:10.5px; font-weight:800; border-radius:999px; padding:1px 7px; background:var(--ink-100); color:var(--ink-500); white-space:nowrap;}
+.agent-count.busy{background:var(--green-50); color:var(--green-600);}
+.agent-chev{color:var(--ink-400); font-size:12px; transition:transform .15s;}
+.agent-depts > li.open .agent-chev{transform:rotate(180deg);}
+.agent-roles-inline{margin-top:8px;}
+.agent-dept-detail{display:none;}
+.agent-dept-title{display:inline-flex; align-items:center; gap:7px;}
+.agent-dept-title b{font-size:13px; font-weight:900; color:var(--ink-900);}
+.agent-accent-dot{width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);}
+
+/* 모델 색 — opus 보라 · sonnet 하늘 · haiku 초록 */
+.am-opus{--m:#7c3aed; --m-bg:#ede9fe;}
+.am-sonnet{--m:#0284c7; --m-bg:#e0f2fe;}
+.am-haiku{--m:#059669; --m-bg:#d1fae5;}
+.agent-model-dots i, .agent-model-bar span{background:var(--m);}
+.agent-model{display:inline-block; border-radius:999px; padding:1px 8px; font-size:10.5px; font-weight:900; background:var(--m-bg); color:var(--m);}
+
+/* 직원 카드 */
+.agent-roles{list-style:none; margin:0; padding:0; display:grid; grid-template-columns:minmax(0,1fr); gap:8px;}
+.agent-role{
+  position:relative; overflow:hidden; min-width:0; border:1px solid var(--ink-200); border-radius:12px; background:#fff; padding:11px 12px;
+  box-shadow:0 12px 24px -20px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+.agent-role::before{
+  content:""; position:absolute; right:-40px; top:-40px; width:110px; height:110px; border-radius:50%; pointer-events:none;
+  background:radial-gradient(circle, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%);
+}
+.agent-role > *{position:relative;}
+.agent-role-head{display:flex; gap:10px; align-items:flex-start;}
+.agent-role-icon{
+  position:relative; flex:0 0 auto; width:44px; height:44px; display:grid; place-items:center; font-size:25px; line-height:1; border-radius:11px;
+  background:linear-gradient(145deg, color-mix(in srgb, var(--accent) 16%, white), #fff); border:1px solid color-mix(in srgb, var(--accent) 30%, white);
+}
+.agent-role-id{display:flex; flex-direction:column; gap:2px; min-width:0;}
+.agent-role-line{display:flex; flex-wrap:wrap; align-items:center; gap:5px;}
+.agent-role-line b{font-size:14px; font-weight:900; color:var(--ink-900);}
+.agent-role-id code{font-size:10.5px; font-weight:600; color:var(--ink-400); word-break:break-all;}
+.agent-busy{display:inline-flex; align-items:center; gap:4px; border-radius:999px; padding:1px 8px; font-size:10.5px; font-weight:800; background:var(--ink-100); color:var(--ink-500);}
+.agent-busy::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--ink-400);}
+.agent-busy.on{background:var(--green-50); color:var(--green-600);}
+.agent-busy.on::before{background:#10b981;}
+.agent-role-desc{margin-top:8px; font-size:12.5px; font-weight:700; color:var(--ink-700); line-height:1.5;}
+.agent-role-when{display:flex; gap:6px; margin-top:5px; font-size:11.5px; font-weight:600; color:var(--ink-500); line-height:1.45;}
+.agent-role-when span{flex:0 0 auto; border-radius:5px; padding:0 6px; background:var(--ink-100); color:var(--ink-700); font-weight:900;}
+.agent-role-work{margin-top:9px; padding-top:8px; border-top:1px dashed var(--ink-200);}
+.agent-role-work-head{display:flex; justify-content:space-between; font-size:11px; font-weight:800; color:var(--ink-400);}
+.agent-role-work-head .on{color:var(--green-600);}
+.agent-role-work ul{margin:4px 0 0; padding:0; list-style:none;}
+.agent-role-work li{position:relative; padding-left:10px; font-size:11.5px; font-weight:600; color:var(--ink-700); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.agent-role-work li::before{content:""; position:absolute; left:0; top:7px; width:4px; height:4px; border-radius:50%; background:#10b981;}
+.agent-role-more{padding-left:10px; font-size:11px; font-weight:700; color:var(--ink-400);}
+.agent-role-idle{font-size:11.5px; font-weight:700; color:var(--ink-400);}
+.agent-empty{margin:0; border:1px dashed var(--ink-200); border-radius:10px; padding:10px 12px; font-size:12px; font-weight:600; color:var(--ink-500);}
+
+/* 일 흐름 */
+.agent-flow-wrap{position:relative;} /* 레일(.agent-flow-rail)의 위치 기준 — ol 안엔 li 만 */
+.agent-flow{list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(5,minmax(0,1fr));}
+.agent-flow-rail{position:absolute; left:10%; right:10%; top:15px; height:2px; border-radius:2px; background:linear-gradient(90deg, #f0abfc, #bef264, #fdba74);}
+.agent-flow-dot{
+  position:absolute; top:-5px; left:0; width:12px; height:12px; margin-left:-6px; border-radius:50%; background:#fff;
+  border:2px solid var(--indigo-600); box-shadow:0 0 0 4px rgba(79,70,229,.15); animation:agent-flow-run 6s ease-in-out infinite;
+}
+@keyframes agent-flow-run{0%{left:0;} 100%{left:100%;}}
+.agent-flow li{position:relative; display:flex; flex-direction:column; align-items:center; gap:4px; padding:0 2px; text-align:center;}
+.agent-flow-num{display:grid; place-items:center; width:32px; height:32px; border-radius:50%; border:1px solid var(--ink-200); background:#fff; font-size:12px; font-weight:900; color:var(--ink-500);}
+.agent-flow li b{font-size:12px; font-weight:900; color:var(--ink-700); word-break:keep-all;}
+.agent-flow-owner{font-size:10.5px; font-weight:600; color:var(--ink-400); word-break:keep-all;}
+.agent-flow li.on .agent-flow-num{
+  border-color:var(--accent); background:var(--accent); color:#fff;
+  box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent), 0 6px 14px -4px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+.agent-flow li.on b{color:var(--ink-900);}
+.agent-offflow{margin:10px 0 0; line-height:1.5;}
+.agent-offflow.on{color:#0891b2;}
+@media (prefers-reduced-motion: reduce){
+  .agent-flow-dot{display:none;}
+  .agent-live-dot.ping::after{animation:none;}
+}
+
+/* 모델 구성 */
+.agent-model-bar{display:flex; gap:2px; height:8px; border-radius:999px; overflow:hidden;}
+.agent-model-bar span{opacity:.75;}
+.agent-models{list-style:none; margin:10px 0 0; padding:0; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;}
+.agent-models li{display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; min-width:0; background:var(--slate-50); border:1px solid var(--ink-100); border-radius:10px; padding:8px 10px;}
+.agent-models b{font-size:14px; font-weight:900; color:var(--ink-900);}
+.agent-models b small{margin-left:1px; font-size:10.5px; color:var(--ink-400);}
+.agent-models-label{flex-basis:100%; font-size:11px; font-weight:700; color:var(--ink-500);}
+.agent-foot{margin:10px 0 0; font-size:10.5px; font-weight:600; color:var(--ink-400); line-height:1.5;}
+
+/* 넓은 카드: 가로 조직도(팀장 → 버스선 → 부서 7칸) + 아래 직원 카드 */
+@container agentteam (min-width: 900px){
+  .agent-stem{margin:0 auto; height:20px; background:linear-gradient(#f0abfc, var(--ink-200));}
+  .agent-depts{position:relative; display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; padding-top:18px;}
+  .agent-depts::before{
+    content:""; position:absolute; top:0; left:calc(100% / 14); right:calc(100% / 14); height:2px; border-radius:2px;
+    background:linear-gradient(90deg, #f0abfc, var(--ink-200), #67e8f9);
+  }
+  .agent-depts > li{padding:0;}
+  .agent-depts > li::before, .agent-depts > li:last-child::before{
+    left:50%; top:-18px; bottom:auto; height:18px; transform:translateX(-50%); background:color-mix(in srgb, var(--accent) 40%, white);
+  }
+  .agent-depts > li.open::before{background:var(--accent);}
+  .agent-depts > li::after{display:none;}
+  .agent-dept{flex-direction:column; justify-content:flex-start; gap:6px; height:100%; padding:12px 6px 10px; text-align:center;}
+  .agent-dept-emojis{font-size:27px;}
+  .agent-dept-body{align-items:center;}
+  .agent-dept-meta{justify-content:center;}
+  .agent-roles-inline{display:none;}
+  .agent-dept-detail{display:block;}
+  .agent-roles{grid-template-columns:repeat(3,minmax(0,1fr));}
+}
+
+/* 업데이트 — 위 태그(누적·버전) + 개발 기록(커밋에서 자동, lib/generated/commitLog.ts) */
+.home-release-tags{display:inline-flex; gap:6px;}
+.home-tag{font-size:11px; font-weight:800; border-radius:999px; padding:2px 9px; background:var(--ink-100); color:var(--ink-700);}
+.home-tag.ver{background:var(--green-50); color:var(--green-600); font-family:ui-monospace, SFMono-Regular, Menlo, monospace;}
+.home-devlog-block{margin-top:6px; padding-top:12px; border-top:1px dashed var(--ink-200);}
+.home-devlog-title{display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; margin-bottom:10px; font-size:13.5px;}
+.home-devlog{margin:4px 0 0; padding-left:16px; font-size:12.5px; color:var(--ink-700); line-height:1.6;}
+.home-devlog li + li{margin-top:2px;}
+/* 제목 한 줄 = details 하나: 접힌 동안 두 줄로 줄이고, 누르면(open) 다 보임. summary 기본 삼각형은 숨김(목록 점이 있으니) */
+.home-devlog-text{display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; cursor:pointer; list-style:none;}
+.home-devlog-text::-webkit-details-marker{display:none;}
+.home-devlog-item[open] > .home-devlog-text{display:block; -webkit-line-clamp:unset; background:var(--indigo-50); border-radius:6px;}
+.home-devlog-crew{margin-right:5px; letter-spacing:-1px;}
+.home-devlog-rest summary{margin:3px 0 0 16px; font-size:12px; font-weight:700; color:var(--ink-500); cursor:pointer;}
+
+@media (max-width:640px){
+  .agent-head{padding:12px 12px 12px;}
+  .agent-title{font-size:19px;}
+  .agent-stats{width:100%; grid-template-columns:repeat(3,minmax(0,1fr));}
+  .agent-block{padding:12px 12px 12px;}
+  .agent-flow li b{font-size:11px;}
+  .agent-flow-owner{display:none;}
+  .agent-models{gap:6px;}
+  .agent-models li{padding:7px 8px;}
+}

@@ -1,5 +1,50 @@
 # firstoa-it 메모
 
+## AI 에이전트 팀 (팀장 규칙) — 2026-11-19
+
+참고: CS팀 FIELD 웹앱(GitHub FIRSTOA/FIRSTOA-field-webapp-MG)의 "FIELD AI 에이전트 팀"을 IT 웹앱에 맞춰 꾸림
+(사용자 결정: 실제로 일하는 팀 + 홈 카드, 밝은 색, 홈 업데이트 바로 위).
+팀장 = Claude Code 본체(클로드). `.claude/agents/`에 직원 10명 — 요청 종류에 따라 **묻지 말고 알아서** 부른다. 직원 보고 첫 줄은 `[부서 이름]`.
+
+| 부서 | 이름 | 파일(key) | 모델 | 하는 일 |
+|---|---|---|---|---|
+| 기획실 | 도면우 📐 | feature-planner | opus | 조사·설계안·작업 분해(docs/tasks/), 코드 안 씀 |
+| 디자인실 | 고화질 🎨 | ui-designer | sonnet | 화면 틀·PC/핸드폰(m-cards)·일관성 |
+| 데이터실 | 정규화 🗄️ | db-schema | opus | Supabase 표·SQL, 구글시트 칸 구조 |
+| 개발실 | 구동민 🧑‍💻 | developer | sonnet | 설계안대로 구현(큰 기능은 파일 단위로 여러 명 동시) |
+| 개발실 | 원인규 🔍 | debugger | opus | 원인 추적·근본 수정·재발 방지 |
+| 품질실 | 이상무 ✅ | qa-checker | sonnet | 타입·빌드·범위·회귀·핸드폰·비밀값 검사 |
+| 검사실 | 안정빈 🚀 | deploy-check | haiku | 배포 전후 검사·라이브 확인 |
+| 검사실 | 방화벽 🔐 | sql-review | sonnet | SQL 건네기 전 검사 |
+| 검사실 | 연동희 🔗 | integration-rules | sonnet | 구글시트·네이버·카톡에 쓰는 코드 규칙 |
+| 운영실 | 경보람 📡 | ops-monitor | haiku | 사이트·동기화·카톡 대기 읽기 전용 점검 |
+
+| 요청 | 순서 |
+|---|---|
+| 기능 추가·개선("추가해줘", "만들어줘", "개선") | feature-planner → (설계안 사용자 승인) → ui-designer + db-schema 병렬(필요한 것만) → developer → qa-checker |
+| 버그·에러·"안 돼요"·숫자가 이상함 | debugger → qa-checker |
+| 화면·디자인·레이아웃만 | ui-designer → qa-checker |
+| 표·SQL | db-schema → sql-review → qa-checker |
+| 시트 쓰기·네이버 제목 태그/동기화·카톡 발송 코드 수정 | 구현 전후 integration-rules(실패면 그 코드는 푸시 안 함) |
+| "검토해줘", "문제 없나" | feature-planner(조사만) + debugger(위험 지점) — 보고만 |
+| "잘 돌아가?", "캘린더가 안 바뀌어", "카톡 안 가", "배포 됐어?" | ops-monitor 먼저 → 이상이면 debugger |
+| 커밋·푸시·배포 직전과 직후 | deploy-check(실패면 멈추고 고친 뒤 다시) |
+| 사용자에게 SQL을 건네기 직전 | sql-review("실행 금지"면 건네지 않음) |
+
+- **작은 일은 팀장이 직접**: 한두 파일·문구·색처럼 범위가 분명하면 기획·디자인을 건너뛰고 팀장이 고친 뒤 qa-checker만(비용·시간). 애매하면 feature-planner에게 크기 판단만.
+- 설계안은 사용자에게 한 번 보여주고 진행(사용자가 "그냥 해"면 생략). 열린 질문은 모아서 한 번에 — 사용자는 개발자가 아님, 쉬운 말·추천안 먼저.
+- 모델: 판단이 필요한 기획·디버깅·DB는 opus, 구현·디자인·QA·SQL/연동 검토는 sonnet, 기계적 검사(배포·운영)는 haiku. 팀장은 최종 판단·코드 리뷰. 어려운 구현은 Agent 호출 때 model: opus.
+- qa-checker가 실패를 내면 끝난 게 아님 — 고치고 다시 검사. 직원 결과는 그대로 믿지 말고 팀장이 diff를 직접 본다(특히 시트·DB·카톡).
+- **작업 끝**: 사람이 알아야 할 변화는 `lib/releases.ts` 맨 위에 쉬운 말로, 새 규칙·주의는 이 파일 해당 절에.
+  커밋 본문 끝(Co-Authored-By 위)에 `투입: 이름, 이름` — **실제로 부른 직원만**(팀장 혼자 한 일이면 줄 없음). 홈 카드의 '한 일'이 이 줄로 집계됨.
+- **명단 바꾸기**: `.claude/agents/<key>.md`(머리 name·model, 본문 첫 줄 `이름 X · 부서 Y · 캐릭터 Z`)와 `lib/agentTeam.ts`를 같이 고침.
+  다르면 `npm run build`의 prebuild(`scripts/gen-commit-log.mjs`)가 빌드를 멈춤. 새 직원 파일은 Claude Code를 다시 시작해야 Agent 목록에 잡힐 수 있음.
+- **커밋 기록 파일** `lib/generated/commitLog.ts`: prebuild가 git 기록에서 만듦(홈 업데이트의 "개발 기록" + AI 카드 '한 일'). 직접 고치지 말 것.
+  Vercel은 얕은 클론이라 이미 커밋된 파일과 해시로 합치고, git을 못 읽으면 Vercel 환경값으로 이번 커밋 한 건만 넣음 → 로컬에서 빌드해 갱신된 파일을 같이 커밋해 둘 것.
+- `.gitignore`는 `.claude/*` + `!.claude/agents/` — 로컬 설정(settings*.json)은 계속 저장소 밖.
+- 홈 카드: `components/home/AgentTeamCard.tsx`(클라이언트, 부서 펼침) · 한 일 계산 `lib/agentWork.ts`(서버 — 커밋 기록 전체를 브라우저로 안 보냄).
+  카드 폭 900px 이상이면 가로 조직도, 좁으면 나무 모양(CSS 컨테이너 쿼리 `agentteam`).
+
 ## 출고 준비 리스트 (/shipment-prep) — 2026-11 구축
 
 원본: first-as-search 백오피스의 출고 준비 기능(지침서 `C:\ref\first-as-search\00_READ_FIRST_guide.md`, 읽기 전용).

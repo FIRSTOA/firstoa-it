@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import Shell from '@/components/Shell';
+import AgentTeamCard from '@/components/home/AgentTeamCard';
 import FeedbackBoard from '@/components/home/FeedbackBoard';
+import { buildTeamWork } from '@/lib/agentWork';
 import {
   ConfirmCardAsync,
   InventoryCardAsync,
@@ -86,6 +88,7 @@ export default async function HomePage() {
           </Suspense>
         </div>
 
+        <AgentTeamCard work={buildTeamWork(today)} />
         <ReleaseNotes />
         <FeedbackBoard initial={feedback} />
       </div>

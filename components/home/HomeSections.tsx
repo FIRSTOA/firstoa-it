@@ -8,6 +8,8 @@ import {
   type PrepOverview,
   type WorkCard,
 } from '@/lib/homeDashboard';
+import { AGENT_DEPTS } from '@/lib/agentTeam';
+import { COMMIT_LOG, type CommitEntry } from '@/lib/generated/commitLog';
 import { RELEASES } from '@/lib/releases';
 import { isPrepDone, isPrepInProgress, isPrepOverhaul, shortDateLabel } from '@/lib/shipmentPrep';
 
@@ -208,11 +210,16 @@ export function ReleaseNotes() {
       </ul>
     </li>
   );
+  const days = groupByDate(COMMIT_LOG);
+  const version = days[0]?.date.replace(/-/g, '.');
   return (
     <section className="home-section">
       <div className="home-section-title">
         <span>🆕 업데이트</span>
-        <span className="home-section-note">누적 {RELEASES.length}건</span>
+        <span className="home-release-tags">
+          <span className="home-tag">누적 {COMMIT_LOG.length}</span>
+          {version && <span className="home-tag ver">v{version}</span>}
+        </span>
       </div>
       <ol className="home-releases">{latest.map(item)}</ol>
       {older.length > 0 && (
@@ -221,6 +228,93 @@ export function ReleaseNotes() {
           <ol className="home-releases">{older.map((r, i) => item(r, i + 3))}</ol>
         </details>
       )}
+
+      {days.length > 0 && (
+        <div className="home-devlog-block">
+          <div className="home-devlog-title">
+            <b>개발 기록</b>
+            <span className="home-section-note">커밋에서 자동으로 — 배포할 때마다 늘어나요</span>
+          </div>
+          <ol className="home-releases">
+            {days.slice(0, 3).map((g) => (
+              <DevLogDay key={g.date} g={g} />
+            ))}
+          </ol>
+          {days.length > 3 && (
+            <details className="home-release-more">
+              <summary>최근 배포 더 보기 ({days.length - 3}일)</summary>
+              <ol className="home-releases">
+                {days.slice(3).map((g) => (
+                  <DevLogDay key={g.date} g={g} />
+                ))}
+              </ol>
+            </details>
+          )}
+        </div>
+      )}
     </section>
+  );
+}
+
+// ---------- 개발 기록(커밋에서 자동, lib/generated/commitLog.ts) ----------
+
+type DayGroup = { date: string; items: CommitEntry[] };
+
+function groupByDate(log: CommitEntry[]): DayGroup[] {
+  const out: DayGroup[] = [];
+  for (const c of log) {
+    const last = out[out.length - 1];
+    if (last && last.date === c.date) last.items.push(c);
+    else out.push({ date: c.date, items: [c] });
+  }
+  return out;
+}
+
+const ROLE_BY_KEY = new Map(AGENT_DEPTS.flatMap((d) => d.roles.map((r) => [r.key, r] as const)));
+
+function DevLogItem({ c }: { c: CommitEntry }) {
+  const crew = c.crew.flatMap((k) => {
+    const r = ROLE_BY_KEY.get(k);
+    return r ? [r] : [];
+  });
+  return (
+    // 긴 제목은 두 줄로 줄여 두고, 누르면(details 펼침) 다 보임 — 핸드폰엔 마우스 올리기(title)가 없어서
+    <li title={`${c.time} · ${c.hash.slice(0, 7)}${crew.length ? ` · 투입: ${crew.map((r) => r.name).join(', ')}` : ''}`}>
+      <details className="home-devlog-item">
+        <summary className="home-devlog-text">
+          {crew.length > 0 && <span className="home-devlog-crew">{crew.map((r) => r.emoji).join('')}</span>}
+          {c.subject}
+        </summary>
+      </details>
+    </li>
+  );
+}
+
+function DevLogDay({ g }: { g: DayGroup }) {
+  const head = g.items.slice(0, 3);
+  const rest = g.items.slice(3);
+  return (
+    <li className="home-release">
+      <div className="home-release-head">
+        <span className="home-release-date">{g.date}</span>
+        {isRecent(g.date) && <span className="home-new">NEW</span>}
+        <span className="home-section-note">{g.items.length}건</span>
+      </div>
+      <ul className="home-devlog">
+        {head.map((c) => (
+          <DevLogItem key={c.hash} c={c} />
+        ))}
+      </ul>
+      {rest.length > 0 && (
+        <details className="home-devlog-rest">
+          <summary>… 외 {rest.length}건</summary>
+          <ul className="home-devlog">
+            {rest.map((c) => (
+              <DevLogItem key={c.hash} c={c} />
+            ))}
+          </ul>
+        </details>
+      )}
+    </li>
   );
 }

@@ -26,8 +26,9 @@ yarn-error.log*
 # vercel
 .vercel
 
-# claude code 로컬 설정
-.claude/
+# claude code 로컬 설정 — 단 AI 에이전트 팀 명단(.claude/agents/)은 저장소에 둠(CLAUDE.md "AI 에이전트 팀")
+.claude/*
+!.claude/agents/
 
 # typescript
 *.tsbuildinfo
