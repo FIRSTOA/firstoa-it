@@ -399,13 +399,14 @@ export default function StocktakeSessionPage({
           <div style={{ fontSize: '12px', color: 'var(--ink-500)', margin: '6px 0 10px' }}>
             반영하면 위치변경·신규등록 건은 웹앱과 구글시트(IT재고 탭) 양쪽에 바로 반영돼요.
           </div>
-          <table>
+          {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+          <table className="m-cards">
             <thead>
               <tr>
-                <th>자산번호</th>
-                <th>구분</th>
-                <th>상세</th>
-                <th style={{ width: '36px' }} />
+                <th data-m="title">자산번호</th>
+                <th data-m="badge">구분</th>
+                <th data-m="full nolabel">상세</th>
+                <th style={{ width: '36px' }} data-m="actions" />
               </tr>
             </thead>
             <tbody>
@@ -466,10 +467,10 @@ export default function StocktakeSessionPage({
       )}
 
       <div className="panel" style={{ paddingTop: '6px' }}>
-        <table>
+        <table className="m-cards">
           <thead>
             <tr>
-              <th style={{ width: '32px' }}>
+              <th style={{ width: '32px' }} data-m="check">
                 <input
                   type="checkbox"
                   checked={session.results.length > 0 && session.results.every((r) => selected.has(r.assetId))}
@@ -477,13 +478,13 @@ export default function StocktakeSessionPage({
                   aria-label="전체 선택"
                 />
               </th>
-              <th>자산번호</th>
+              <th data-m="title">자산번호</th>
               <th>품목</th>
-              <th className="hide-mobile">브랜드</th>
-              <th>모델명</th>
-              <th>상태</th>
-              <th>비고</th>
-              <th style={{ width: '90px' }} />
+              <th className="hide-mobile" data-m="inline">브랜드</th>
+              <th data-m="inline">모델명</th>
+              <th data-m="badge">상태</th>
+              <th data-m="full">비고</th>
+              <th style={{ width: '90px' }} data-m="actions" />
             </tr>
           </thead>
           <tbody>

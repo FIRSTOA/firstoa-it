@@ -319,14 +319,14 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
             </div>
           </div>
 
-          <table style={{ marginTop: '12px' }}>
+          <table className="m-cards" style={{ marginTop: '12px' }}>
             <thead>
               <tr>
                 <th>품목</th>
                 <th>모델명</th>
                 <th>기번(시리얼)</th>
                 <th>자산번호</th>
-                <th style={{ width: '50px' }} />
+                <th style={{ width: '50px' }} data-m="actions" />
               </tr>
             </thead>
             <tbody>
@@ -434,26 +434,27 @@ export default function ConfirmFormPage({ initialEntries }: { initialEntries: Di
           ))}
         </div>
         <div style={{ overflowX: 'auto' }}>
-          <table>
+          {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+          <table className="m-cards">
             <thead>
               <tr>
                 <th>접수일</th>
-                <th>접수시간</th>
+                <th data-m="hide">접수시간</th>
                 <th>시작</th>
                 <th>종료</th>
                 <th>처리여부</th>
-                <th>접수자</th>
+                <th data-m="hide">접수자</th>
                 <th>처리자</th>
-                <th>구분</th>
-                <th>상호</th>
+                <th data-m="badge">구분</th>
+                <th data-m="title">상호</th>
                 <th>연락처</th>
                 <th>품목</th>
                 <th>모델명</th>
                 <th>자산번호</th>
                 <th>시리얼번호</th>
-                <th>비고</th>
+                <th data-m="full">비고</th>
                 <th>납품/교체일</th>
-                <th />
+                <th data-m="actions" />
               </tr>
             </thead>
             <tbody>

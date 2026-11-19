@@ -204,16 +204,17 @@ export default function ConfirmSheetPanel({ onToast }: { onToast: (msg: string) 
       {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 8 }}>{error}</div>}
 
       <div style={{ overflowX: 'auto' }}>
-        <table>
+        {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+        <table className="m-cards">
           <thead>
             <tr>
-              <th style={{ whiteSpace: 'nowrap' }}>납품일</th>
-              <th>상호</th>
-              <th>요청 품목</th>
+              <th style={{ whiteSpace: 'nowrap' }} data-m="badge">납품일</th>
+              <th data-m="title">상호</th>
+              <th data-m="full">요청 품목</th>
               <th style={{ whiteSpace: 'nowrap' }}>출고 기재</th>
               <th style={{ whiteSpace: 'nowrap' }}>출고 준비</th>
               <th style={{ whiteSpace: 'nowrap' }}>저장</th>
-              <th />
+              <th data-m="actions" />
             </tr>
           </thead>
           <tbody>

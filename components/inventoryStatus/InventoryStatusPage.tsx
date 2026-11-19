@@ -149,15 +149,16 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
             }
 
             return (
-              <div key={category} style={{ minWidth: '660px', flex: '1 1 660px' }}>
+              <div key={category} className="inv-status-block" style={{ minWidth: '660px', flex: '1 1 660px' }}>
                 <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>
                   {category} ({total}대)
                 </div>
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ fontSize: '12.5px', whiteSpace: 'nowrap' }}>
+                  {/* 핸드폰에선 구분코드마다 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+                  <table className="m-cards" style={{ fontSize: '12.5px', whiteSpace: 'nowrap' }}>
                     <thead>
                       <tr>
-                        <th>구분코드</th>
+                        <th data-m="title">구분코드</th>
                         <th>총재고</th>
                         {DETAIL_STATUSES.map((s) => (
                           <th key={s}>{s}</th>
@@ -291,17 +292,17 @@ export default function InventoryStatusPage({ assets, stocktakeConfirmations, sa
             const rows = allRows.filter((r) => !(r.confirmedCount === 0 && r.lastScannedAt === null));
             if (rows.length === 0) return null;
             return (
-              <div key={category} style={{ minWidth: '320px', flex: '1 1 320px' }}>
+              <div key={category} className="inv-status-block" style={{ minWidth: '320px', flex: '1 1 320px' }}>
                 <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '6px' }}>{category}</div>
-                <table style={{ fontSize: '12.5px' }}>
+                <table className="m-cards" style={{ fontSize: '12.5px' }}>
                   <thead>
                     <tr>
-                      <th>위치</th>
-                      <th>{category}</th>
+                      <th data-m="title">위치</th>
+                      <th data-label="시스템">{category}</th>
                       <th>실재고체크</th>
-                      <th>업데이트</th>
+                      <th data-m="full">업데이트</th>
                       <th>담당자</th>
-                      <th>비고</th>
+                      <th data-m="badge">비고</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -107,21 +107,22 @@ export default function InventoryTable({
   const rows = renderAll ? items : items.slice(0, FIRST_PAINT_ROWS);
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
-      <table>
+      {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+      <table className="m-cards">
         <thead>
           <tr>
-            <th style={{ width: '32px' }}>
+            <th style={{ width: '32px' }} data-m="check">
               <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="전체 선택" />
             </th>
-            <th style={{ width: '30%' }}>사양</th>
-            <th>자산번호</th>
-            <th>브랜드</th>
-            <th>모델명</th>
+            <th style={{ width: '30%' }} data-m="full nolabel">사양</th>
+            <th data-m="title">자산번호</th>
+            <th data-m="inline">브랜드</th>
+            <th data-m="inline">모델명</th>
             <th>위치</th>
-            <th>상태</th>
+            <th data-m="badge">상태</th>
             <th>이력</th>
             <th>예약</th>
-            <th style={{ width: '70px' }} />
+            <th style={{ width: '70px' }} data-m="actions" />
           </tr>
         </thead>
         <tbody>

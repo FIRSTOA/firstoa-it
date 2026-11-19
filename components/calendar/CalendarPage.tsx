@@ -1,5 +1,6 @@
 'use client';
 
+import MobileFilterRows from '@/components/MobileFilterRows';
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { createEvent, deleteEvent, listConnectedCalendars, listEventsInRange, updateEvent } from '@/app/calendar/actions';
 import {
@@ -298,6 +299,8 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
             ⭐ 중요
           </button>
         </div>
+        {/* 핸드폰에선 캘린더·상태·유형 칩을 "필터" 버튼으로 접음(PC에선 그대로 — .m-filter-rows 는 display:contents) */}
+        <MobileFilterRows>
         <div className="chip-group">
           <button type="button" className={`chip${!calendarFilter ? ' active' : ''}`} onClick={() => setCalendarFilter(null)}>
             전체
@@ -342,26 +345,29 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
             </button>
           ))}
         </div>
+        </MobileFilterRows>
         <input
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           placeholder="제목/장소/설명 검색"
+          className="calendar-search"
           style={{ minWidth: '200px' }}
         />
       </div>
 
       {viewMode === 'list' ? (
         <div className="panel" style={{ paddingTop: '6px' }}>
-          <table>
+          {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+          <table className="m-cards">
             <thead>
               <tr>
-                <th style={{ width: '36px' }} />
-                <th>날짜</th>
-                <th>시간</th>
-                <th>제목</th>
+                <th style={{ width: '36px' }} data-m="check" />
+                <th data-m="inline">날짜</th>
+                <th data-m="inline">시간</th>
+                <th data-m="title">제목</th>
                 <th>장소</th>
-                <th>상태</th>
+                <th data-m="badge">상태</th>
                 <th>캘린더</th>
                 <th>등록자</th>
               </tr>

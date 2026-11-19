@@ -48,15 +48,16 @@ export default function SoldAssetsPanel({ assets: loaded }: { assets: Asset[] | 
         />
       </div>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ fontSize: '12.5px' }}>
+        {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+        <table className="m-cards" style={{ fontSize: '12.5px' }}>
           <thead>
             <tr>
-              <th>품목</th>
-              <th>브랜드</th>
-              <th>모델명</th>
-              <th>자산번호</th>
+              <th data-m="badge">품목</th>
+              <th data-m="inline">브랜드</th>
+              <th data-m="inline">모델명</th>
+              <th data-m="title">자산번호</th>
               <th>시리얼번호</th>
-              <th>이동 이력(거래처/날짜)</th>
+              <th data-m="full">이동 이력(거래처/날짜)</th>
             </tr>
           </thead>
           <tbody>

@@ -1,5 +1,6 @@
 'use client';
 
+import MobileFilterRows from '@/components/MobileFilterRows';
 import { DISPATCH_TYPES, type DispatchFilters as Filters } from '@/lib/dispatch';
 
 type Props = {
@@ -20,6 +21,7 @@ export default function DispatchFilters({ filters, searchTerm, onSearchChange, o
           placeholder="상호 / 품목 / 자산번호 / 연락처 검색"
         />
       </div>
+      <MobileFilterRows>
       <div className="filter-row" style={{ borderTop: 'none' }}>
         <div className="filter-label">구분</div>
         <div className="chip-group">
@@ -42,6 +44,7 @@ export default function DispatchFilters({ filters, searchTerm, onSearchChange, o
           ))}
         </div>
       </div>
+      </MobileFilterRows>
     </div>
   );
 }

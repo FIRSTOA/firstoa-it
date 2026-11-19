@@ -1,0 +1,94 @@
+import Link from 'next/link';
+import { Suspense } from 'react';
+import Shell from '@/components/Shell';
+import FeedbackBoard from '@/components/home/FeedbackBoard';
+import {
+  ConfirmCardAsync,
+  InventoryCardAsync,
+  ReleaseNotes,
+  SystemStatusAsync,
+  SystemStatusLoading,
+  UpcomingShipments,
+  WorkCardLoading,
+  WorkCardView,
+} from '@/components/home/HomeSections';
+import { listFeedback } from './feedbackActions';
+import {
+  kstToday,
+  loadBillingCard,
+  loadPrepOverview,
+  loadReceivingCard,
+  loadStocktakeCard,
+  todayHeading,
+} from '@/lib/homeDashboard';
+
+// 매번 최신 — 숫자는 각 메뉴 원본에서 바로 읽음(보관 안 함)
+export const dynamic = 'force-dynamic';
+
+/**
+ * 홈 대시보드 — 오늘 할 일과 각 메뉴 상태를 한눈에(참고: 점검AS inspection-finder 홈 구성).
+ * Supabase 카드(출고 준비·입고·실재고·청구)는 동시에 읽어 바로, 구글시트 카드(확인서·IT 재고)와
+ * 운영·시스템(응답 시간 측정)은 Suspense 로 틀 먼저 띄우고 도착하면 채움.
+ */
+export default async function HomePage() {
+  const today = kstToday();
+  const head = todayHeading(today);
+  const [prep, receiving, stocktake, billing, feedback] = await Promise.all([
+    loadPrepOverview(today),
+    loadReceivingCard(today),
+    loadStocktakeCard(today),
+    loadBillingCard(today),
+    listFeedback(),
+  ]);
+  const fast = [prep.card, receiving, stocktake, billing];
+  const todo = fast.filter((c) => c.alert && (c.tone === 'bad' || c.tone === 'warn'));
+  const failed = fast.filter((c) => c.error).length;
+
+  return (
+    <Shell activeMenu="홈" title="🏠 홈" note="오늘 할 일과 메뉴별 상태를 한눈에">
+      <div className="home">
+        <header className="home-hero">
+          <div>
+            <div className="home-date">{head.title}</div>
+            <div className="home-date-sub">{head.sub}</div>
+          </div>
+          <div className="home-todo">
+            {failed > 0 && <span className="home-chip state-waiting">일부 숫자를 못 읽었어요({failed}곳)</span>}
+            {todo.length === 0 ? (
+              failed === 0 && <span className="home-chip state-done">✓ 지금 급한 일 없음</span>
+            ) : (
+              todo.map((c) => (
+                <Link key={c.key} href={c.href} className={`home-chip state-${c.tone === 'bad' ? 'bad' : 'waiting'}`}>
+                  {c.icon} {c.alert}
+                </Link>
+              ))
+            )}
+          </div>
+        </header>
+
+        <div className="home-cards">
+          <WorkCardView card={prep.card} />
+          <Suspense fallback={<WorkCardLoading title="확인서 출고 기재" icon="📄" />}>
+            <ConfirmCardAsync today={today} />
+          </Suspense>
+          <WorkCardView card={receiving} />
+          <Suspense fallback={<WorkCardLoading title="IT 재고" icon="🖥️" />}>
+            <InventoryCardAsync />
+          </Suspense>
+          <WorkCardView card={stocktake} />
+          <WorkCardView card={billing} />
+        </div>
+
+        <div className="home-grid2">
+          <UpcomingShipments prep={prep} />
+          <Suspense fallback={<SystemStatusLoading />}>
+            <SystemStatusAsync />
+          </Suspense>
+        </div>
+
+        <ReleaseNotes />
+        <FeedbackBoard initial={feedback} />
+      </div>
+    </Shell>
+  );
+}

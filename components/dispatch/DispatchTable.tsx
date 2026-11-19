@@ -20,18 +20,19 @@ type Props = {
 export default function DispatchTable({ entries, disabled, onEdit, onDelete }: Props) {
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
-      <table>
+      {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+      <table className="m-cards">
         <thead>
           <tr>
-            <th style={{ width: '50px' }}>순번</th>
+            <th style={{ width: '50px' }} data-m="hide">순번</th>
             <th>구분</th>
-            <th>상태</th>
-            <th>상호</th>
-            <th style={{ width: '26%' }}>품목</th>
+            <th data-m="badge">상태</th>
+            <th data-m="title">상호</th>
+            <th style={{ width: '26%' }} data-m="full">품목</th>
             <th>자산번호</th>
             <th>담당</th>
             <th>일정</th>
-            <th style={{ width: '70px' }} />
+            <th style={{ width: '70px' }} data-m="actions" />
           </tr>
         </thead>
         <tbody>

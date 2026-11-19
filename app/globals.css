@@ -16,9 +16,14 @@
 *{box-sizing:border-box;}
 html,body{margin:0; height:100%;}
 body{font-family:'Pretendard','Apple SD Gothic Neo','Segoe UI',sans-serif;}
+/* 홈 화면 앱(PWA) — viewport-fit=cover 라서 노치·하단 홈바·가로모드 옆을 비켜 줌(PC·일반 브라우저에선 0).
+   그래서 .shell 은 100vh 가 아니라 100%(body 안쪽 높이) — 100vh 면 패딩만큼 넘쳐 아래가 홈바에 가림. */
+body{
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
 
 /* ===== ERP Shell (top nav + left sidebar) ===== */
-.shell{display:flex; height:100vh; background:var(--slate-50); overflow:hidden;}
+.shell{display:flex; height:100%; background:var(--slate-50); overflow:hidden;}
 
 .sidebar{
   width:236px; flex-shrink:0; background:#fff; border-right:1px solid var(--ink-200);
@@ -81,7 +86,28 @@ body{font-family:'Pretendard','Apple SD Gothic Neo','Segoe UI',sans-serif;}
 @keyframes nav-spin{to{transform:rotate(360deg);}}
 @keyframes nav-progress{from{transform:translateX(-100%);} to{transform:translateX(250%);}}
 
-.shell-main{flex:1; display:flex; flex-direction:column; min-width:0; height:100vh;}
+.shell-main{flex:1; display:flex; flex-direction:column; min-width:0; height:100%;}
+
+/* 사이드바 맨 아래 "📱 핸드폰에 앱처럼 설치하기" + 안내창 — components/InstallAppButton.tsx */
+.install-app-btn{
+  margin-top:auto; width:100%; padding:10px 12px; border-radius:10px; border:1px dashed var(--indigo-100);
+  background:var(--indigo-50); color:var(--indigo-600); font:inherit; font-size:12.5px; font-weight:700;
+  cursor:pointer; text-align:center; flex-shrink:0;
+}
+.install-app-btn:hover{background:var(--indigo-100);}
+.modal-overlay.install-guide-overlay{z-index:70;} /* 모바일에서 열린 사이드바(60)보다 위 — .modal-overlay(50)가 뒤에 있어 두 클래스로 */
+.install-guide{width:440px;}
+.install-steps{margin:0; padding-left:20px; font-size:13.5px; color:var(--ink-700); line-height:1.7;}
+.install-steps li{margin-bottom:10px;}
+.install-steps b{color:var(--ink-900);}
+.install-steps .hint{display:block; font-size:12px; color:var(--ink-500);}
+.install-share-icon{vertical-align:-3px; color:var(--blue-600);}
+.install-note{font-size:12px; color:var(--ink-500); background:var(--ink-100); border-radius:9px; padding:9px 11px; margin-top:4px; line-height:1.6;}
+.install-url{display:flex; gap:6px; margin:8px 0 12px;}
+.install-url input{
+  flex:1; min-width:0; border:1px solid var(--ink-200); border-radius:9px; padding:8px 10px;
+  font-size:13px; font-family:inherit; color:var(--ink-900); background:var(--slate-50);
+}
 
 .topnav{
   height:60px; flex-shrink:0; background:#fff; border-bottom:1px solid var(--ink-200);
@@ -462,8 +488,16 @@ tbody tr:hover{background:var(--indigo-50);}
 @media (max-width:860px){
   .hamburger-btn{display:flex;}
   .sidebar{
-    position:fixed; top:0; left:0; z-index:60; width:82vw; max-width:280px; height:100vh;
+    /* 높이는 100vh 금지 — 아이폰 Safari의 100vh는 아래 주소창이 숨었을 때 높이라 서랍이 화면보다 길어져서
+       메뉴가 다 들어가 버려(스크롤 안 생김) 아래쪽(임대·청구, 설치 버튼)이 주소창 밑에 가려 못 내렸음.
+       top+bottom 으로 지금 보이는 높이에 맞추고, 넘치는 만큼 서랍 안에서 스크롤. */
+    position:fixed; top:0; bottom:0; left:0; z-index:60; width:82vw; max-width:280px;
+    overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
     transform:translateX(-100%); transition:.2s transform; box-shadow:0 0 0 rgba(0,0,0,0);
+    /* 화면 끝에 붙는 서랍이라 body 패딩을 못 받음 → 노치·홈바만큼 직접 비킴 */
+    padding-top:calc(14px + env(safe-area-inset-top));
+    padding-bottom:calc(18px + env(safe-area-inset-bottom));
+    padding-left:calc(14px + env(safe-area-inset-left));
   }
   .sidebar.open{transform:translateX(0); box-shadow:8px 0 24px -8px rgba(15,23,42,.35);}
   .sidebar-backdrop{
@@ -497,3 +531,298 @@ tbody tr:hover{background:var(--indigo-50);}
 .receiving-table{min-width:2130px;}
 .receiving-table th{white-space:nowrap;}
 .receiving-table select.inline-cell-input{min-width:0; text-overflow:clip;}
+
+/* =====================================================================================
+   핸드폰 화면(≤640px) — PC 화면은 그대로 두고 핸드폰에서만 덮어씀.
+   · 목록 표 → 카드: components/MobileTableCards.tsx 가 <th data-m> 를 칸마다 data-ml(이름)·data-mr(역할)로 옮김
+   · 필터 칩 → "필터" 버튼으로 접기: components/MobileFilterRows.tsx
+   ===================================================================================== */
+.m-filter-toggle{display:none;}
+/* PC에선 감싼 div가 없는 것처럼(통합 캘린더처럼 칩 묶음이 바로 flex 항목인 곳도 모양 그대로) */
+.m-filter-rows{display:contents;}
+@media (max-width:640px){
+  /* --- 위 막대: 회사 글자 빼고 탭 두 개가 다 보이게 --- */
+  .topnav{height:54px; padding:0 10px; gap:8px;}
+  .topnav-left{gap:8px;}
+  .company-text{display:none;}
+  .company-mark{width:30px; height:30px; font-size:14px; border-radius:9px;}
+  .topnav-tabs{gap:2px;}
+  .topnav-tab{padding:7px 9px; font-size:13px;}
+  .topnav-right{gap:6px;}
+  .hr-pill{padding:6px 8px;}
+  .logout-btn{width:30px; height:30px;}
+
+  /* --- 화면 제목 줄 --- */
+  .breadcrumb-bar{padding:12px 12px 0; gap:8px;}
+  .breadcrumb-bar h1{font-size:16px;}
+  .team-pills{margin-left:0;}
+  .team-pill{padding:3px 9px; font-size:11.5px;}
+  .breadcrumb-note{
+    flex-basis:100%; margin-left:0; font-size:11.5px; line-height:1.45;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  }
+
+  /* --- 본문 여백·버튼 --- */
+  .app, .prep-page{padding:12px 12px 48px;}
+  .dashboard-title-block{margin-bottom:8px;}
+  .dashboard-title-block h2{font-size:17px;}
+  .topbar{gap:8px; margin-bottom:10px !important;}
+  .title-block h1{font-size:17px;}
+  .actions{gap:6px; flex-wrap:wrap;}
+  .actions .btn{padding:8px 11px; font-size:12.5px; border-radius:9px; box-shadow:none;}
+  .panel{padding:12px 12px 6px; border-radius:12px; margin-bottom:12px;}
+  .search-row{margin-bottom:8px; gap:6px;}
+  .search-row input{padding:9px 12px;}
+  /* 아이폰은 16px보다 작은 입력칸을 누르면 화면을 확대해 버림 */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea{font-size:16px !important;}
+
+  /* --- 숫자 카드: 2칸 큰 카드 → 4칸 작은 카드 --- */
+  .stats, .category-cards{grid-template-columns:repeat(4,minmax(0,1fr)) !important; gap:6px; margin-bottom:10px;}
+  .stat-card, .category-card{padding:7px 8px 6px; border-radius:10px;}
+  .stat-card:hover, .category-card:hover{transform:none; box-shadow:none;}
+  .stat-num, .category-card-num{font-size:16px; margin-bottom:1px;}
+  .stat-label, .category-card-label{font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .category-card-check{top:6px; right:6px; width:14px; height:14px; font-size:9px;}
+
+  /* --- 필터: 접어 두고 버튼으로 펼침 --- */
+  .m-filter-toggle{
+    display:flex; align-items:center; gap:8px; width:100%; margin:0 0 8px; padding:9px 12px;
+    border:1px solid var(--ink-200); border-radius:10px; background:var(--slate-50);
+    font:inherit; font-size:13px; font-weight:700; color:var(--ink-700); cursor:pointer;
+  }
+  .m-filter-count{background:var(--indigo-600); color:#fff; border-radius:999px; padding:2px 8px; font-size:11.5px;}
+  .m-filter-caret{margin-left:auto; font-size:12px; color:var(--ink-500); font-weight:600;}
+  .m-filter-rows:not(.open){display:none;}
+  .m-filter-rows.open{display:block; flex-basis:100%;}
+  .m-filter-rows.open > .chip-group{margin-bottom:8px;}
+  .filter-row{padding:7px 0; gap:6px;}
+  .filter-label{font-size:12px;}
+  .chip{padding:6px 10px;}
+  .active-filters{padding:10px 12px; margin-bottom:10px;}
+
+  /* --- 목록 표 → 카드 (table.m-cards) --- */
+  table.m-cards{display:block; width:100% !important; min-width:0 !important; font-size:13.5px;}
+  table.m-cards > thead, table.m-cards > colgroup{display:none;}
+  table.m-cards > tbody, table.m-cards > tfoot{display:block;}
+  table.m-cards tr{
+    display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px 12px; position:relative;
+    background:#fff; border:1px solid var(--ink-200); border-radius:12px; padding:12px 14px; margin:0 0 10px;
+  }
+  table.m-cards tbody tr:hover{background:#fff;}
+  table.m-cards td{
+    display:block; flex:1 1 calc(50% - 6px); min-width:0; padding:0; border:0;
+    white-space:normal !important; text-align:left !important; word-break:keep-all; overflow-wrap:anywhere;
+  }
+  /* 제목 줄(check·title·badge) 다음에서 줄을 끊음 — 브랜드·모델명이 제목 옆으로 붙지 않게 */
+  table.m-cards tr::before{content:''; order:-2; flex:0 0 100%; height:0; margin-bottom:-8px;}
+  /* 이름은 값 앞에 작게 한 줄로(이름 따로 한 줄 쓰면 카드가 너무 길어짐) */
+  table.m-cards td[data-ml]:not([data-ml=""])::before{
+    content:attr(data-ml); display:inline-block; margin-right:6px; font-size:11.5px; font-weight:600; color:var(--ink-400);
+  }
+  /* !important: 아래 '바로 고치는 칸'(display:flex) 규칙이 더 세서 숨김이 안 먹던 것 */
+  table.m-cards td:empty, table.m-cards td[data-m-empty], table.m-cards td.hide-mobile, table.m-cards td[data-mr~="hide"]{display:none !important;}
+  table.m-cards td:is([data-mr~="title"], [data-mr~="badge"], [data-mr~="check"], [data-mr~="inline"], [data-mr~="sub"], [data-mr~="actions"], [data-mr~="nolabel"])::before{display:none !important;}
+  table.m-cards td[data-mr~="check"]{order:-5; flex:0 0 auto;}
+  /* 제목이 길면 제목 안에서 줄바꿈 — 오른쪽 배지(상태·날짜)는 같은 줄에 남게 */
+  table.m-cards td[data-mr~="title"]{order:-4; flex:1 1 0; min-width:0; font-size:15.5px; font-weight:800; color:var(--ink-900);}
+  table.m-cards td[data-mr~="badge"]{order:-3; flex:0 1 auto; margin-left:auto; text-align:right !important;}
+  table.m-cards td[data-mr~="inline"]{order:-1; flex:0 1 auto; font-size:13.5px; color:var(--ink-700); font-weight:600;}
+  table.m-cards td[data-mr~="sub"]{order:-1; flex-basis:100%; font-size:12.5px; color:var(--ink-500);}
+  table.m-cards td[data-mr~="full"]{flex-basis:100%;}
+  /* 버튼은 마지막 줄 오른쪽 — 자리가 남으면 마지막 칸 옆에 같이 */
+  table.m-cards td[data-mr~="actions"]{order:99; flex:0 0 auto; margin-left:auto; display:flex; justify-content:flex-end; gap:6px; flex-wrap:wrap;}
+  table.m-cards td[data-mr~="actions"]:has(> .row-actions:empty){display:none;}
+  table.m-cards .row-actions{gap:8px;}
+  table.m-cards .icon-btn{width:34px; height:34px; font-size:15px;}
+  table.m-cards td input:not([type="checkbox"]):not([type="radio"]), table.m-cards td select, table.m-cards td textarea{width:100%; max-width:100%;}
+  table.m-cards td[data-mr~="check"] input[type="checkbox"]{width:20px; height:20px; margin:1px 0 0;}
+  /* 표 안에서 바로 고치는 칸(입고 대장 등): 이름 옆에 붙이고, 손가락으론 hover가 없으니 밑줄로 고칠 수 있는 칸임을 표시 */
+  table.m-cards td:is(:has(> .inline-cell-input), :has(> div > .inline-cell-input)){display:flex; align-items:center; gap:4px;}
+  table.m-cards td:has(> div > .inline-cell-input) > div{flex:1 1 auto; min-width:0;}
+  table.m-cards td:is(:has(> .inline-cell-input), :has(> div > .inline-cell-input))::before{flex:0 0 auto; margin-right:2px;}
+  table.m-cards .inline-cell-input{flex:1 1 auto; min-width:0; padding:3px 4px; border-radius:0; border-bottom:1px dashed var(--ink-200);}
+  table.m-cards td[data-mr~="title"] .inline-cell-input{font-weight:800; font-size:16px; color:var(--ink-900); border-bottom-color:transparent;}
+  table.m-cards .empty-state{padding:30px 0;}
+  /* 재고 현황판: PC용 최소 폭(660px) 풀기 */
+  .inv-status-block{min-width:0 !important; flex-basis:100% !important;}
+  /* 흰 상자 안 설명글(.sub)이 기본 16px로 커 보이던 것 */
+  .panel .sub, .app .sub{font-size:12.5px; line-height:1.55; color:var(--ink-500);}
+  /* 카드만 들어 있는 흰 상자는 상자를 빼고 카드만 */
+  .panel:has(> table.m-cards){background:transparent; border:0; padding:0; overflow:visible;}
+
+  /* --- 팝업: 아래에서 올라오는 시트(화면 폭 꽉) --- */
+  .modal-overlay{align-items:flex-end;}
+  .modal{
+    width:100% !important; max-width:100% !important; max-height:86vh !important; max-height:92dvh !important;
+    border-radius:16px 16px 0 0; padding:18px 16px calc(14px + env(safe-area-inset-bottom));
+  }
+  .modal h2{font-size:16px;}
+
+  /* --- 통합 캘린더 월간: 칸이 좁아 "09:…"만 보이던 일정 → 색 막대로, 날짜를 누르면 그날 목록(아래 시트) --- */
+  .calendar-search{min-width:0 !important; width:100%;}
+  .calendar-grid{grid-auto-rows:minmax(58px, auto);}
+  .calendar-day{padding:4px 3px; gap:3px;}
+  .calendar-day-number{font-size:12px;}
+  .calendar-day.today .calendar-day-number{width:20px; height:20px;}
+  /* .calendar-grid 안에서만 — 날짜 팝업(DayEventsModal)도 같은 칩 클래스를 써서 거기까지 막대가 되면 안 됨 */
+  .calendar-grid .calendar-event-chip{
+    pointer-events:none; height:4px; padding:0; border-radius:2px; font-size:0; line-height:0;
+    background:currentColor !important; opacity:.7;
+  }
+  .calendar-grid .calendar-event-chip.done{opacity:.25;}
+  .calendar-grid .calendar-event-more{pointer-events:none; padding:0; font-size:10px; line-height:1.2;}
+  /* 날짜 팝업의 일정 제목은 길어서 한 줄로 자르지 말고 두세 줄로 */
+  .modal .calendar-event-chip{white-space:normal; line-height:1.45; padding:6px 8px; font-size:12.5px;}
+}
+
+/* =====================================================================================
+   홈 대시보드(/home) — app/home/page.tsx, components/home/*
+   카드·칸의 띠 색: tone-good(초록) / tone-warn(주황) / tone-bad(빨강) / tone-muted(회색)
+   ===================================================================================== */
+.home{padding:16px 32px 60px; color:var(--ink-900);}
+.home-hero{display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:14px;}
+.home-date{font-size:24px; font-weight:800; letter-spacing:-0.02em;}
+.home-date-sub{font-size:12.5px; color:var(--ink-500); font-weight:600; margin-top:2px;}
+.home-todo{display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;}
+.home-chip{
+  display:inline-flex; align-items:center; gap:4px; border-radius:999px; padding:5px 11px; font-size:12px; font-weight:700;
+  text-decoration:none; white-space:nowrap; border:1px solid transparent;
+}
+.home-chip.state-done{background:var(--green-50); color:var(--green-600); border-color:var(--green-100);}
+.home-chip.state-doing, .home-chip.state-waiting{background:var(--amber-50); color:var(--amber-600); border-color:var(--amber-100);}
+.home-chip.state-bad{background:var(--red-50); color:var(--red-600); border-color:var(--red-100);}
+.home-prep-state .home-chip.state-waiting{background:var(--ink-100); color:var(--ink-500); border-color:var(--ink-200);}
+
+.home-cards{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px;}
+.home-card{
+  --tone:var(--ink-300);
+  display:flex; flex-direction:column; gap:10px; background:#fff; border:1px solid var(--ink-200); border-top:3px solid var(--tone);
+  border-radius:14px; padding:12px 16px 12px; color:inherit; text-decoration:none; transition:.15s box-shadow,.15s transform;
+}
+a.home-card:hover{box-shadow:0 10px 24px -14px rgba(15,23,42,.3); transform:translateY(-1px);}
+.home-card.tone-good{--tone:var(--green-600);}
+.home-card.tone-warn{--tone:var(--amber-600);}
+.home-card.tone-bad{--tone:var(--red-600);}
+.home-card-head{display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:800;}
+.home-card-icon{margin-right:2px;}
+.home-card-go{color:var(--ink-400); font-size:18px; line-height:1;}
+.home-card-metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(68px,1fr)); gap:6px;}
+.home-metric .v{font-size:21px; font-weight:800; letter-spacing:-0.02em; line-height:1.15;}
+.home-metric .l{font-size:11px; color:var(--ink-500); font-weight:600; margin-top:2px;}
+.home-metric.tone-good .v{color:var(--green-600);}
+.home-metric.tone-warn .v{color:var(--amber-600);}
+.home-metric.tone-bad .v{color:var(--red-600);}
+.home-card-alert{font-size:12px; font-weight:600; border-radius:8px; padding:6px 9px; line-height:1.45;}
+.home-card-alert.tone-good{background:var(--green-50); color:var(--green-600);}
+.home-card-alert.tone-warn{background:var(--amber-50); color:var(--amber-600);}
+.home-card-alert.tone-bad{background:var(--red-50); color:var(--red-600);}
+.home-card-alert.tone-muted{background:var(--ink-100); color:var(--ink-500);}
+.home-loading{display:flex; align-items:center; gap:8px; color:var(--ink-500); font-size:12.5px; font-weight:600; padding:14px 0;}
+.home-loading .nav-spinner{width:14px; height:14px; margin:0;}
+
+.home-grid2{display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:16px; align-items:start;}
+.home-section{background:#fff; border:1px solid var(--ink-200); border-radius:14px; padding:14px 18px 16px; margin-bottom:16px;}
+.home-section-title{display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; font-size:14.5px; font-weight:800; margin-bottom:10px;}
+.home-section-note{font-size:11.5px; color:var(--ink-400); font-weight:600;}
+.home-more{font-size:12px; font-weight:700; color:var(--indigo-600); text-decoration:none;}
+.home-empty{font-size:12.5px; color:var(--ink-500); padding:10px 0; line-height:1.6;}
+.home-empty code{background:var(--ink-100); border-radius:5px; padding:1px 5px; font-size:12px;}
+
+/* 오늘·내일 출고 */
+.home-prep-group + .home-prep-group{margin-top:12px;}
+.home-prep-group-label{font-size:12px; font-weight:800; color:var(--ink-500); margin-bottom:6px;}
+.home-prep-group-label span{color:var(--indigo-600); margin-left:4px;}
+.home-prep-row{
+  display:grid; grid-template-columns:52px minmax(0,1fr) auto; gap:10px; align-items:start; padding:9px 10px; border-radius:10px;
+  border:1px solid var(--ink-100); margin-bottom:6px; color:inherit; text-decoration:none; background:#fff;
+}
+.home-prep-row:hover{background:var(--slate-50);}
+.home-prep-row.prep-done{background:#f6fdf9;}
+.home-prep-time{font-size:12.5px; font-weight:800; color:var(--ink-700); padding-top:2px;}
+.home-prep-title{display:flex; align-items:center; gap:6px; font-size:13.5px; min-width:0;}
+.home-prep-title b{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.home-kind{border-radius:5px; padding:1px 6px; font-size:11px; font-weight:800; flex-shrink:0;}
+.home-prep-items{font-size:12px; color:var(--ink-500); margin-top:3px; word-break:keep-all;}
+.home-prep-people{display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; font-size:11.5px; font-weight:700;}
+.home-prep-people .done{color:var(--green-600);}
+.home-prep-people .doing{color:var(--amber-600);}
+.home-prep-state{display:flex; flex-direction:column; align-items:flex-end; gap:4px;}
+
+/* 운영·시스템 */
+.home-status-grid{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;}
+.home-status{border:1px solid var(--ink-100); border-radius:10px; padding:9px 11px; background:var(--slate-50);}
+.home-status-label{display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:var(--ink-500);}
+.home-status-label .dot{width:8px; height:8px; border-radius:50%; background:var(--ink-300); flex-shrink:0;}
+.home-status.tone-good .dot{background:var(--green-600); box-shadow:0 0 0 3px var(--green-100);}
+.home-status.tone-warn .dot{background:var(--amber-600); box-shadow:0 0 0 3px var(--amber-100);}
+.home-status.tone-bad .dot{background:var(--red-600); box-shadow:0 0 0 3px var(--red-100);}
+.home-status-value{font-size:15px; font-weight:800; margin-top:3px;}
+.home-status-detail{font-size:11px; color:var(--ink-400); margin-top:2px; line-height:1.45; word-break:keep-all;}
+
+/* 업데이트 */
+.home-releases{list-style:none; margin:0; padding:0; border-left:2px solid var(--indigo-100); margin-left:6px;}
+.home-release{position:relative; padding:0 0 12px 16px;}
+.home-release::before{
+  content:""; position:absolute; left:-6px; top:5px; width:10px; height:10px; border-radius:50%;
+  background:#fff; border:2px solid var(--indigo-600);
+}
+.home-release-head{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; font-size:13.5px;}
+.home-release-date{font-size:12px; font-weight:800; color:var(--indigo-600);}
+.home-release ul{margin:4px 0 0; padding-left:16px; font-size:12.5px; color:var(--ink-700); line-height:1.65;}
+.home-release-more summary{cursor:pointer; font-size:12.5px; font-weight:700; color:var(--ink-500); margin:2px 0 10px;}
+
+/* 피드백 */
+.home-feedback{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:16px; align-items:start;}
+.home-feedback-form{display:flex; flex-direction:column; gap:8px;}
+.home-feedback-form textarea, .home-feedback-row select, .home-feedback-row input, .home-fb-reply-edit input{
+  border:1px solid var(--ink-200); border-radius:9px; padding:8px 10px; font:inherit; font-size:13px; outline:none; background:#fff; min-width:0;
+}
+.home-feedback-form textarea{resize:vertical; line-height:1.55; width:100%;}
+.home-feedback-form textarea:focus, .home-feedback-row select:focus, .home-feedback-row input:focus{border-color:var(--indigo-600); box-shadow:0 0 0 3px var(--indigo-100);}
+.home-feedback-row{display:flex; gap:8px; align-items:center; justify-content:space-between;}
+.home-feedback-row select, .home-feedback-row input{flex:1;}
+.home-feedback-error{font-size:12.5px; color:var(--red-600); font-weight:600;}
+.home-feedback-list ul{list-style:none; margin:10px 0 0; padding:0; max-height:520px; overflow-y:auto;}
+.home-fb{border:1px solid var(--ink-100); border-radius:10px; padding:10px 12px; margin-bottom:8px;}
+.home-fb.status-완료{background:#f6fdf9;}
+.home-fb.status-보류, .home-fb.status-반려{opacity:.75;}
+.home-fb-head{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.home-fb-kind{font-size:11.5px; font-weight:800; border-radius:6px; padding:2px 7px; background:var(--ink-100); color:var(--ink-700);}
+.home-fb-kind.kind-버그{background:var(--red-50); color:var(--red-600);}
+.home-fb-kind.kind-개선{background:var(--blue-50); color:var(--blue-600);}
+.home-fb-kind.kind-불편{background:var(--amber-50); color:var(--amber-600);}
+.home-fb-meta{font-size:11.5px; color:var(--ink-400); font-weight:600; flex:1; min-width:0;}
+.home-fb-status{border:1px solid var(--ink-200); border-radius:7px; padding:3px 6px; font:inherit; font-size:12px; font-weight:700; background:#fff;}
+.home-fb-status.status-진행{color:var(--blue-600); border-color:var(--blue-100);}
+.home-fb-status.status-완료{color:var(--green-600); border-color:var(--green-100);}
+.home-fb-body{font-size:13px; line-height:1.6; margin-top:6px; white-space:pre-wrap; word-break:break-word;}
+.home-fb-reply{font-size:12.5px; color:var(--indigo-700); background:var(--indigo-50); border-radius:7px; padding:6px 9px; margin-top:6px; white-space:pre-wrap;}
+.home-fb-actions{display:flex; gap:6px; margin-top:8px;}
+.home-fb-actions .chip{padding:4px 9px; font-size:11.5px;}
+.home-fb-reply-edit{display:flex; gap:6px; margin-top:8px;}
+.home-fb-reply-edit input{flex:1;}
+.home-fb-reply-edit .btn{padding:6px 10px; font-size:12px;}
+
+@media (max-width:1100px){
+  .home-cards{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media (max-width:900px){
+  /* minmax(0,…) — 그냥 1fr 이면 입력칸 기본 폭보다 안 줄어 핸드폰에서 옆으로 넘쳤음 */
+  .home-grid2, .home-feedback{grid-template-columns:minmax(0,1fr);}
+}
+@media (max-width:640px){
+  .home{padding:12px 12px 48px;}
+  .home-hero{align-items:flex-start; margin-bottom:10px;}
+  .home-date{font-size:20px;}
+  .home-todo{justify-content:flex-start;}
+  .home-chip{white-space:normal;}
+  .home-cards{grid-template-columns:1fr; gap:8px; margin-bottom:12px;}
+  .home-card{padding:10px 12px; gap:8px; border-radius:12px;}
+  .home-card-metrics{grid-template-columns:repeat(4,minmax(0,1fr));}
+  .home-metric .v{font-size:18px;}
+  .home-section{padding:12px 12px 14px; border-radius:12px; margin-bottom:12px;}
+  .home-prep-row{grid-template-columns:44px minmax(0,1fr);}
+  .home-prep-state{grid-column:2; flex-direction:row; align-items:center; justify-content:flex-start;}
+  .home-feedback-list ul{max-height:none;}
+}
+.home-new{font-size:10px; font-weight:800; color:#fff; background:var(--red-600); border-radius:999px; padding:1px 7px; letter-spacing:.03em;}

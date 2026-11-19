@@ -170,23 +170,24 @@ export default function ConsumablesTable({
 
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
-      <table>
+      {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+      <table className="m-cards">
         <thead>
           <tr>
-            <th style={{ width: '32px' }}>
+            <th style={{ width: '32px' }} data-m="check">
               <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="전체 선택" />
             </th>
             <th>구분</th>
-            <th>사양</th>
+            <th data-m="sub">사양</th>
             <th>품목</th>
-            <th>모델명</th>
+            <th data-m="title">모델명</th>
             <th>제조사</th>
             <th>매입처</th>
             <th>구매단가</th>
             <th>판매단가</th>
             <th>마진</th>
             <th>인터넷가격</th>
-            <th style={{ width: '70px' }} />
+            <th style={{ width: '70px' }} data-m="actions" />
           </tr>
         </thead>
         <tbody>

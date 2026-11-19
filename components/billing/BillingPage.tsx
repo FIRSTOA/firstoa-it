@@ -125,17 +125,18 @@ export default function BillingPage({ initialLines }: Props) {
         </div>
       </div>
 
-      <table>
+      {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+      <table className="m-cards">
         <thead>
           <tr>
             <th>청구일</th>
-            <th>자산번호</th>
-            <th>거래처</th>
+            <th data-m="title">자산번호</th>
+            <th data-m="sub">거래처</th>
             <th>청구번호</th>
             <th>금액</th>
-            <th>상태</th>
+            <th data-m="badge">상태</th>
             <th>배분</th>
-            <th></th>
+            <th data-m="actions"></th>
           </tr>
         </thead>
         <tbody>

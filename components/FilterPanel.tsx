@@ -12,6 +12,7 @@ import {
   type Filters,
 } from '@/lib/filters';
 import { SPECS, STATUSES, type Asset } from '@/lib/types';
+import MobileFilterRows from '@/components/MobileFilterRows';
 
 type ExtraChip = { label: string; active: boolean; onClick: () => void };
 
@@ -123,6 +124,8 @@ export default function FilterPanel({
         />
       </div>
 
+      {/* 핸드폰에선 칩 줄들을 "필터" 버튼 하나로 접음 */}
+      <MobileFilterRows>
       {/* 상태·품목·사양: 다중 선택 (같은 필터 안에서는 OR) */}
       <ChipGroup
         label="상태"
@@ -195,6 +198,7 @@ export default function FilterPanel({
           onClearAll={() => onSetFilter('screenGroup', null)}
         />
       )}
+      </MobileFilterRows>
     </div>
   );
 }

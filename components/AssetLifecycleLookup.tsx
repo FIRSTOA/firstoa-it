@@ -104,13 +104,14 @@ export default function AssetLifecycleLookup({ initialQuery = '', asSheetUrl }: 
           {data.rentals.length === 0 ? (
             <div className="detail-empty">임대리스트(firstoa-works)에 기록이 없어요.</div>
           ) : (
-            <table>
+            // 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고
+            <table className="m-cards">
               <thead>
                 <tr>
-                  <th>거래처</th>
-                  <th>현장</th>
-                  <th>임대 기간</th>
-                  <th>상태</th>
+                  <th data-m="title">거래처</th>
+                  <th data-m="sub">현장</th>
+                  <th data-m="full">임대 기간</th>
+                  <th data-m="badge">상태</th>
                   <th style={{ textAlign: 'right' }}>개월</th>
                   <th style={{ textAlign: 'right' }}>기본금액</th>
                   <th style={{ textAlign: 'right' }}>청구금액</th>
@@ -160,14 +161,14 @@ export default function AssetLifecycleLookup({ initialQuery = '', asSheetUrl }: 
           {data.asRecords.length === 0 ? (
             <div className="detail-empty">AS 접수 기록이 없어요.</div>
           ) : (
-            <table>
+            <table className="m-cards">
               <thead>
                 <tr>
-                  <th>접수일</th>
-                  <th>처리여부</th>
-                  <th>거래처</th>
-                  <th>증상</th>
-                  <th>처리내용</th>
+                  <th data-m="sub">접수일</th>
+                  <th data-m="badge">처리여부</th>
+                  <th data-m="title">거래처</th>
+                  <th data-m="full">증상</th>
+                  <th data-m="full">처리내용</th>
                   <th>처리자</th>
                 </tr>
               </thead>

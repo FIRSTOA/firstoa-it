@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import InstallAppButton from '@/components/InstallAppButton';
+import MobileTableCards from '@/components/MobileTableCards';
 
 const SIDEBAR_SECTIONS = [
   {
@@ -32,13 +34,14 @@ const SIDEBAR_SECTIONS = [
 type SidebarItem = (typeof SIDEBAR_SECTIONS)[number]['items'][number];
 
 const TOP_TABS = [
+  { label: '홈', href: '/home' },
   { label: '통합 캘린더', href: '/calendar' },
   { label: '재고관리', href: '/' },
 ] as const;
 
 type Props = {
   children: ReactNode;
-  activeMenu: SidebarItem['label'] | '통합 캘린더';
+  activeMenu: SidebarItem['label'] | '통합 캘린더' | '홈';
   title: string;
   note?: string;
 };
@@ -46,7 +49,7 @@ type Props = {
 /** ERP 공통 껍데기 — 왼쪽 사이드바 + 상단 네비 + 브레드크럼. 여러 페이지가 공유합니다. */
 export default function Shell({ children, activeMenu, title, note }: Props) {
   const pathname = usePathname();
-  const activeTab = pathname?.startsWith('/calendar') ? '통합 캘린더' : '재고관리';
+  const activeTab = pathname?.startsWith('/home') ? '홈' : pathname?.startsWith('/calendar') ? '통합 캘린더' : '재고관리';
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // 메뉴를 누른 뒤 다음 화면이 뜰 때까지(서버에서 화면을 만드느라 몇 초 걸림) 진행 막대 + 누른 메뉴 빙글 표시.
   const [pendingHref, setPendingHref] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
 
   return (
     <div className={`shell${pendingHref ? ' navigating' : ''}`}>
+      <MobileTableCards />
       {pendingHref && <div className="nav-progress" aria-hidden />}
       {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
       <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
@@ -105,6 +109,7 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
             </ul>
           </div>
         ))}
+        <InstallAppButton />
       </aside>
 
       <div className="shell-main">

@@ -199,15 +199,16 @@ export default function StocktakeListPage({
       )}
 
       <div className="panel" style={{ paddingTop: '6px' }}>
-        <table>
+        {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+        <table className="m-cards">
           <thead>
             <tr>
-              <th className="hide-mobile">순번</th>
-              <th>위치</th>
-              <th>상태</th>
-              <th>담당자·시작일시</th>
-              <th>확인 현황</th>
-              <th />
+              <th className="hide-mobile" data-m="hide">순번</th>
+              <th data-m="title">위치</th>
+              <th data-m="badge">상태</th>
+              <th data-m="full">담당자·시작일시</th>
+              <th data-m="full">확인 현황</th>
+              <th data-m="actions" />
             </tr>
           </thead>
           <tbody>

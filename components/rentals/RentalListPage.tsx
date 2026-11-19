@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getRentalFilterOptions, searchRentals, type RentalRow } from '@/app/rentals/actions';
+import MobileFilterRows from '@/components/MobileFilterRows';
 import RentalSyncModal from './RentalSyncModal';
 
 const PAGE_SIZE = 50;
@@ -140,6 +141,7 @@ export default function RentalListPage({ sheetUrl }: { sheetUrl: string | null }
             placeholder="거래처명 · 담당자 · 순번 · 모델명 · S/N 검색"
           />
         </div>
+        <MobileFilterRows>
         {(Object.keys(FILTER_LABELS) as FilterKey[]).map((key) => (
           <div className="filter-row" key={key}>
             <div className="filter-label">{FILTER_LABELS[key]}</div>
@@ -164,16 +166,18 @@ export default function RentalListPage({ sheetUrl }: { sheetUrl: string | null }
             </div>
           </div>
         ))}
+        </MobileFilterRows>
       </div>
 
       <div className="panel" style={{ paddingTop: '6px', marginTop: '12px', overflowX: 'auto' }}>
         {error && <div className="setup-alert">{error}</div>}
-        <table>
+        {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+        <table className="m-cards">
           <thead>
             <tr>
-              <th style={{ width: '50px' }}>순번</th>
-              <th>거래처명</th>
-              <th>현장/지점명</th>
+              <th style={{ width: '50px' }} data-m="hide">순번</th>
+              <th data-m="title">거래처명</th>
+              <th data-m="sub">현장/지점명</th>
               <th>담당자</th>
               <th>연락처</th>
               <th>자산코드</th>
@@ -181,7 +185,7 @@ export default function RentalListPage({ sheetUrl }: { sheetUrl: string | null }
               <th>기기 S/N</th>
               <th>계약일</th>
               <th>종료일</th>
-              <th>상태</th>
+              <th data-m="badge">상태</th>
               <th>품목</th>
               <th>제조사</th>
               <th>옵션1</th>

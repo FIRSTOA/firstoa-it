@@ -205,7 +205,7 @@ export default function ShipmentPrepPage() {
   };
 
   return (
-    <div>
+    <div className="prep-page">
       {banner && (
         <div
           style={{

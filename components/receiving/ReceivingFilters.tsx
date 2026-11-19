@@ -1,5 +1,6 @@
 'use client';
 
+import MobileFilterRows from '@/components/MobileFilterRows';
 import { RECEIVING_KINDS, type ReceivingFilters as Filters } from '@/lib/receiving';
 import { CATEGORIES } from '@/lib/types';
 
@@ -30,6 +31,7 @@ export default function ReceivingFilters({
           placeholder="자산번호 / 모델명 / 브랜드 / 발주처 검색"
         />
       </div>
+      <MobileFilterRows>
       <div className="filter-row" style={{ borderTop: 'none' }}>
         <div className="filter-label">유형</div>
         <div className="chip-group">
@@ -82,6 +84,7 @@ export default function ReceivingFilters({
           ))}
         </div>
       </div>
+      </MobileFilterRows>
     </div>
   );
 }

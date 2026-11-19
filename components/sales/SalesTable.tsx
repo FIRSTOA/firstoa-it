@@ -16,15 +16,16 @@ export default function SalesTable({ entries, disabled, selectedIds, onToggleSel
   const allSelected = entries.length > 0 && entries.every((e) => selectedIds.has(e.id));
   return (
     <div className="panel" style={{ paddingTop: '6px' }}>
-      <table>
+      {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+      <table className="m-cards">
         <thead>
           <tr>
-            <th style={{ width: '32px' }}>
+            <th style={{ width: '32px' }} data-m="check">
               <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="전체 선택" />
             </th>
-            <th style={{ width: '50px' }}>순번</th>
-            <th>모델명</th>
-            <th>스펙</th>
+            <th style={{ width: '50px' }} data-m="hide">순번</th>
+            <th data-m="title">모델명</th>
+            <th data-m="sub">스펙</th>
             <th>자산번호</th>
             <th>시리얼번호</th>
             <th>구매처</th>
@@ -32,7 +33,7 @@ export default function SalesTable({ entries, disabled, selectedIds, onToggleSel
             <th>판매금액</th>
             <th>위치(판매한 곳)</th>
             <th>판매일</th>
-            <th style={{ width: '90px' }} />
+            <th style={{ width: '90px' }} data-m="actions" />
           </tr>
         </thead>
         <tbody>

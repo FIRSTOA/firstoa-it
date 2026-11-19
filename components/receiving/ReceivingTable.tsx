@@ -312,29 +312,30 @@ export default function ReceivingTable({
   const allSelected = entries.length > 0 && entries.every((e) => selectedIds.has(e.id));
   return (
     <div className="panel" style={{ paddingTop: '6px', overflowX: 'auto' }}>
-      <table className="receiving-table">
+      {/* 핸드폰에선 카드(m-cards) — 자주 보는 칸만 남기고 나머지(발주처·매입가·담당자·비고 등)는 ✎ 수정 창에서 */}
+      <table className="receiving-table m-cards">
         <thead>
           <tr>
-            <th style={{ width: '32px' }}>
+            <th style={{ width: '32px' }} data-m="check">
               <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="전체 선택" />
             </th>
-            <th style={{ width: '50px' }}>순번</th>
-            <th style={{ width: '85px' }}>등록일</th>
+            <th style={{ width: '50px' }} data-m="hide">순번</th>
+            <th style={{ width: '85px' }} data-m="hide">등록일</th>
             <th style={{ width: '150px' }}>유형</th>
-            <th style={{ width: '86px' }}>상태</th>
+            <th style={{ width: '86px' }} data-m="badge">상태</th>
             <th style={{ width: '145px' }}>품목</th>
             <th style={{ width: '110px' }}>브랜드</th>
-            <th style={{ width: '160px' }}>모델명</th>
+            <th style={{ width: '160px' }} data-m="title">모델명</th>
             <th style={{ width: '100px' }}>자산번호</th>
             <th style={{ width: '160px' }}>시리얼번호</th>
-            <th style={{ width: '140px' }}>발주처</th>
-            <th style={{ width: '180px' }}>매입가</th>
-            <th style={{ width: '36px' }}>🔗</th>
-            <th style={{ width: '70px' }}>수량</th>
-            <th style={{ width: '145px' }}>예상입고일</th>
-            <th style={{ width: '95px' }}>담당자</th>
-            <th style={{ width: '220px' }}>비고</th>
-            <th style={{ width: '150px' }} />
+            <th style={{ width: '140px' }} data-m="hide">발주처</th>
+            <th style={{ width: '180px' }} data-m="hide">매입가</th>
+            <th style={{ width: '36px' }} data-m="hide">🔗</th>
+            <th style={{ width: '70px' }} data-m="hide">수량</th>
+            <th style={{ width: '145px' }} data-m="full">예상입고일</th>
+            <th style={{ width: '95px' }} data-m="hide">담당자</th>
+            <th style={{ width: '220px' }} data-m="hide">비고</th>
+            <th style={{ width: '150px' }} data-m="actions" />
           </tr>
         </thead>
         <tbody>

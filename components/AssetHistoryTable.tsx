@@ -43,16 +43,17 @@ export default function AssetHistoryTable({ movements }: Props) {
       </div>
 
       <div className="panel" style={{ paddingTop: '6px' }}>
-        <table>
+        {/* 핸드폰에선 카드(m-cards) — data-m 은 components/MobileTableCards.tsx 참고 */}
+        <table className="m-cards">
           <thead>
             <tr>
-              <th>품목</th>
-              <th>자산번호</th>
-              <th>이동일시</th>
-              <th>위치 변경</th>
-              <th>상태 변화</th>
+              <th data-m="badge">품목</th>
+              <th data-m="title">자산번호</th>
+              <th data-m="sub">이동일시</th>
+              <th data-m="full">위치 변경</th>
+              <th data-m="full">상태 변화</th>
               <th>담당자</th>
-              <th>메모</th>
+              <th data-m="full">메모</th>
             </tr>
           </thead>
           <tbody>
