@@ -66,6 +66,9 @@
   미리보기 → 묶음별 거래처 고르기(건너뛰기 없음, 못 정하면 "미분류") → 반영(시트 다시 읽어 지문 같을 때만) → 저장값을 다시 읽어 시트 값과 대조 → 결과 표 "빠진 것 0".
   `source_key` 로 여러 번 눌러도 중복 없음. 실측(2026-11-20): 갱신형 32줄·비갱신형 229줄, 비밀 칸 456(+카드 40).
   시트 조사 때 비밀 칸(비갱신형 9·10·14, 갱신형 6·7) 값은 출력하지 말 것.
+  미리보기에서 묶음째 '옮기지 않기'(target 'skip')·줄 ☑ 해제(excludeRows)·줄 [수정](rowEdits — 일반 칸만, contractSig 계산 전에 적용, source_raw 는 원문 유지).
+  뺀 줄은 결과의 skippedRows/skippedGroups 로만 셈("빠진 것"과 별개). 이미 옮긴 줄은 미리보기에서 못 고침(서버가 건너뜀) — 화면에서 고침.
+- **옮긴 뒤 지우기**: 좌석 여러 개 `deleteSwSeats`(열람 중, 최대 500, 200개씩, 비밀 칸 cascade), "이 상품 지우기" = deleteSwSeats(전부) → deleteSwContract.
 - 표 SQL `supabase/contracts_schema.sql`(6개 표, RLS·revoke — 예전 판(sealed 암호문)을 실행한 DB 는 다시 실행하면 value_text 로 바뀜). 화면 `components/contracts/*`, 액션 `app/contracts/{actions,secretActions,importActions}.ts`.
 
 ## 청구 배분 — 임대 건 단위 자산번호 지정 (/billing?view=review) — 2026-11-20

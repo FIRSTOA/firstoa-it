@@ -3,6 +3,16 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "959b694893",
+    "date": "2026-11-20",
+    "time": "17:34",
+    "subject": "계약 관리 · 비밀번호 칸에 👁 보기 버튼 — 누르면 적은 글자가 보이고 다시 누르면 가림(열기·처음 정하기·비밀번호 바꾸기 칸마다 따로), 글자가 보일 때 핸드폰 자동 대문자·맞춤법 고침 끔",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "c0e02386f8",
     "date": "2026-11-20",
     "time": "17:28",

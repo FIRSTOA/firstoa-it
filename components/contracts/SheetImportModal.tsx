@@ -11,6 +11,8 @@ import {
   type ImportGroup,
   type ImportPlan,
   type ImportPreview,
+  type ImportRowDetail,
+  type ImportRowEdit,
   type ImportResult,
   type ImportTabResult,
   type SecretField,
@@ -18,7 +20,57 @@ import {
 import { useContractsCtx } from './UnlockDialog';
 
 type Phase = 'loading' | 'error' | 'groups' | 'names' | 'confirm' | 'applying' | 'result';
-type Mode = '' | 'client' | 'new' | 'unsorted';
+type Mode = '' | 'client' | 'new' | 'unsorted' | 'skip';
+
+const rowKey = (tab: 'renew' | 'perm', row: number) => `${tab}:${row}`;
+
+/** 줄 수정 폼에서 다루는 글자 칸(날짜는 'YYYY-MM-DD' 또는 빈 값) */
+type RowForm = {
+  product: string;
+  supplier: string;
+  userName: string;
+  dept: string;
+  pcAssetCode: string;
+  mfaNote: string;
+  purchasedOn: string;
+  renewsOn: string;
+  endsOn: string;
+};
+
+function rowFormOf(d: ImportRowDetail, e: ImportRowEdit | undefined): RowForm {
+  const pick = <K extends 'product' | 'supplier' | 'userName' | 'dept' | 'pcAssetCode' | 'mfaNote'>(k: K): string => (e?.[k] !== undefined ? (e[k] as string) : d[k]);
+  const date = (k: 'purchasedOn' | 'renewsOn' | 'endsOn'): string => (e?.[k] !== undefined ? (e[k] ?? '') : (d[k] ?? ''));
+  return {
+    product: pick('product'),
+    supplier: pick('supplier'),
+    userName: pick('userName'),
+    dept: pick('dept'),
+    pcAssetCode: pick('pcAssetCode'),
+    mfaNote: pick('mfaNote'),
+    purchasedOn: date('purchasedOn'),
+    renewsOn: date('renewsOn'),
+    endsOn: date('endsOn'),
+  };
+}
+
+/** 시트 값과 다른 칸만 골라 rowEdits 한 줄로. 하나도 안 다르면 null */
+function diffEdit(tab: 'renew' | 'perm', d: ImportRowDetail, f: RowForm): ImportRowEdit | null {
+  const out: ImportRowEdit = { tab, row: d.row };
+  let n = 0;
+  for (const k of ['product', 'supplier', 'userName', 'dept', 'pcAssetCode', 'mfaNote'] as const) {
+    if (f[k] !== d[k]) {
+      out[k] = f[k];
+      n += 1;
+    }
+  }
+  for (const k of ['purchasedOn', 'renewsOn', 'endsOn'] as const) {
+    if (f[k] !== (d[k] ?? '')) {
+      out[k] = f[k] ? f[k] : null;
+      n += 1;
+    }
+  }
+  return n > 0 ? out : null;
+}
 type Pick = { mode: Mode; clientKey: string; newName: string };
 
 const TAB_LABEL = { renew: '갱신형', perm: '비갱신형' } as const;
@@ -43,7 +95,7 @@ function defaultPick(g: ImportGroup): Pick {
   return { mode: '', clientKey: '', newName: g.sheetName }; // 확인 필요 — 사람이 고를 때까지 비워 둠
 }
 
-const pickValue = (p: Pick): string => (p.mode === 'client' ? `c:${p.clientKey}` : p.mode === 'new' ? 'n' : p.mode === 'unsorted' ? 'u' : '');
+const pickValue = (p: Pick): string => (p.mode === 'client' ? `c:${p.clientKey}` : p.mode === 'new' ? 'n' : p.mode === 'unsorted' ? 'u' : p.mode === 'skip' ? 's' : '');
 
 type Props = {
   open: boolean;
@@ -65,6 +117,12 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
   const [supRen, setSupRen] = useState<Record<string, string>>({});
   const [result, setResult] = useState<ImportResult | null>(null);
   const [applyError, setApplyError] = useState('');
+  // 줄 하나씩 빼기·고치기 — 키는 "탭:시트 행 번호"
+  const [excluded, setExcluded] = useState<Record<string, true>>({});
+  const [edits, setEdits] = useState<Record<string, ImportRowEdit>>({});
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [rowForm, setRowForm] = useState<RowForm | null>(null);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 640px)');
@@ -92,6 +150,11 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
       const next: Record<string, Pick> = {};
       for (const g of p.groups) next[g.groupKey] = defaultPick(g);
       setPicks(next);
+      setExcluded({});
+      setEdits({});
+      setOpenGroups({});
+      setEditKey(null);
+      setRowForm(null);
       const pr: Record<string, string> = {};
       for (const n of p.productNames) pr[n.name] = n.name;
       setProdRen(pr);
@@ -127,7 +190,14 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
       const p = picks[g.groupKey] ?? { mode: '', clientKey: '', newName: '' };
       return {
         groupKey: g.groupKey,
-        target: p.mode === 'client' ? { clientKey: p.clientKey } : p.mode === 'new' ? { newName: p.newName.trim() } : 'unsorted',
+        target:
+          p.mode === 'client'
+            ? { clientKey: p.clientKey }
+            : p.mode === 'new'
+              ? { newName: p.newName.trim() }
+              : p.mode === 'skip'
+                ? 'skip'
+                : 'unsorted',
       };
     });
     const diff = (m: Record<string, string>) => {
@@ -135,11 +205,43 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
       for (const [k, v] of Object.entries(m)) if (v.trim() && v.trim() !== k) out[k] = v.trim();
       return out;
     };
-    return { fingerprint: preview.fingerprint, choices, productRenames: diff(prodRen), supplierRenames: diff(supRen) };
-  }, [preview, picks, prodRen, supRen]);
+    // 옮기지 않는 묶음의 줄은 따로 뺄 필요 없음 — 줄 하나씩 뺀 것과 고친 것만 보냄
+    const skipGroups = new Set(preview.groups.filter((g) => picks[g.groupKey]?.mode === 'skip').map((g) => g.groupKey));
+    const excludeRows: ImportPlan['excludeRows'] = [];
+    const rowEdits: ImportRowEdit[] = [];
+    for (const g of preview.groups) {
+      if (skipGroups.has(g.groupKey)) continue;
+      for (const d of g.rowsDetail) {
+        const k = rowKey(g.tab, d.row);
+        if (excluded[k]) excludeRows.push({ tab: g.tab, row: d.row });
+        else if (edits[k]) rowEdits.push(edits[k]);
+      }
+    }
+    return { fingerprint: preview.fingerprint, choices, productRenames: diff(prodRen), supplierRenames: diff(supRen), excludeRows, rowEdits };
+  }, [preview, picks, prodRen, supRen, excluded, edits]);
 
   const totalSeats = preview ? preview.counts.renew.seats + preview.counts.perm.seats : 0;
   const totalSecrets = preview ? sumValues(preview.counts.renew.secrets) + sumValues(preview.counts.perm.secrets) : 0;
+
+  // 뺀 것 세기(확인 단계 문구용): 옮기지 않는 묶음의 줄 + 줄 하나씩 뺀 줄
+  const skipStats = useMemo(() => {
+    let skippedGroups = 0;
+    let skippedRows = 0;
+    let skippedSecrets = 0;
+    let edited = 0;
+    for (const g of preview?.groups ?? []) {
+      const skipAll = picks[g.groupKey]?.mode === 'skip';
+      if (skipAll) skippedGroups += 1;
+      for (const d of g.rowsDetail) {
+        const k = rowKey(g.tab, d.row);
+        if (skipAll || excluded[k]) {
+          skippedRows += 1;
+          skippedSecrets += d.secretFields.length;
+        } else if (edits[k]) edited += 1;
+      }
+    }
+    return { skippedGroups, skippedRows, skippedSecrets, edited };
+  }, [preview, picks, excluded, edits]);
 
   async function apply() {
     if (!plan || phase === 'applying') return;
@@ -170,10 +272,197 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
     if (value.startsWith('c:')) setPick(g.groupKey, { mode: 'client', clientKey: value.slice(2) });
     else if (value === 'n') setPick(g.groupKey, { mode: 'new', clientKey: '', newName: picks[g.groupKey]?.newName || g.sheetName });
     else if (value === 'u') setPick(g.groupKey, { mode: 'unsorted', clientKey: '' });
+    else if (value === 's') setPick(g.groupKey, { mode: 'skip', clientKey: '' });
     else setPick(g.groupKey, { mode: '', clientKey: '' });
   }
 
   const busy = phase === 'applying';
+
+  function setRowForm1<K extends keyof RowForm>(k: K, v: string) {
+    setRowForm((f) => (f ? { ...f, [k]: v } : f));
+  }
+
+  /** 묶음 안 줄 목록 — ☑ 풀면 그 줄은 안 옮김, [수정]은 이 줄만 고쳐서 옮김(시트는 안 바뀜) */
+  function renderRows(g: ImportGroup, groupSkipped: boolean) {
+    const editing = g.rowsDetail.find((d) => rowKey(g.tab, d.row) === editKey) ?? null;
+    return (
+      <div className="ct-rows">
+        <table className="m-cards ct-rows-table">
+          <thead>
+            <tr>
+              <th data-m="check" data-label="옮김">옮김</th>
+              <th data-m="title" data-label="행">행</th>
+              <th data-m="badge" data-label="표시">표시</th>
+              <th data-m="inline" data-label="상품">상품</th>
+              <th data-m="inline" data-label="사용자">사용자 · 부서</th>
+              <th data-m="inline" data-label="PC">설치 PC</th>
+              <th data-m="sub" data-label="날짜">날짜</th>
+              <th data-m="full" data-label="비밀 칸">비밀 칸</th>
+              <th data-m="actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {g.rowsDetail.map((d) => {
+              const k = rowKey(g.tab, d.row);
+              const off = groupSkipped || !!excluded[k];
+              const ed = edits[k];
+              return (
+                <tr key={k} className={off ? 'ct-row-off' : undefined}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={!off}
+                      disabled={groupSkipped || busy}
+                      aria-label={`${d.row}행 옮기기`}
+                      onChange={(e) =>
+                        setExcluded((m) => {
+                          const next = { ...m };
+                          if (e.target.checked) delete next[k];
+                          else next[k] = true;
+                          return next;
+                        })
+                      }
+                    />
+                  </td>
+                  <td>{d.row}행</td>
+                  <td>
+                    {off ? <span className="badge badge-미정">안 옮겨요</span> : null}
+                    {!off && d.alreadyImported ? <span className="badge badge-임대중">이미 옮김</span> : null}
+                    {ed && !off ? <span className="badge badge-판매">수정됨</span> : null}
+                  </td>
+                  <td>{(ed?.product ?? d.product) || '-'}</td>
+                  <td>{[ed?.userName ?? d.userName, ed?.dept ?? d.dept].filter(Boolean).join(' · ') || '-'}</td>
+                  <td>{(ed?.pcAssetCode ?? d.pcAssetCode) || '-'}</td>
+                  <td>{d.dateRaw || '-'}</td>
+                  <td>
+                    {d.secretFields.length > 0 ? (
+                      <span className="ct-secret-tags">
+                        {d.secretFields.map((f) => (
+                          <span key={f} className="badge badge-기타">
+                            🔒 {SECRET_FIELD_LABEL[f]}
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
+                  <td>
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost ct-small"
+                        disabled={off || busy || d.alreadyImported}
+                        title={d.alreadyImported ? '이미 옮긴 줄은 옮긴 뒤 화면(거래처 창)에서 고쳐요' : undefined}
+                        onClick={() => {
+                          setEditKey(k);
+                          setRowForm(rowFormOf(d, ed));
+                        }}
+                      >
+                        {d.alreadyImported ? '화면에서 수정' : '수정'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {editing && rowForm && (
+          <div className="ct-card ct-card-edit">
+            <div className="ct-card-title">{editing.row}행 고쳐서 옮기기</div>
+            <div className="ct-muted">여기서 고친 값만 앱에 들어가요. 시트는 그대로예요. 비밀 칸은 옮긴 뒤 화면에서 고쳐요.</div>
+            <div className="form-grid">
+              <div className="form-field">
+                <label>상품명</label>
+                <input value={rowForm.product} onChange={(e) => setRowForm1('product', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>매입처</label>
+                <input value={rowForm.supplier} onChange={(e) => setRowForm1('supplier', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>사용자</label>
+                <input value={rowForm.userName} onChange={(e) => setRowForm1('userName', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>부서</label>
+                <input value={rowForm.dept} onChange={(e) => setRowForm1('dept', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>설치 PC 자산번호</label>
+                <input value={rowForm.pcAssetCode} onChange={(e) => setRowForm1('pcAssetCode', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>2차인증 메모</label>
+                <input value={rowForm.mfaNote} onChange={(e) => setRowForm1('mfaNote', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>구매일</label>
+                <input type="date" value={rowForm.purchasedOn} onChange={(e) => setRowForm1('purchasedOn', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>다음 갱신일</label>
+                <input type="date" value={rowForm.renewsOn} onChange={(e) => setRowForm1('renewsOn', e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>종료일</label>
+                <input type="date" value={rowForm.endsOn} onChange={(e) => setRowForm1('endsOn', e.target.value)} />
+              </div>
+            </div>
+            <div className="ct-btnrow">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const k = rowKey(g.tab, editing.row);
+                  const e = diffEdit(g.tab, editing, rowForm);
+                  setEdits((m) => {
+                    const next = { ...m };
+                    if (e) next[k] = e;
+                    else delete next[k];
+                    return next;
+                  });
+                  setEditKey(null);
+                  setRowForm(null);
+                }}
+              >
+                저장
+              </button>
+              {edits[rowKey(g.tab, editing.row)] && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    const k = rowKey(g.tab, editing.row);
+                    setEdits((m) => {
+                      const next = { ...m };
+                      delete next[k];
+                      return next;
+                    });
+                    setEditKey(null);
+                    setRowForm(null);
+                  }}
+                >
+                  시트 값으로 되돌리기
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setEditKey(null);
+                  setRowForm(null);
+                }}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   function countsTable(c: { renew: ImportCounts; perm: ImportCounts }) {
     const fields = fieldsIn(c.renew.secrets, c.perm.secrets);
@@ -277,6 +566,20 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
               <b>{r.perm.missing.length}</b>
             </td>
           </tr>
+          <tr className="ct-skip-row">
+            <td>
+              <b>뺀 줄</b>
+              <div className="ct-muted">내가 뺀 것 — 시트에는 그대로 있어요</div>
+            </td>
+            <td>{r.renew.skippedRows}</td>
+            <td>{r.perm.skippedRows}</td>
+          </tr>
+          <tr className="ct-skip-row">
+            <td>
+              <b>뺀 묶음</b>
+            </td>
+            <td colSpan={2}>{r.skippedGroups}개 묶음은 옮기지 않았어요</td>
+          </tr>
         </tbody>
       </table>
     );
@@ -341,7 +644,7 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
             {preview && phase === 'groups' && (
               <>
                 <div className="ct-note">
-                  시트를 읽었을 뿐 아직 아무것도 옮기지 않았어요. 아래 숫자가 시트와 맞는지 확인하고, 시트 업체마다 어느 거래처로 옮길지 골라 주세요. 건너뛰는 선택은 없어요. 모르면 [미분류로]를 고르면 나중에 옮길 수 있어요.
+                  시트를 읽었을 뿐 아직 아무것도 옮기지 않았어요. 아래 숫자가 시트와 맞는지 확인하고, 시트 업체마다 어느 거래처로 옮길지 골라 주세요. 옮기고 싶지 않은 업체는 [옮기지 않기](시트에만 남아요), 일부 줄만 빼거나 고치려면 [줄 n개 보기]를 눌러 주세요. 모르면 [미분류로]를 고르면 나중에 옮길 수 있어요.
                 </div>
                 {countsTable(preview.counts)}
                 {preview.warnings.length > 0 && (
@@ -369,7 +672,7 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
                     .map((f) => `${SECRET_FIELD_LABEL[f]} ${g.secretCounts[f]}`)
                     .join(' · ');
                   return (
-                    <div key={g.groupKey} className={`ct-group${p.mode === '' ? ' ct-group-todo' : ''}`}>
+                    <div key={g.groupKey} className={`ct-group${p.mode === '' ? ' ct-group-todo' : ''}${p.mode === 'skip' ? ' ct-group-skip' : ''}`}>
                       <div className="ct-group-head">
                         <b>{g.sheetName || '(업체 이름 없음)'}</b>
                         <span className="badge badge-기타">{TAB_LABEL[g.tab]}</span>
@@ -409,6 +712,9 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
                           </optgroup>
                           <option value="n">＋ 새 거래처로 (works에 없음)</option>
                           <option value="u">미분류로 (나중에 옮기기)</option>
+                          <option value="s" style={{ color: 'var(--red-600)' }}>
+                            옮기지 않기 (시트에만 둠)
+                          </option>
                         </select>
                         {p.mode === 'new' && (
                           <input
@@ -419,6 +725,23 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
                           />
                         )}
                       </div>
+                      {p.mode === 'skip' && <div className="ct-warn">이 묶음은 옮기지 않아요. 시트에는 그대로 있어요.</div>}
+                      {g.rowsDetail.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            className="ct-rows-toggle"
+                            aria-expanded={!!openGroups[g.groupKey]}
+                            onClick={() => setOpenGroups((o) => ({ ...o, [g.groupKey]: !o[g.groupKey] }))}
+                          >
+                            {openGroups[g.groupKey] ? '▾' : '▸'} 줄 {g.rowsDetail.length}개 보기
+                            {g.rowsDetail.some((d) => excluded[rowKey(g.tab, d.row)]) || g.rowsDetail.some((d) => edits[rowKey(g.tab, d.row)])
+                              ? ` (뺀 줄 ${g.rowsDetail.filter((d) => excluded[rowKey(g.tab, d.row)]).length} · 고친 줄 ${g.rowsDetail.filter((d) => edits[rowKey(g.tab, d.row)]).length})`
+                              : ''}
+                          </button>
+                          {openGroups[g.groupKey] && renderRows(g, p.mode === 'skip')}
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -505,13 +828,16 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
             {preview && (phase === 'confirm' || phase === 'applying') && plan && (
               <>
                 <div className="ct-confirm">
-                  좌석 {totalSeats}개 · 비밀 칸 {totalSecrets}개를 옮길까요?
+                  좌석 {Math.max(0, totalSeats - skipStats.skippedRows)}개 · 비밀 칸 {Math.max(0, totalSecrets - skipStats.skippedSecrets)}개를 옮길까요?
+                  <div className="ct-muted" style={{ fontSize: '12.5px', marginTop: '4px' }}>
+                    (뺀 줄 {skipStats.skippedRows}개 · 묶음 {skipStats.skippedGroups}개는 안 옮겨요 · 고친 줄 {skipStats.edited}개)
+                  </div>
                 </div>
                 <ul className="ct-confirm-list">
                   <li>
                     기존 거래처로 {plan.choices.filter((c) => typeof c.target === 'object' && 'clientKey' in c.target).length}묶음 · 새 거래처로{' '}
                     {plan.choices.filter((c) => typeof c.target === 'object' && 'newName' in c.target).length}묶음 · 미분류로{' '}
-                    {plan.choices.filter((c) => c.target === 'unsorted').length}묶음
+                    {plan.choices.filter((c) => c.target === 'unsorted').length}묶음 · 옮기지 않기 {skipStats.skippedGroups}묶음
                   </li>
                   <li>
                     이름 합치기: 상품 {Object.keys(plan.productRenames).length}개 · 매입처 {Object.keys(plan.supplierRenames).length}개

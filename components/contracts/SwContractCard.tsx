@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { moveSwContract, renewSwContract, addSwSeats, deleteSwContract, saveSwContract, saveSwSeat } from '@/app/contracts/actions';
-import { deleteSwSeat } from '@/app/contracts/secretActions';
+import { deleteSwSeat, deleteSwSeats } from '@/app/contracts/secretActions';
 import {
   SW_CONTRACT_STATUSES,
   SW_SEAT_STATUSES,
@@ -124,6 +124,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
   const [seatEditId, setSeatEditId] = useState<string | null>(null);
   const [seatForm, setSeatForm] = useState<SeatForm | null>(null);
   const [addCount, setAddCount] = useState('1');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState(false);
   const [moveTo, setMoveTo] = useState('');
 
@@ -226,16 +227,48 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
 
   async function removeContract() {
     if (!contract) return;
-    if (!window.confirm(`"${contract.product}" 계약 상품을 지울까요? 되돌릴 수 없어요.`)) return;
+    const n = contract.seats.length;
+    const msg =
+      n > 0
+        ? `"${contract.product}" 상품과 좌석 ${n}개·비밀 칸까지 모두 지워요. 되돌릴 수 없어요.`
+        : `"${contract.product}" 계약 상품을 지울까요? 되돌릴 수 없어요.`;
+    if (!window.confirm(msg)) return;
     await run(async () => {
+      if (n > 0) {
+        const d = await deleteSwSeats(contract.seats.map((s) => s.id));
+        if (!d.ok) {
+          fail(d);
+          onChanged(); // 중간에 멈췄으면 일부 좌석은 지워졌을 수 있어 다시 읽음
+          return;
+        }
+      }
       const r = await deleteSwContract(contract.id);
       if (!r.ok) {
         fail(r);
+        onChanged(); // 좌석은 이미 지워졌을 수 있어 다시 읽음
         return;
       }
       toast('지웠어요.');
       onChanged();
     }, '지우지 못했어요. 잠시 뒤 다시 해 주세요.');
+  }
+
+  async function removeSelectedSeats() {
+    const ids = Array.from(picked).filter((id) => seats.some((s) => s.id === id));
+    if (ids.length === 0) return;
+    if (!window.confirm(`좌석 ${ids.length}개와 그 비밀 칸을 지워요. 되돌릴 수 없어요.`)) return;
+    await run(async () => {
+      const r = await deleteSwSeats(ids);
+      if (!r.ok) {
+        fail(r);
+        setPicked(new Set());
+        onChanged(); // 중간에 멈췄으면 일부 좌석은 지워졌을 수 있어 다시 읽음
+        return;
+      }
+      toast(`좌석 ${r.deleted}개를 지웠어요.`);
+      setPicked(new Set());
+      onChanged();
+    }, '좌석을 지우지 못했어요. 잠시 뒤 다시 해 주세요.');
   }
 
   async function addSeats() {
@@ -470,11 +503,9 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
             <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setMoving((m) => !m)}>
               다른 거래처로 옮기기
             </button>
-            {seats.length === 0 && (
-              <button type="button" className="btn btn-ghost ct-danger" disabled={busy} onClick={() => void removeContract()}>
-                상품 지우기
-              </button>
-            )}
+            <button type="button" className="btn btn-ghost ct-danger" disabled={busy} onClick={() => void removeContract()}>
+              이 상품 지우기
+            </button>
           </div>
           {moving && (
             <div className="ct-inline-form">
@@ -502,10 +533,33 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
 
       <div className="ct-section-title">
         <span>사용자(좌석) {seats.length}개</span>
+        {seats.length > 1 && (
+          <button
+            type="button"
+            className="btn btn-ghost ct-small"
+            onClick={() => setPicked(seats.every((s) => picked.has(s.id)) ? new Set() : new Set(seats.map((s) => s.id)))}
+          >
+            {seats.every((s) => picked.has(s.id)) ? '선택 풀기' : '전체 선택'}
+          </button>
+        )}
+        {picked.size > 0 && (
+          <button type="button" className="btn btn-ghost ct-danger" disabled={busy} onClick={() => void removeSelectedSeats()}>
+            선택한 좌석 {picked.size}개 지우기
+          </button>
+        )}
       </div>
       <table className="m-cards ct-seat-table">
         <thead>
           <tr>
+            <th data-m="check" data-label="선택">
+              <input
+                type="checkbox"
+                aria-label="좌석 전체 선택"
+                checked={seats.length > 0 && seats.every((s) => picked.has(s.id))}
+                disabled={seats.length === 0}
+                onChange={(e) => setPicked(e.target.checked ? new Set(seats.map((s) => s.id)) : new Set())}
+              />
+            </th>
             <th data-m="title" data-label="사용자">사용자</th>
             <th data-m="badge" data-label="상태">상태</th>
             <th data-m="inline" data-label="PC">PC 자산번호</th>
@@ -519,6 +573,21 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
         <tbody>
           {seats.map((s) => (
             <tr key={s.id}>
+              <td>
+                <input
+                  type="checkbox"
+                  aria-label={`${s.userName || '사용자 없음'} 선택`}
+                  checked={picked.has(s.id)}
+                  onChange={(e) =>
+                    setPicked((p) => {
+                      const next = new Set(p);
+                      if (e.target.checked) next.add(s.id);
+                      else next.delete(s.id);
+                      return next;
+                    })
+                  }
+                />
+              </td>
               <td>{s.userName || '(사용자 없음)'}</td>
               <td>
                 <span className={`badge ${s.status === '사용중' ? 'badge-상품화완료' : s.status === '미배정' ? 'badge-상품화준비중' : 'badge-미정'}`}>{s.status}</span>
@@ -546,14 +615,14 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
                 <div className="row-actions">
                   <button
                     type="button"
-                    className="btn btn-ghost ct-small"
+                    className="btn btn-ghost ct-small ct-edit"
                     disabled={busy}
                     onClick={() => {
                       setSeatEditId(s.id);
                       setSeatForm(seatFormOf(s));
                     }}
                   >
-                    편집
+                    ✏️ 수정
                   </button>
                   <button type="button" className="btn btn-ghost ct-small ct-danger" disabled={busy} onClick={() => void removeSeat(s)}>
                     삭제
@@ -564,7 +633,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
           ))}
           {seats.length === 0 && (
             <tr>
-              <td colSpan={8} className="empty-state">
+              <td colSpan={9} className="empty-state">
                 <div>👤</div>아직 사용자(좌석)가 없어요. 아래에서 좌석을 추가해 주세요.
               </td>
             </tr>
@@ -574,7 +643,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
 
       {editingSeat && seatForm && (
         <div className="ct-card ct-card-edit">
-          <div className="ct-card-title">좌석 편집 · {editingSeat.userName || '(사용자 없음)'}</div>
+          <div className="ct-card-title">좌석 수정 · {editingSeat.userName || '(사용자 없음)'}</div>
           <div className="form-grid">
             <div className="form-field">
               <label>사용자</label>

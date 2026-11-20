@@ -4,9 +4,11 @@ import { revalidatePath } from 'next/cache';
 import {
   UnlockRequired,
   attemptUnlock,
+  cleanSeatIds,
   clearUnlockCookie,
   countSeatSecrets,
   deleteSeatRow,
+  deleteSeatRows,
   logSecretEvent,
   parseSecretField,
   parseSecretOwner,
@@ -183,6 +185,43 @@ export async function deleteSwSeat(id: string): Promise<ActionResult> {
     revalidatePath('/contracts');
     revalidatePath('/home');
     return { ok: true };
+  } catch (err) {
+    return failFrom(err, '좌석을 지우지 못했어요.');
+  }
+}
+
+/**
+ * 여러 좌석 한꺼번에 지우기(최대 500, 비밀 칸 함께) — "선택한 좌석 지우기"·"이 상품 지우기"(→ 이어서 deleteSwContract).
+ * 열려 있을 때만. 없는 id 는 무시하고 실제 지운 수를 돌려줌. 지웠으면 기록 한 줄(값 없이 개수만).
+ */
+export async function deleteSwSeats(ids: string[]): Promise<ActionResult<{ deleted: number }>> {
+  const g = await guard();
+  if (!g.ok) return g;
+  const cleaned = cleanSeatIds(ids);
+  if (!cleaned.ok) return { ok: false, error: cleaned.error };
+  try {
+    const res = await deleteSeatRows(cleaned.ids);
+    if (res.deleted > 0) {
+      // 좌석들이 한 상품 것이면 상품·거래처까지 기록
+      const ctx =
+        res.contractIds.length === 1
+          ? await secretOwnerContext({ kind: 'contract', id: res.contractIds[0], column: 'contract_id' })
+          : null;
+      const several = res.contractIds.length > 1 ? ` · 상품 ${res.contractIds.length}개` : '';
+      await logSecretEvent({
+        action: 'delete',
+        actor: g.name,
+        contractId: ctx?.contractId,
+        clientId: ctx?.clientId,
+        clientName: ctx?.clientName,
+        count: res.deleted,
+        note: `좌석 ${res.deleted}개 삭제(비밀 칸 ${res.secretCount}개 함께)${several}`,
+      });
+      revalidatePath('/contracts');
+      revalidatePath('/home');
+    }
+    if (res.error) return { ok: false, error: res.error };
+    return { ok: true, deleted: res.deleted };
   } catch (err) {
     return failFrom(err, '좌석을 지우지 못했어요.');
   }

@@ -41,6 +41,8 @@ export type ParsedRow = {
   sourceRaw: Record<string, string>; // 비밀 칸 제외, 머리줄 이름 → 값
   seatSourceKey: string; // perm:<행> / renew:<행>
   dateWarnings: number;
+  dateRaw: string; // 날짜 칸 원문 요약(표시용)
+  edited?: { product: boolean; supplier: boolean }; // 줄 수정으로 바꾼 칸(이름 정리표보다 우선)
 };
 
 export type ParsedTab = {
@@ -227,6 +229,11 @@ function parsePerm(values: string[][]): { pre: Pre[]; blank: number } {
       if (!p.ok) dw++;
       return p.iso;
     };
+    const rawDates = [
+      ['구매', cleanText(cell(row, c.purchase1)) || cleanText(cell(row, c.purchase2))],
+      ['갱신', cleanText(cell(row, c.renews))],
+      ['종료', cleanText(cell(row, c.ends))],
+    ];
     const purchased1 = date(c.purchase1);
     const purchased = purchased1 ?? date(c.purchase2);
     const product = cleanText(cell(row, c.product));
@@ -276,6 +283,7 @@ function parsePerm(values: string[][]): { pre: Pre[]; blank: number } {
       sourceRaw: buildRaw(row, names),
       seatSourceKey: `perm:${sheetRow}`,
       dateWarnings: dw,
+      dateRaw: rawDates.filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(' · '),
     });
   }
   return { pre, blank };
@@ -337,6 +345,13 @@ function parseRenew(values: string[][]): { pre: Pre[]; blank: number } {
       sourceRaw: raw,
       seatSourceKey: `renew:${sheetRow}`,
       dateWarnings: dw,
+      dateRaw: [
+        ['시작', cleanText(cell(row, c.start))],
+        ['갱신', cleanText(cell(row, c.renews))],
+      ]
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k} ${v}`)
+        .join(' · '),
     });
   }
   return { pre, blank };
@@ -441,4 +456,52 @@ export function countSecrets(tab: ParsedTab): Partial<Record<SheetSecretField, n
 export function contractSig(product: string, typeRaw: string, supplier: string): string {
   const n = (s: string) => groupNameKey(s);
   return `${n(product)}:${n(typeRaw)}:${n(supplier)}`;
+}
+
+// ── 줄 수정(미리보기 화면에서 고친 값) ─────────────────────
+export type RowEditLike = {
+  product?: string;
+  supplier?: string;
+  userName?: string;
+  dept?: string;
+  pcAssetCode?: string;
+  mfaNote?: string;
+  purchasedOn?: string | null;
+  renewsOn?: string | null;
+  endsOn?: string | null;
+};
+
+function editDate(v: string | null | undefined, keep: string | null): { v: string | null; bad: boolean } {
+  if (v === undefined) return { v: keep, bad: false };
+  if (v === null) return { v: null, bad: false };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return { v: keep, bad: true };
+  const p = parseSheetDate(v);
+  return p.iso ? { v: p.iso, bad: false } : { v: keep, bad: true };
+}
+
+/** 넣은 칸만 시트 값 대신 씀. 날짜 모양이 틀리면 그 칸은 시트 값 유지 + warnings 에 셈. source_raw 는 그대로(시트 원문 보존) */
+export function applyRowEdit(r: ParsedRow, e: RowEditLike): { row: ParsedRow; warnings: number } {
+  let warnings = 0;
+  const d = (v: string | null | undefined, keep: string | null) => {
+    const x = editDate(v, keep);
+    if (x.bad) warnings++;
+    return x.v;
+  };
+  const row: ParsedRow = {
+    ...r,
+    product: e.product !== undefined ? cleanText(e.product) : r.product,
+    supplier: e.supplier !== undefined ? cleanText(e.supplier) : r.supplier,
+    seat: {
+      ...r.seat,
+      userName: e.userName !== undefined ? cleanText(e.userName) : r.seat.userName,
+      dept: e.dept !== undefined ? cleanText(e.dept) : r.seat.dept,
+      pcAssetCode: e.pcAssetCode !== undefined ? e.pcAssetCode.replace(/\s+/g, '').toUpperCase() : r.seat.pcAssetCode,
+      mfaNote: e.mfaNote !== undefined ? e.mfaNote.trim() : r.seat.mfaNote,
+      purchasedOn: d(e.purchasedOn, r.seat.purchasedOn),
+      renewsOn: d(e.renewsOn, r.seat.renewsOn),
+      endsOn: d(e.endsOn, r.seat.endsOn),
+    },
+    edited: { product: e.product !== undefined, supplier: e.supplier !== undefined },
+  };
+  return { row, warnings };
 }

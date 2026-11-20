@@ -16,6 +16,7 @@ import {
   countNames,
   countSecrets,
   contractSig,
+  applyRowEdit,
   SheetHeaderError,
   type ParsedRow,
   type ParsedSheet,
@@ -24,6 +25,7 @@ import {
 } from '@/lib/contracts/sheetParse';
 import type {
   ImportGroup,
+  ImportRowDetail,
   ImportPlan,
   ImportPreview,
   ImportResult,
@@ -99,6 +101,24 @@ async function readSeatKeys(): Promise<Map<string, string>> {
   }
 }
 
+function rowDetail(r: ParsedRow, done: boolean): ImportRowDetail {
+  return {
+    row: r.sheetRow,
+    product: r.product,
+    supplier: r.supplier,
+    userName: r.seat.userName,
+    dept: r.seat.dept,
+    pcAssetCode: r.seat.pcAssetCode,
+    mfaNote: r.seat.mfaNote,
+    purchasedOn: r.seat.purchasedOn,
+    renewsOn: r.seat.renewsOn,
+    endsOn: r.seat.endsOn,
+    dateRaw: r.dateRaw,
+    secretFields: r.secrets.map((x) => x.field), // 칸 이름만(값 없음)
+    alreadyImported: done,
+  };
+}
+
 function emptyCounts(t: ParsedTab): ImportCounts {
   return { sheetRows: t.sheetRows, blankRows: t.blankRows, seats: t.sheetRows, secrets: countSecrets(t) };
 }
@@ -129,8 +149,15 @@ export async function previewImport(): Promise<{ ok: true; preview: ImportPrevie
   }
 
   const doneBy = new Map<string, number>();
+  const detailBy = new Map<string, ImportRowDetail[]>();
   for (const t of [sheet.renew, sheet.perm]) {
-    for (const r of t.rows) if (seatKeys.has(r.seatSourceKey)) doneBy.set(r.groupKey, (doneBy.get(r.groupKey) ?? 0) + 1);
+    for (const r of t.rows) {
+      const done = seatKeys.has(r.seatSourceKey);
+      if (done) doneBy.set(r.groupKey, (doneBy.get(r.groupKey) ?? 0) + 1);
+      const list = detailBy.get(r.groupKey) ?? [];
+      list.push(rowDetail(r, done));
+      detailBy.set(r.groupKey, list);
+    }
   }
 
   const groups: ImportGroup[] = summarizeGroups(sheet).map((g) => {
@@ -156,6 +183,7 @@ export async function previewImport(): Promise<{ ok: true; preview: ImportPrevie
       match,
       candidates,
       alreadyImported: doneBy.get(g.groupKey) ?? 0,
+      rowsDetail: detailBy.get(g.groupKey) ?? [],
     };
   });
 
@@ -186,7 +214,7 @@ function chunk<T>(a: T[], n: number): T[][] {
 }
 
 function emptyTabResult(t: ParsedTab): ImportTabResult {
-  return { sheetRows: t.sheetRows, seatsInserted: 0, seatsExisting: 0, secrets: {}, missing: [] };
+  return { sheetRows: t.sheetRows, seatsInserted: 0, seatsExisting: 0, secrets: {}, missing: [], skippedRows: 0 };
 }
 
 export async function applyImport(
@@ -200,7 +228,34 @@ export async function applyImport(
   if (!parsed.ok) return parsed;
   const sheet = parsed.sheet;
   const supabase = createAdminClient();
-  const rowsAll: ParsedRow[] = [...sheet.renew.rows, ...sheet.perm.rows];
+
+  // 빼기(묶음째·줄 하나씩) → 줄 수정. 뺀 줄은 좌석·비밀 모두 안 넣고 missing 에도 안 셈.
+  const choiceOf = new Map(plan.choices.map((c) => [c.groupKey, c.target] as const));
+  const excluded = new Set((plan.excludeRows ?? []).map((x) => `${x.tab}:${x.row}`));
+  const editOf = new Map((plan.rowEdits ?? []).map((e) => [`${e.tab}:${e.row}`, e] as const));
+  const skipped: Record<'renew' | 'perm', number> = { renew: 0, perm: 0 };
+  const skippedGroupKeys = new Set<string>();
+  let editWarnings = 0;
+  const rowsAll: ParsedRow[] = [];
+  for (const t of [sheet.renew, sheet.perm]) {
+    for (const r0 of t.rows) {
+      if (choiceOf.get(r0.groupKey) === 'skip') {
+        skippedGroupKeys.add(r0.groupKey);
+        skipped[r0.tab]++;
+        continue;
+      }
+      if (excluded.has(`${r0.tab}:${r0.sheetRow}`)) {
+        skipped[r0.tab]++;
+        continue;
+      }
+      const e = editOf.get(`${r0.tab}:${r0.sheetRow}`);
+      if (e) {
+        const x = applyRowEdit(r0, e);
+        editWarnings += x.warnings;
+        rowsAll.push(x.row);
+      } else rowsAll.push(r0);
+    }
+  }
 
   try {
     // 1. 거래처 정하기
@@ -213,7 +268,6 @@ export async function applyImport(
         if (!data || data.length < 1000) break;
       }
     }
-    const choiceOf = new Map(plan.choices.map((c) => [c.groupKey, c.target] as const));
     const clientByGroup = new Map<string, string>();
     const resolvedByName = new Map<string, string>();
     const unsortedGroups = new Set<string>();
@@ -232,6 +286,7 @@ export async function applyImport(
 
     for (const gk of groupKeys) {
       const target = choiceOf.get(gk) ?? 'unsorted';
+      if (target === 'skip') continue; // 위에서 이미 뺌
       if (target === 'unsorted') {
         unsortedGroups.add(gk);
         clientByGroup.set(gk, await byNameKey(UNSORTED_NAME));
@@ -277,8 +332,9 @@ export async function applyImport(
     }
 
     // 2. 계약 상품 upsert
-    const prodOf = (r: ParsedRow) => plan.productRenames[r.product] || r.product || NO_PRODUCT;
-    const supOf = (r: ParsedRow) => plan.supplierRenames[r.supplier] || r.supplier;
+    // 줄 수정이 이름 정리표보다 우선
+    const prodOf = (r: ParsedRow) => (r.edited?.product ? r.product : plan.productRenames[r.product] || r.product) || NO_PRODUCT;
+    const supOf = (r: ParsedRow) => (r.edited?.supplier ? r.supplier : plan.supplierRenames[r.supplier] || r.supplier);
     const contractKeyOf = (r: ParsedRow) => `sheet:${clientByGroup.get(r.groupKey)}:${contractSig(prodOf(r), r.typeRaw, supOf(r))}`;
     const contractRows = new Map<string, Record<string, unknown>>();
     for (const r of rowsAll) {
@@ -413,6 +469,9 @@ export async function applyImport(
       }
     }
 
+    results.renew.skippedRows = skipped.renew;
+    results.perm.skippedRows = skipped.perm;
+
     // 6. 기록(값 없이 개수만)
     const secretTotal = [results.renew, results.perm].reduce(
       (n, t) => n + Object.values(t.secrets).reduce((m, s) => m + (s?.inserted ?? 0), 0),
@@ -422,12 +481,12 @@ export async function applyImport(
       action: 'import',
       actor,
       count: secretTotal,
-      note: `좌석 ${results.renew.seatsInserted + results.perm.seatsInserted}개 · 거래처 ${clientsCreated}곳 · 상품 ${contractsCreated}개 새로`,
+      note: `좌석 ${results.renew.seatsInserted + results.perm.seatsInserted}개 · 거래처 ${clientsCreated}곳 · 상품 ${contractsCreated}개 새로 · 뺀 줄 ${skipped.renew + skipped.perm}${editWarnings ? ` · 줄 수정 날짜 모양 오류 ${editWarnings}칸(시트 값 유지)` : ''}`,
     });
 
     return {
       ok: true,
-      result: { clientsCreated, contractsCreated, unsortedGroups: unsortedGroups.size, renew: results.renew, perm: results.perm },
+      result: { clientsCreated, contractsCreated, unsortedGroups: unsortedGroups.size, skippedGroups: skippedGroupKeys.size, renew: results.renew, perm: results.perm },
     };
   } catch (e) {
     if (isMissingTable(e)) return { ok: false, error: MISSING_TABLE_MSG };

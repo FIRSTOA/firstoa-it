@@ -825,6 +825,66 @@ export async function countSeatSecrets(seatId: string): Promise<number> {
   return count ?? 0;
 }
 
+/** 여러 좌석 한꺼번에 지울 때 한 번에 받는 최대 개수 */
+export const SEAT_DELETE_MAX = 500;
+
+/** 화면에서 온 좌석 id 목록 정리 — uuid 모양만, 소문자, 중복 제거. 1~max 개가 아니면 문구 */
+export function cleanSeatIds(ids: unknown, max: number = SEAT_DELETE_MAX): { ok: true; ids: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(ids)) return { ok: false, error: '지울 좌석 목록이 올바르지 않아요. 화면을 새로 고쳐 주세요.' };
+  const out = uniqueUuids(ids.filter((x): x is string => typeof x === 'string'));
+  if (out.length === 0) return { ok: false, error: '지울 좌석을 골라 주세요.' };
+  if (out.length > max) return { ok: false, error: `한 번에 ${max}개까지 지울 수 있어요(고른 좌석 ${out.length}개).` };
+  return { ok: true, ids: out };
+}
+
+/**
+ * 여러 좌석 삭제(비밀 칸은 FK cascade 로 같이) — 200개씩 .in('id', …). 없는 id 는 무시.
+ * 지우기 전에 좌석별 비밀 칸 수만 셈(값은 안 읽음). 지운 좌석의 계약 상품 id 들도 돌려줌(기록용).
+ * 첫 묶음에서 실패하면 던지고, 중간에 멈추면 그때까지 지운 수 + error 로 돌려줌(부르는 쪽이 지운 만큼 기록).
+ */
+export async function deleteSeatRows(
+  ids: string[],
+): Promise<{ deleted: number; secretCount: number; contractIds: string[]; error: string | null }> {
+  const seatIds = uniqueUuids(ids);
+  const supabase = createAdminClient();
+
+  // 지울 좌석이 어느 상품 것인지(기록용) — 200개씩이라 1000줄 한도 안
+  const contractOf = new Map<string, string>();
+  for (const part of chunk(seatIds, ID_CHUNK)) {
+    const { data, error } = await supabase.from(SW_SEATS_TABLE).select('id, contract_id').in('id', part);
+    if (error) throw dbError('지울 좌석을 못 읽었어요', error);
+    for (const r of (data ?? []) as { id: string; contract_id: string }[]) contractOf.set(String(r.id).toLowerCase(), String(r.contract_id));
+  }
+  const existing = seatIds.filter((id) => contractOf.has(id));
+  if (existing.length === 0) return { deleted: 0, secretCount: 0, contractIds: [], error: null };
+
+  // 좌석별 비밀 칸 수(값 칸은 안 읽음)
+  const secretsPerSeat = new Map<string, number>();
+  for (const r of await readSecretRows(supabase, 'seat_id', existing, false)) {
+    secretsPerSeat.set(r.owner, (secretsPerSeat.get(r.owner) ?? 0) + 1);
+  }
+
+  const deletedIds: string[] = [];
+  let stopped: string | null = null;
+  for (const part of chunk(existing, ID_CHUNK)) {
+    const { data, error } = await supabase.from(SW_SEATS_TABLE).delete().in('id', part).select('id');
+    if (error) {
+      // restrict FK 는 23001, 일반 FK 는 23503 — 다른 기록이 좌석을 가리킴
+      const why =
+        error.code === '23001' || error.code === '23503'
+          ? '다른 기록이 이 좌석들을 쓰고 있어 지울 수 없어요.'
+          : dbError('좌석을 지우지 못했어요', error).message;
+      if (deletedIds.length === 0) throw new Error(why);
+      stopped = `좌석 ${deletedIds.length}개를 지운 뒤 멈췄어요 — ${why}`;
+      break;
+    }
+    for (const r of (data ?? []) as { id: string }[]) deletedIds.push(String(r.id).toLowerCase());
+  }
+  const contractIds = [...new Set(deletedIds.map((id) => contractOf.get(id)).filter((v): v is string => Boolean(v)))];
+  const secretCount = deletedIds.reduce((n, id) => n + (secretsPerSeat.get(id) ?? 0), 0);
+  return { deleted: deletedIds.length, secretCount, contractIds, error: stopped };
+}
+
 /** 좌석 한 줄 삭제(비밀 칸은 FK cascade 로 같이). 지운 줄이 있으면 true */
 export async function deleteSeatRow(seatId: string): Promise<boolean> {
   const owner = parseSecretOwner({ seatId });

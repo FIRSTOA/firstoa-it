@@ -168,6 +168,38 @@ export type ImportGroup = {
   match: ImportMatch;
   candidates: { key: string; name: string }[];
   alreadyImported: number;
+  /** 줄마다 빼기용(비밀 값 없음 — 어떤 비밀 칸이 있는지 이름만). row = 시트 행 번호 */
+  rowsDetail: ImportRowDetail[];
+};
+/** 미리보기 한 줄 — 수정 가능한 일반 칸(비밀 값 없음, 비밀 칸은 옮긴 뒤 화면에서 수정) */
+export type ImportRowDetail = {
+  row: number;
+  product: string;
+  supplier: string;
+  userName: string;
+  dept: string;
+  pcAssetCode: string;
+  mfaNote: string;
+  purchasedOn: string | null; // YYYY-MM-DD(못 읽었으면 null — 원문은 dateRaw)
+  renewsOn: string | null;
+  endsOn: string | null;
+  dateRaw: string; // 날짜 칸 원문 요약(표시용)
+  secretFields: SecretField[];
+  alreadyImported: boolean;
+};
+/** 줄 하나 고쳐서 옮기기 — 넣은 칸만 바꿈(빈 글자 = 비우기, 안 넣으면 시트 값 그대로) */
+export type ImportRowEdit = {
+  tab: 'renew' | 'perm';
+  row: number;
+  product?: string;
+  supplier?: string;
+  userName?: string;
+  dept?: string;
+  pcAssetCode?: string;
+  mfaNote?: string;
+  purchasedOn?: string | null;
+  renewsOn?: string | null;
+  endsOn?: string | null;
 };
 export type ImportCounts = {
   // 탭별
@@ -184,27 +216,34 @@ export type ImportPreview = {
   supplierNames: { name: string; rows: number }[];
   warnings: string[];
 };
+/** 'skip' = 이 묶음은 옮기지 않음(시트는 그대로) */
 export type ImportChoice = {
   groupKey: string;
-  target: { clientKey: string } | { newName: string } | 'unsorted';
+  target: { clientKey: string } | { newName: string } | 'unsorted' | 'skip';
 };
 export type ImportPlan = {
   fingerprint: string;
   choices: ImportChoice[];
   productRenames: Record<string, string>;
   supplierRenames: Record<string, string>;
+  /** 줄 하나씩 빼기 — 시트 행 번호 */
+  excludeRows: { tab: 'renew' | 'perm'; row: number }[];
+  /** 줄 하나씩 고치기(상품명·매입처를 고치면 그 줄은 고친 이름의 계약 상품으로 들어감 — 이름 정리표보다 우선) */
+  rowEdits: ImportRowEdit[];
 };
 export type ImportTabResult = {
   sheetRows: number;
   seatsInserted: number;
   seatsExisting: number;
   secrets: Partial<Record<SecretField, { sheet: number; inserted: number; existing: number; verified: number }>>;
-  missing: { row: number; field: SecretField | 'seat' }[]; // 값 없이 위치만
+  missing: { row: number; field: SecretField | 'seat' }[]; // 값 없이 위치만 — 뺀 줄은 여기 안 셈
+  skippedRows: number; // 사람이 뺀 줄(묶음째 + 줄 하나씩)
 };
 export type ImportResult = {
   clientsCreated: number;
   contractsCreated: number;
   unsortedGroups: number;
+  skippedGroups: number;
   renew: ImportTabResult;
   perm: ImportTabResult;
 };
@@ -278,7 +317,7 @@ export type UnlockResult =
  *   createManualClient(name: string, actor: string): ActionResult<{ id: string }>   // works에 없는 거래처
  *   deleteClient(id: string, actor: string): ActionResult                          // 계약 상품 0개일 때만
  *   saveSwContract(input: SwContractInput, actor: string): ActionResult<{ id: string; clientId: string }>
- *   deleteSwContract(id: string): ActionResult                                     // 좌석 0개일 때만
+ *   deleteSwContract(id: string): ActionResult                                     // 좌석 0개일 때만("이 상품 지우기" = deleteSwSeats(전부) → deleteSwContract)
  *   moveSwContract(contractId: string, clientKey: string, actor: string): ActionResult<{ clientId: string }>
  *   saveSwSeat(input: SwSeatInput, actor: string): ActionResult<{ id: string }>
  *   addSwSeats(contractId: string, count: number, actor: string): ActionResult<{ ids: string[] }>  // 최대 200
@@ -291,10 +330,11 @@ export type UnlockResult =
  *   changePassword(current: string, next: string): ActionResult               // 열람 중 + 지금 비밀번호 확인 → 다른 기기 쿠키 무효, 이 기기는 다시 열림
  *   saveSecret(owner: SecretOwner, field: SecretField, value: string): ActionResult   // 열람 중, 빈 값 = 삭제
  *   deleteSwSeat(id: string): ActionResult                                    // 열람 중
+ *   deleteSwSeats(ids: string[]): ActionResult<{ deleted: number }>          // 열람 중, 여러 좌석 한꺼번에(최대 500, 비밀 칸 함께) — "선택한 좌석 지우기"·"이 상품 지우기"
  *   listSecretLog(limit?: number): ActionResult<{ rows: SecretLogRow[]; failed24h: number }>  // 열람 중
  *   (revealSecret / revealContractSecrets 는 없앰 — 열면 getClientDetail 이 값을 같이 줌)
  * app/contracts/importActions.ts (개발 C) — 둘 다 열람 중이어야
  *   previewSheetImport(): ActionResult<{ preview: ImportPreview }>
- *   applySheetImport(plan: ImportPlan): ActionResult<{ result: ImportResult }>
+ *   applySheetImport(plan: ImportPlan): ActionResult<{ result: ImportResult }>   // 'skip' 묶음·excludeRows 줄은 안 옮김, rowEdits 반영
  * (모두 Promise 로 감싸서 반환)
  */
