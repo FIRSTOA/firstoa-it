@@ -81,3 +81,16 @@ notify pgrst, 'reload schema';
 -- drop table if exists public.it_prep_events;
 -- drop index if exists public.it_calendar_events_naver_important_idx;
 -- alter table public.it_calendar_events drop column if exists naver_important;
+
+-- ── 2026-11-20 추가: 재고 반영 결과(stock_issues) ──────────────────
+-- ※ 이미 위 파일을 실행한 DB 는 **이 블록만** 복사해서 실행하세요. 파일 전체를 다시 실행해도 표·데이터는
+--   안 지워지지만, 6) 이 네이버 동기화 지문을 비워 일정 본문을 처음부터 다시 읽게 해요(몇 분 걸림).
+-- 무엇: 완료 보고를 보낸 뒤 IT재고 위치를 '임대중'으로 못 바꾼 기기를 자산번호별로 적어 둠.
+--   예) {"A123": {"reason": "not_found", "message": "IT재고에 없는 자산번호예요", "at": "2026-11-20T01:23:45Z"}}
+--   reason: not_found(IT재고에 없음) / error(시트 쓰기 실패 등). 반영되면 그 번호는 여기서 빠지고 stock_applied 로 감.
+-- 왜: 재고 반영은 카톡 발송 응답 뒤(after)에 돌아서 실패해도 화면에 못 알렸음 → 완료 보고 창·출고 준비 목록·홈 카드가
+--   이 칸을 읽어 "재고 반영 안 됨 n대 · 재고 다시 반영"을 보여 줌.
+-- 여러 번 실행해도 안전(if not exists). 실행 전에도 앱은 돌아감(이 칸이 없으면 "기기 − stock_applied"로만 셈).
+-- 되돌리기: alter table public.it_prep_reports drop column if exists stock_issues;
+alter table public.it_prep_reports add column if not exists stock_issues jsonb not null default '{}'::jsonb;
+notify pgrst, 'reload schema';

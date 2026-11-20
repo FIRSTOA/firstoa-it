@@ -152,7 +152,79 @@ export type PrepReport = {
   message: string;
   sentAt: string | null;
   stockApplied: string[];
+  /** IT재고 반영을 못 한 기기(자산번호 → 이유). stock_issues 칸이 없으면(SQL 실행 전) 빈 값. */
+  stockIssues: PrepStockIssues;
+  /** 마지막 저장·발송 시각 — 재고 반영 결과가 아직 없을 때 "처리 중"인지 "끊김"인지 가르는 데 씀 */
+  updatedAt: string | null;
 };
+
+// ── 재고 반영 결과(완료 보고 → IT재고 위치 '임대중') ─────────────────────
+// 반영은 카톡 발송 응답 뒤(after)에 돌아서, 결과를 보고 행(stock_applied·stock_issues)에 적어 두고
+// 완료 보고 창·출고 준비 목록·홈이 이 함수로 읽어 "재고 반영 안 됨 n대"를 보여 줌.
+
+export type PrepStockIssue = { reason: 'not_found' | 'error'; message: string; at: string };
+export type PrepStockIssues = Record<string, PrepStockIssue>;
+
+/** 결과가 없는 기기를 "끊김"으로 보는 시간 — 발송 뒤 이만큼 지나도 결과가 없으면 다시 반영하라고 알림. */
+export const STOCK_PENDING_STALE_MS = 5 * 60_000;
+
+/** IT재고 위치를 바꿔야 하는 자산번호(철수 제외, 대문자, 중복 없이) — sendPrepReport 와 같은 기준. */
+export function stockTargetIds(kind: string, units: PrepUnit[]): string[] {
+  if (kind === '철수') return [];
+  return [...new Set(units.map((u) => (u.assetId ?? '').trim().toUpperCase()).filter(Boolean))];
+}
+
+export type PrepStockView = {
+  /** 위치를 바꿔야 하는 자산번호 */
+  targets: string[];
+  /** 반영됨 */
+  applied: string[];
+  /** 못 함 — 이유 있음 */
+  issues: { id: string; reason: PrepStockIssue['reason']; message: string }[];
+  /** 아직 결과 없음(처리 중이거나 중간에 끊김) */
+  pending: string[];
+  /** pending 이 "처리 중"이 아니라 끊긴 것으로 볼 만큼 오래됨 */
+  pendingStale: boolean;
+  /** 화면에 경고로 띄울 대수 = 못 함 + (끊긴) 결과 없음 */
+  problemCount: number;
+};
+
+/**
+ * 보고 하나의 재고 반영 상태. attempted = 보낸(또는 "고치기만" 한) 보고라 반영을 시도했음 —
+ * 아직 안 보낸 보고는 아무것도 경고하지 않음.
+ */
+export function prepStockView(input: {
+  kind: string;
+  units: PrepUnit[];
+  applied: string[];
+  issues: PrepStockIssues;
+  attempted: boolean;
+  updatedAt: string | null;
+  now?: number;
+}): PrepStockView {
+  const targets = input.attempted ? stockTargetIds(input.kind, input.units) : [];
+  const appliedSet = new Set(input.applied);
+  const applied = targets.filter((id) => appliedSet.has(id));
+  const issues = targets
+    .filter((id) => !appliedSet.has(id) && input.issues[id])
+    .map((id) => ({ id, reason: input.issues[id].reason, message: input.issues[id].message }));
+  const pending = targets.filter((id) => !appliedSet.has(id) && !input.issues[id]);
+  const since = input.updatedAt ? Date.parse(input.updatedAt) : NaN;
+  const pendingStale = pending.length > 0 && (!Number.isFinite(since) || (input.now ?? Date.now()) - since > STOCK_PENDING_STALE_MS);
+  return { targets, applied, issues, pending, pendingStale, problemCount: issues.length + (pendingStale ? pending.length : 0) };
+}
+
+/**
+ * stock_issues 칸이 아직 없는지(SQL 실행 전) — 좁게만 판정: 오류 문구에 stock_issues 가 있고
+ * 42703(칸 없음)·PGRST204(스키마에 칸 없음)·"does not exist"/"could not find" 일 때만.
+ * 권한 오류 등을 "칸 없음"으로 보면 기록이 조용히 빠지므로 그런 오류는 그대로 오류로 둠.
+ */
+export function isMissingStockIssuesColumn(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const msg = error.message ?? '';
+  if (!/stock_issues/.test(msg)) return false;
+  return error.code === '42703' || error.code === 'PGRST204' || /does not exist|could not find/i.test(msg);
+}
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 export function shortDateLabel(ymd: string): string {

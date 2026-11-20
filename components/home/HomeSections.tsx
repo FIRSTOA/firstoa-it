@@ -115,6 +115,7 @@ function PrepRow({ ev, showReport }: { ev: PrepEventRow; showReport: boolean }) 
         {showReport && (
           <span className={`home-chip ${ev.reportSent ? 'state-done' : 'state-waiting'}`}>{ev.reportSent ? '카톡 보고 ✓' : '보고 전'}</span>
         )}
+        {showReport && ev.stockProblem > 0 && <span className="home-chip state-doing">재고 반영 안 됨 {ev.stockProblem}대</span>}
       </div>
     </Link>
   );

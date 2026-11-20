@@ -7,8 +7,20 @@ import { findAssetBriefs } from '@/lib/inventory/assetIndex';
 import { getAssetFromSheets, updateAssetInSheet } from '@/lib/inventory/sheets';
 import { logAssetMovement } from '@/lib/inventory/movements';
 import { extractSaleInfoFromImage, isOcrConfigured } from '@/lib/ocr';
-import { buildPrepMessage, KAKAO_ROOM, type PrepPhoto, type PrepReport, type PrepUnit } from '@/lib/shipmentPrep';
+import {
+  buildPrepMessage,
+  eventKindOf,
+  isMissingStockIssuesColumn,
+  KAKAO_ROOM,
+  stockTargetIds,
+  type PrepPhoto,
+  type PrepReport,
+  type PrepStockIssue,
+  type PrepStockIssues,
+  type PrepUnit,
+} from '@/lib/shipmentPrep';
 import { CALENDAR_TABLE, createAdminClient, RENTAL_TABLE } from '@/lib/supabase/server';
+import { sheetFailReason } from '@/lib/syncFailure';
 
 const REPORTS_TABLE = 'it_prep_reports';
 const PHOTO_ITEMS_TABLE = 'it_prep_photo_items';
@@ -20,6 +32,9 @@ type ReportRow = {
   id: string; event_id: string; company: string; model: string; author: string; units: PrepUnit[];
   photos: PrepPhoto[]; checked_items: string[]; note: string; message: string; sent_at: string | null;
   stock_applied: string[];
+  /** SQL(shipment_prep_schema.sql 맨 끝) 실행 전이면 select('*') 결과에 없음 */
+  stock_issues?: PrepStockIssues | null;
+  updated_at?: string | null;
 };
 
 function toReport(r: ReportRow): PrepReport {
@@ -36,6 +51,8 @@ function toReport(r: ReportRow): PrepReport {
     message: r.message,
     sentAt: r.sent_at,
     stockApplied: r.stock_applied ?? [],
+    stockIssues: r.stock_issues ?? {},
+    updatedAt: r.updated_at ?? null,
   };
 }
 
@@ -337,14 +354,14 @@ export async function sendPrepReport(
   photoItemCount: number,
   /** send = 처음 발송, resend = "[수정]" 붙여 다시 발송, fix = 고치기만(카톡 안 보냄) */
   mode: 'send' | 'resend' | 'fix' = 'send',
-): Promise<Result<{ message: string; stockWarnings: string[]; stockPending: number }>> {
+): Promise<Result<{ message: string; stockPending: number }>> {
   const saved = await savePrepReport(eventId, draft);
   if (!saved.ok) return saved;
   const supabase = createAdminClient();
   const report = await ensureReport(eventId);
   const { data: ev } = await supabase.from(CALENDAR_TABLE).select('date,title').eq('id', eventId).single();
   const evRow = ev as { date: string; title: string };
-  const kind = evRow.title.includes('철수') ? '철수' : evRow.title.includes('교체') ? '교체' : '납품';
+  const kind = eventKindOf(evRow.title);
   const albumUrl = `${await siteOrigin()}/album?id=${report.id}`;
   const units = (report.units ?? []).filter((u) => u.serial || u.assetId);
   const built = buildPrepMessage({
@@ -378,45 +395,174 @@ export async function sendPrepReport(
 
   // 재고 위치 변경(철수 제외)은 응답 뒤에 따로 — 여러 대를 구글시트에 한 대씩 쓰면 1분을 넘겨
   // 창이 "처리 중"에서 멈췄어요. 이미 바꾼 자산번호는 stock_applied로 건너뜀.
-  const pending = kind === '철수' ? [] : units.map((u) => u.assetId.trim().toUpperCase()).filter((id) => id && !(report.stock_applied ?? []).includes(id));
+  // 결과(반영됨 / IT재고에 없음 / 실패)는 한 대씩 보고 행에 적고, 완료 보고 창이 그걸 읽어 알려 줌.
+  const pending = stockTargetIds(kind, units).filter((id) => !(report.stock_applied ?? []).includes(id));
   if (pending.length) {
+    const ctx = { company: report.company, date: evRow.date, kind };
     after(async () => {
-      const d = new Date(Date.now() + 9 * 3600_000);
-      const stamp = `${String(d.getUTCFullYear()).slice(2)}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${String(d.getUTCDate()).padStart(2, '0')}`;
-      for (const id of [...new Set(pending)]) {
-        try {
-          const asset = await getAssetFromSheets(id);
-          if (!asset) {
-            console.warn('[prep] IT재고에 없는 자산번호:', id);
-            continue;
-          }
-          const tag = `${stamp} ${report.company || '출고'}`;
-          // 이미 반영된 자산(예전 발송이 중간에 끊긴 경우)은 이력을 두 번 쓰지 않음
-          const already = asset.location.trim() === '임대중' && asset.history.includes(tag);
-          const history = already ? asset.history : [asset.history.trim(), tag].filter(Boolean).join(' / ');
-          if (!already) await updateAssetInSheet(id, { ...asset, location: '임대중', history });
-          if (!already)
-            await logAssetMovement({
-              assetNumber: id,
-              category: asset.category,
-              fromLocation: null,
-              toLocation: null,
-              fromStatus: null,
-              toStatus: null,
-              memo: `출고 준비 완료 보고 — ${report.company} (${evRow.date} ${kind})`,
-            });
-          // 한 대씩 기록 — 중간에 끊겨도 다시 보낼 때 이미 바꾼 건 건너뜀
-          const { data: cur } = await supabase.from(REPORTS_TABLE).select('stock_applied').eq('id', report.id).single();
-          const done = new Set(((cur as { stock_applied: string[] } | null)?.stock_applied ?? []) as string[]);
-          done.add(id);
-          await supabase.from(REPORTS_TABLE).update({ stock_applied: [...done] }).eq('id', report.id);
-        } catch (err) {
-          console.error('[prep] 재고 위치 변경 실패:', id, err);
-        }
-      }
+      await applyStockForReport(report.id, pending, ctx);
     });
   }
-  return { ok: true, message, stockWarnings: [], stockPending: pending.length };
+  return { ok: true, message, stockPending: pending.length };
+}
+
+// ── IT재고 반영(납품·교체 → 위치 '임대중' + 비고 "yy.mm.dd 업체명") ────────────
+
+type StockContext = { company: string; date: string; kind: string };
+export type StockOutcome = {
+  id: string;
+  result: 'applied' | PrepStockIssue['reason'];
+  message: string;
+  /** 시트는 처리했는데 결과를 보고 행에 못 적음(다시 반영해도 같은 날 이력은 두 번 안 씀) */
+  recordError?: string;
+};
+
+function kstStamp(): string {
+  const d = new Date(Date.now() + 9 * 3600_000);
+  return `${String(d.getUTCFullYear()).slice(2)}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+/** 한 대 반영 — 예전 after() 안의 동작 그대로(무엇을·어디에 쓰는지 같음) + 읽은 줄 재확인. */
+async function applyStockUnit(id: string, ctx: StockContext): Promise<StockOutcome> {
+  try {
+    const asset = await getAssetFromSheets(id);
+    if (!asset) {
+      console.warn('[prep] IT재고에 없는 자산번호:', id);
+      return { id, result: 'not_found', message: 'IT재고에 없는 자산번호예요 — 번호가 맞는지 확인해 주세요' };
+    }
+    // 기억해 둔 줄 번호가 밀려(그 사이 시트에 줄이 끼거나 빠짐) 다른 기기 줄을 읽었으면 쓰지 않음
+    if (asset.assetId.trim().toUpperCase() !== id) {
+      console.error('[prep] 읽은 줄의 자산번호가 다름 — 안 씀:', id, '→', asset.assetId);
+      return {
+        id,
+        result: 'error',
+        message: `IT재고 시트 줄 위치가 바뀌어 다른 줄(${asset.assetId || '빈 줄'})이 읽혀서 안 썼어요 — 10분쯤 뒤 다시 반영해 주세요`,
+      };
+    }
+    const tag = `${kstStamp()} ${ctx.company || '출고'}`;
+    // 이미 반영된 자산(예전 발송이 중간에 끊긴 경우)은 이력을 두 번 쓰지 않음
+    const already = asset.location.trim() === '임대중' && asset.history.includes(tag);
+    const history = already ? asset.history : [asset.history.trim(), tag].filter(Boolean).join(' / ');
+    if (!already) await updateAssetInSheet(id, { ...asset, location: '임대중', history });
+    if (!already)
+      await logAssetMovement({
+        assetNumber: id,
+        category: asset.category,
+        fromLocation: null,
+        toLocation: null,
+        fromStatus: null,
+        toStatus: null,
+        memo: `출고 준비 완료 보고 — ${ctx.company} (${ctx.date} ${ctx.kind})`,
+      });
+    return { id, result: 'applied', message: '' };
+  } catch (err) {
+    console.error('[prep] 재고 위치 변경 실패:', id, err);
+    return { id, result: 'error', message: `IT재고 시트에 못 썼어요(${sheetFailReason(err)})` };
+  }
+}
+
+type StockState = { applied: string[]; issues: PrepStockIssues; issuesReady: boolean };
+
+async function readStockState(reportId: string): Promise<StockState> {
+  const supabase = createAdminClient();
+  const full = await supabase.from(REPORTS_TABLE).select('stock_applied,stock_issues').eq('id', reportId).single();
+  if (!full.error) {
+    const r = full.data as { stock_applied: string[] | null; stock_issues: PrepStockIssues | null };
+    return { applied: r.stock_applied ?? [], issues: r.stock_issues ?? {}, issuesReady: true };
+  }
+  if (!isMissingStockIssuesColumn(full.error)) throw new Error(`보고 읽기 실패: ${full.error.message}`);
+  // SQL 실행 전 — 반영된 것만 적고, 못 한 것은 화면이 "기기 − stock_applied"로 셈
+  const old = await supabase.from(REPORTS_TABLE).select('stock_applied').eq('id', reportId).single();
+  if (old.error) throw new Error(`보고 읽기 실패: ${old.error.message}`);
+  return { applied: (old.data as { stock_applied: string[] | null }).stock_applied ?? [], issues: {}, issuesReady: false };
+}
+
+/** 한 대씩 기록 — 중간에 끊겨도 다시 보낼 때 이미 바꾼 건 건너뜀(stock_applied), 못 한 건 이유(stock_issues). */
+async function recordStockOutcome(reportId: string, o: StockOutcome): Promise<void> {
+  const state = await readStockState(reportId);
+  const applied = new Set(state.applied);
+  const issues: PrepStockIssues = { ...state.issues };
+  if (o.result === 'applied') {
+    applied.add(o.id);
+    delete issues[o.id];
+  } else {
+    if (!state.issuesReady) return; // 적을 칸이 없음 — 화면은 "기기 − stock_applied"로 셈
+    issues[o.id] = { reason: o.result, message: o.message, at: new Date().toISOString() };
+  }
+  const patch = state.issuesReady ? { stock_applied: [...applied], stock_issues: issues } : { stock_applied: [...applied] };
+  const { error } = await createAdminClient().from(REPORTS_TABLE).update(patch).eq('id', reportId);
+  if (error) throw new Error(`반영 결과 저장 실패: ${error.message}`);
+}
+
+/** 다시 시도하는 번호의 예전 이유는 먼저 지움 — 창이 옛 결과 대신 "처리 중"으로 보게(새 결과가 곧 적힘). */
+async function clearStockIssues(reportId: string, ids: string[]): Promise<void> {
+  const state = await readStockState(reportId);
+  if (!state.issuesReady || !ids.some((id) => state.issues[id])) return;
+  const issues: PrepStockIssues = { ...state.issues };
+  for (const id of ids) delete issues[id];
+  const { error } = await createAdminClient().from(REPORTS_TABLE).update({ stock_issues: issues }).eq('id', reportId);
+  if (error) throw new Error(`예전 반영 결과 지우기 실패: ${error.message}`);
+}
+
+async function applyStockForReport(reportId: string, ids: string[], ctx: StockContext): Promise<StockOutcome[]> {
+  const out: StockOutcome[] = [];
+  // 예전 이유 지우기는 화면 표시용 — 실패해도 재고 반영(본 일)은 그대로 하고, 새 결과가 옛 이유를 덮어씀
+  try {
+    await clearStockIssues(reportId, ids);
+  } catch (err) {
+    console.error('[prep] 예전 반영 결과 지우기 실패(반영은 계속):', reportId, err);
+  }
+  for (const id of [...new Set(ids)]) {
+    const o = await applyStockUnit(id, ctx);
+    try {
+      await recordStockOutcome(reportId, o);
+    } catch (err) {
+      console.error('[prep] 재고 반영 결과 저장 실패:', id, err);
+      o.recordError = err instanceof Error ? err.message : String(err);
+    }
+    out.push(o);
+  }
+  return out;
+}
+
+/** 재고 반영 상태만 다시 읽기(완료 보고 창이 발송 뒤 몇 초마다 확인) — 사진 항목은 안 읽음. */
+export async function getPrepStock(eventId: string): Promise<Result<{ report: PrepReport | null }>> {
+  const { data, error } = await createAdminClient().from(REPORTS_TABLE).select('*').eq('event_id', eventId).maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, report: data ? toReport(data as ReportRow) : null };
+}
+
+/**
+ * "재고 다시 반영" — 아직 IT재고에 반영 안 된 기기만 지금 바로 다시(카톡은 안 보냄). 발송 때와 같은 반영 함수,
+ * stock_applied 에 있는 번호는 건너뜀. skip = 이번에 창에서 이미 시도한 번호(같은 번호를 되풀이하지 않게).
+ * 한 번에 최대 6대(한 대에 시트 3번 — 응답이 30초를 안 넘게). 남으면(remaining) 창이 이어서 부름.
+ */
+export async function retryPrepStock(
+  eventId: string,
+  skip: string[] = [],
+): Promise<Result<{ outcomes: StockOutcome[]; remaining: number }>> {
+  try {
+    const supabase = createAdminClient();
+    const { data: rep, error } = await supabase.from(REPORTS_TABLE).select('*').eq('event_id', eventId).maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (!rep) return { ok: false, error: '완료 보고가 아직 없어요.' };
+    const report = rep as ReportRow;
+    const { data: ev, error: evError } = await supabase.from(CALENDAR_TABLE).select('date,title').eq('id', eventId).single();
+    if (evError) return { ok: false, error: evError.message };
+    const evRow = ev as { date: string; title: string };
+    const kind = eventKindOf(evRow.title);
+    if (kind === '철수') return { ok: false, error: '철수 건은 IT재고 위치를 바꾸지 않아요.' };
+    const done = new Set(report.stock_applied ?? []);
+    const tried = new Set(skip);
+    const pending = stockTargetIds(kind, report.units ?? []).filter((id) => !done.has(id) && !tried.has(id));
+    const batch = pending.slice(0, 6);
+    const outcomes = batch.length
+      ? await applyStockForReport(report.id, batch, { company: report.company, date: evRow.date, kind })
+      : [];
+    return { ok: true, outcomes, remaining: pending.length - batch.length };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** 공개 앨범 뷰어(/album?id=)용 — 로그인 없이 사진만. */

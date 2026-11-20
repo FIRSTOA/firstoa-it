@@ -119,6 +119,10 @@
 - **카톡**: 메신저 Supabase `outbox`에 `{ room: '! IT 출고', text }` INSERT → 카톡봇 polling. 키는 Vercel Env `MESSENGER_SUPABASE_ANON_KEY`(publishable).
 - **공개 앨범**: `/album?id=<report id>` (로그인 없음).
 - **재고**: 납품·교체 보고 발송 시 자산번호의 IT재고 위치 → `임대중`, 비고에 `yy.mm.dd 업체명` 추가, `stock_applied`로 재발송 중복 방지. 철수는 제외.
+  - 반영은 응답 뒤(`after()`, 16대에 1분 넘어서) — 결과를 한 대씩 보고 행에 기록: 됨 → `stock_applied`, 못 함 → `stock_issues`(자산번호 → not_found/error·이유, SQL `shipment_prep_schema.sql` 맨 끝 블록).
+    칸이 없으면(SQL 전) "기기 − stock_applied"로만 셈 — 없음 판정은 `isMissingStockIssuesColumn`(42703/PGRST204·문구에 stock_issues)만, 권한 오류는 오류로.
+    완료 보고 창이 발송 뒤 3초마다 `getPrepStock`으로 "📦 IT재고 반영" 상자를 갱신(90초), 결과 없는 기기는 5분 지나면 "끊김"(`prepStockView`). 목록 버튼·홈 카드에 "재고 반영 안 됨 n대".
+    `retryPrepStock`("🔁 재고 다시 반영") = 카톡 안 보냄, 같은 `applyStockUnit`, 한 번에 6대. 쓰기 전 읽은 줄의 자산번호가 다르면(10분 행 번호 기억이 밀림) 안 쓰고 error.
 
 ## 확인서 출고 기재 (/confirm-form 첫 탭) — 2026-11-18
 
@@ -149,6 +153,9 @@
 - 상태 테이블 `it_naver_sync_state`는 1000행 넘으면 잘리므로 페이지로 끝까지 읽음.
 - 저장 실패한 일정은 etag를 저장하지 않음(영구 누락 방지).
 - 삭제는 에러·밀린 분량 없을 때만, 동기화 기간 창(-30~+120일) 안의 일정만.
+- **최선노력 반영도 실패는 삼키지 말고 경고로 돌려줌**(2026-11-20): 앱 저장은 성공으로 두되 결과에 `naverWarning`(캘린더)·`sheetWarning`(판매리스트)
+  같은 이유를 실어 화면이 주황 알림(`.toast.toast-warn`, 저절로 안 닫힘)으로 "앱에는 저장, ○○는 실패 — 이렇게 하세요"를 보여 줌. 이유 문구는 `lib/syncFailure.ts`.
+  응답 뒤(`after()`)에 도는 일은 결과를 DB에 적어 화면이 읽게(출고 재고 `stock_issues`). 새 최선노력 반영을 만들 때도 같은 방식.
 
 ## 속도 (2026-11-18)
 

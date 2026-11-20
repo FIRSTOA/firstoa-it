@@ -386,6 +386,8 @@ tbody tr:hover{background:var(--indigo-50);}
   background:none; border:none; color:#fff; opacity:.7; font-size:18px; line-height:1; cursor:pointer; padding:2px 4px; flex-shrink:0;
 }
 .toast-close:hover{opacity:1;}
+/* 앱 저장은 됐지만 네이버·구글시트 반영이 실패 — 주황(저절로 안 닫힘, × 로 닫음) */
+.toast.toast-warn{background:#9a3412; line-height:1.5;}
 
 .inline-cell-input{
   width:100%; border:1px solid transparent; background:transparent; font:inherit; color:inherit; padding:4px 6px;

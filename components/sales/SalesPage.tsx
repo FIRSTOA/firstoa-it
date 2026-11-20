@@ -24,11 +24,15 @@ export default function SalesPage({
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [editing, setEditing] = useState<SaleEntry | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [toast, setToast] = useState({ msg: '', show: false });
+  const [toast, setToast] = useState({ msg: '', show: false, warn: false });
   const [pending, startTransition] = useTransition();
 
   function showToast(msg: string) {
-    setToast({ msg, show: true });
+    setToast({ msg, show: true, warn: false });
+  }
+  /** 앱 저장은 됐지만 구글시트 반영이 실패 — 주황 알림(저절로 안 닫힘, × 로 닫음). */
+  function showWarn(msg: string) {
+    setToast({ msg, show: true, warn: true });
   }
 
   function closeToast() {
@@ -47,7 +51,11 @@ export default function SalesPage({
       }
       setModalOpen(false);
       setEditing(null);
-      showToast(target ? '수정했어요.' : '등록했어요.');
+      if (result.sheetWarning) {
+        showWarn(
+          `앱에는 ${target ? '수정' : '등록'}했어요. 구글시트 '판매리스트' 탭에는 못 썼어요(${result.sheetWarning}) — 잠시 뒤 이 판매 건을 열어 [저장]을 한 번 더 누르면 시트에 다시 써요(순번으로 찾아 덮어써서 두 줄이 안 생겨요).`,
+        );
+      } else showToast(target ? '수정했어요.' : '등록했어요.');
     });
   }
 
@@ -59,7 +67,11 @@ export default function SalesPage({
         return;
       }
       setPasteModalOpen(false);
-      showToast(`${entries.length}건 등록했어요.`);
+      if (result.sheetWarning) {
+        showWarn(
+          `앱에는 ${entries.length}건 등록했어요. 구글시트 '판매리스트' 탭에는 못 썼어요(${result.sheetWarning})${result.seqRange ? ` — 순번 ${result.seqRange} 줄이 시트에 없어요. 시트에 직접 옮기거나 개발 담당에게 알려 주세요.` : ' — 개발 담당에게 알려 주세요.'}`,
+        );
+      } else showToast(`${entries.length}건 등록했어요.`);
     });
   }
 
@@ -67,7 +79,11 @@ export default function SalesPage({
     if (!confirm('이 판매 건을 삭제할까요?')) return;
     startTransition(async () => {
       const result = await deleteSale(id);
-      showToast(result.ok ? '삭제했어요.' : result.error);
+      if (result.ok && result.sheetWarning) {
+        showWarn(
+          `앱에서는 지웠어요. 구글시트 '판매리스트' 탭의 ${result.seq !== null ? `순번 ${result.seq} ` : ''}줄은 못 지웠어요(${result.sheetWarning}) — 시트에서 그 줄을 직접 지워 주세요.`,
+        );
+      } else showToast(result.ok ? '삭제했어요.' : result.error);
     });
   }
 
@@ -98,14 +114,28 @@ export default function SalesPage({
     startTransition(async () => {
       let success = 0;
       const failures: string[] = [];
+      const sheetMissed: string[] = []; // 앱에선 지웠지만 시트에서 못 지운 순번
+      let sheetReason = '';
       for (const id of selectedIds) {
         const result = await deleteSale(id);
-        if (result.ok) success++;
-        else failures.push(result.error);
+        if (result.ok) {
+          success++;
+          if (result.sheetWarning) {
+            sheetMissed.push(result.seq !== null ? String(result.seq) : '?');
+            sheetReason ||= result.sheetWarning;
+          }
+        } else failures.push(result.error);
       }
       clearSelection();
-      if (failures.length === 0) showToast(`${success}건 삭제했어요.`);
-      else showToast(`${success}건 삭제, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`);
+      const base =
+        failures.length === 0
+          ? `${success}건 삭제했어요.`
+          : `${success}건 삭제, ${failures.length}건 실패 — ${failures.slice(0, 2).join(' / ')}`;
+      if (sheetMissed.length) {
+        showWarn(
+          `${base} 그중 ${sheetMissed.length}건(순번 ${sheetMissed.join(', ')})은 구글시트 '판매리스트' 탭에서 못 지웠어요(${sheetReason}) — 시트에서 그 줄을 직접 지워 주세요.`,
+        );
+      } else showToast(base);
     });
   }
 
@@ -189,7 +219,7 @@ export default function SalesPage({
 
       <SoldAssetsPanel assets={soldFromInventory} />
 
-      <div className={`toast${toast.show ? ' show' : ''}`}>
+      <div className={`toast${toast.show ? ' show' : ''}${toast.warn ? ' toast-warn' : ''}`} role={toast.warn ? 'alert' : undefined}>
         <span>{toast.msg}</span>
         <button type="button" className="toast-close" onClick={closeToast} aria-label="닫기">
           ×

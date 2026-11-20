@@ -129,6 +129,17 @@ export async function loadPrepOverview(today: string): Promise<PrepOverview> {
     const targetEvents = res.events.filter((e) => e.date === target);
     const remaining = targetEvents.filter((e) => !isPrepared(e)).length;
     const unreported = todayEvents.filter((e) => !e.reportSent).length;
+    // 보낸 완료 보고 중 IT재고 위치를 못 바꾼 것(목록 범위 -14~+60일 전체)
+    const stockProblemEvents = res.events.filter((e) => e.stockProblem > 0);
+    const stockProblemUnits = stockProblemEvents.reduce((n, e) => n + e.stockProblem, 0);
+    const stockAlert = stockProblemEvents.length
+      ? `IT재고 반영 안 된 완료 보고 ${stockProblemEvents.length}건(${stockProblemUnits}대) — 출고 준비에서 완료 보고를 열어 [재고 다시 반영]`
+      : null;
+    const mainAlert = remaining
+      ? `${shortDateLabel(target)} 출고분 중 준비 안 된 일정 ${remaining}건`
+      : unreported
+        ? `오늘 출고분 중 완료 보고(카톡) 안 보낸 일정 ${unreported}건`
+        : null;
     return {
       ...base,
       todayEvents,
@@ -144,12 +155,8 @@ export async function loadPrepOverview(today: string): Promise<PrepOverview> {
           { label: '오늘 출고', value: todayEvents.length },
           { label: '보고 미발송', value: unreported, tone: unreported ? 'warn' : undefined },
         ],
-        alert: remaining
-          ? `${shortDateLabel(target)} 출고분 중 준비 안 된 일정 ${remaining}건`
-          : unreported
-            ? `오늘 출고분 중 완료 보고(카톡) 안 보낸 일정 ${unreported}건`
-            : null,
-        tone: remaining ? 'bad' : unreported ? 'warn' : 'good',
+        alert: [mainAlert, stockAlert].filter(Boolean).join(' · ') || null,
+        tone: remaining ? 'bad' : unreported || stockAlert ? 'warn' : 'good',
       },
     };
   } catch (err) {

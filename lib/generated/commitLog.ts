@@ -3,6 +3,17 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "d8755ed37a",
+    "date": "2026-11-20",
+    "time": "19:13",
+    "subject": "메뉴 정리 + 사용설명서 — 위 메뉴 6개(홈 · 통합 캘린더 · 재고관리 · 임대·청구 · 계약관리 · 사용설명서, 묶음 첫 화면으로·핸드폰은 옆으로 밀어 봄), 왼쪽 메뉴 계약관리 묶음 → 소프트웨어 계약(/contracts?tab=sw) / PC 유지보수(?tab=pcm) 따로(탭별 제목·활성 표시, 화면 위 칩도 Link) · 진행 표시는 실제 주소(경로+?뒤) 바뀜으로 끔 · 사용설명서 /manual(CS팀 FIELD 웹앱 참고): 묶음별 설명서 카드 + 검은 소개 상자·\"이 화면이 해 주는 것\" 색 카드·번호 꼭지·따라가는 목차, 설명서마다 정적 주소 /manual/<key> 17개(링크 복사·새 탭·화면 열기), 버튼마다 시트·네이버·카톡·works 영향 범위 · 내용 lib/manual/docs/*.ts(형식 types.ts, 순서 index.ts) · CLAUDE.md 메뉴 구성·사용설명서 절",
+    "crew": [
+      "developer",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "2dff636930",
     "date": "2026-11-20",
     "time": "18:12",

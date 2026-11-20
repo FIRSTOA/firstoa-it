@@ -21,8 +21,10 @@ import {
   type NaverCalendarConnectionRow,
 } from '@/lib/calendar';
 import { CALENDAR_TABLE, createAdminClient } from '@/lib/supabase/server';
+import { naverFailReason } from '@/lib/syncFailure';
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
+/** naverWarning = 앱 저장은 됐지만 네이버 반영이 실패한 이유(화면이 경고로 알림). */
+export type ActionResult = { ok: true; naverWarning?: string } | { ok: false; error: string };
 
 const NAVER_CALENDARS_TABLE = 'it_naver_calendars';
 
@@ -38,16 +40,18 @@ function toMessage(error: { code?: string; message: string }): string {
 }
 
 /**
- * 네이버 반영은 최선노력입니다 — Supabase 쓰기가 이 앱의 기준값이고, 실패해도 사용자에게
- * 보이는 결과(로컬 저장 성공)는 바뀌지 않습니다. lib/inventory/movements.ts의
- * logAssetMovement와 동일한 원칙.
+ * 네이버 반영은 최선노력입니다 — Supabase 쓰기가 이 앱의 기준값이라 실패해도 앱 저장은
+ * 성공으로 둡니다. 다만 실패를 삼키지 않고 이유(쉬운 말)를 돌려줘서, 화면이 "앱에는 저장,
+ * 네이버는 실패 — 다시 [저장]"을 알립니다. null = 반영 성공(또는 네이버 연동 설정 없음).
  */
-async function syncToNaverBestEffort(fn: () => Promise<void>, label: string): Promise<void> {
-  if (!isNaverCalDavConfigured()) return;
+async function syncToNaverBestEffort(fn: () => Promise<void>, label: string): Promise<string | null> {
+  if (!isNaverCalDavConfigured()) return null;
   try {
     await fn();
+    return null;
   } catch (err) {
     console.error(`[calendar] ${label} 실패(네이버):`, err);
+    return naverFailReason(err);
   }
 }
 
@@ -66,7 +70,9 @@ export async function listEventsInRange(startDate: string, endDate: string): Pro
   return ((data ?? []) as CalendarEventRow[]).map(rowToCalendarEvent);
 }
 
-export async function createEvent(input: CalendarEventInput): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+export async function createEvent(
+  input: CalendarEventInput,
+): Promise<{ ok: true; id: string; naverWarning?: string } | { ok: false; error: string }> {
   const invalid = validate(input);
   if (invalid) return { ok: false, error: invalid };
 
@@ -78,8 +84,9 @@ export async function createEvent(input: CalendarEventInput): Promise<{ ok: true
   }
 
   const id = (data as CalendarEventRow).id;
+  let naverWarning: string | null = null;
   if (input.calendarId) {
-    await syncToNaverBestEffort(async () => {
+    naverWarning = await syncToNaverBestEffort(async () => {
       const uid = `it-${id}`;
       const ical = buildIcal({
         uid,
@@ -96,7 +103,7 @@ export async function createEvent(input: CalendarEventInput): Promise<{ ok: true
   }
 
   revalidatePath('/calendar');
-  return { ok: true, id };
+  return naverWarning ? { ok: true, id, naverWarning } : { ok: true, id };
 }
 
 export async function updateEvent(id: string, input: CalendarEventInput): Promise<ActionResult> {
@@ -113,7 +120,7 @@ export async function updateEvent(id: string, input: CalendarEventInput): Promis
     return { ok: false, error: toMessage(error) };
   }
 
-  await syncToNaverBestEffort(async () => {
+  const naverWarning = await syncToNaverBestEffort(async () => {
     const uid = `it-${id}`;
     // 연결된 캘린더가 바뀌었으면 예전 캘린더에서는 지웁니다.
     if (prevCalendarId && prevCalendarId !== input.calendarId) {
@@ -137,7 +144,7 @@ export async function updateEvent(id: string, input: CalendarEventInput): Promis
   }, 'updateEvent');
 
   revalidatePath('/calendar');
-  return { ok: true };
+  return naverWarning ? { ok: true, naverWarning } : { ok: true };
 }
 
 export async function deleteEvent(id: string): Promise<ActionResult> {
@@ -145,9 +152,11 @@ export async function deleteEvent(id: string): Promise<ActionResult> {
   const { data } = await supabase.from(CALENDAR_TABLE).select('*').eq('id', id).maybeSingle();
   const calendarId = (data as CalendarEventRow | null)?.calendar_id ?? null;
 
-  if (calendarId) {
-    await syncToNaverBestEffort(() => naverDeleteEvent(calendarId, `it-${id}`), 'deleteEvent');
-  }
+  // 네이버 삭제가 실패해도 앱에서는 지웁니다(예전 동작 그대로) — 대신 화면이 "네이버에는 남아
+  // 있어요, 네이버에서 직접 지워 주세요"를 알립니다(앱 줄이 없어져 앱에서 다시 지울 수 없어서).
+  const naverWarning = calendarId
+    ? await syncToNaverBestEffort(() => naverDeleteEvent(calendarId, `it-${id}`), 'deleteEvent')
+    : null;
 
   const { error } = await supabase.from(CALENDAR_TABLE).delete().eq('id', id);
   if (error) {
@@ -156,7 +165,7 @@ export async function deleteEvent(id: string): Promise<ActionResult> {
   }
 
   revalidatePath('/calendar');
-  return { ok: true };
+  return naverWarning ? { ok: true, naverWarning } : { ok: true };
 }
 
 // ── 연결된 네이버 캘린더 관리 ──────────────────────────────────────

@@ -42,7 +42,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
   const [defaultDate, setDefaultDate] = useState<string>(todayYmd());
-  const [toast, setToast] = useState({ msg: '', show: false });
+  const [toast, setToast] = useState({ msg: '', show: false, warn: false });
   const [pending, startTransition] = useTransition();
   const [viewMode, setViewMode] = useState<'month' | 'list' | 'day'>('month');
   const [searchTerm, setSearchTerm] = useState('');
@@ -61,7 +61,11 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
   }
 
   function showToast(msg: string) {
-    setToast({ msg, show: true });
+    setToast({ msg, show: true, warn: false });
+  }
+  /** 앱 저장은 됐지만 네이버 반영이 실패 — 주황 알림(저절로 안 닫힘, × 로 닫음). */
+  function showWarn(msg: string) {
+    setToast({ msg, show: true, warn: true });
   }
   function closeToast() {
     setToast((t) => ({ ...t, show: false }));
@@ -207,7 +211,11 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
       }
       setModalOpen(false);
       setEditing(null);
-      showToast(target ? '수정했어요.' : '등록했어요.');
+      if (result.naverWarning) {
+        showWarn(
+          `앱에는 ${target ? '수정' : '등록'}했어요. 네이버 캘린더에는 못 ${target ? '바꿨어요' : '올렸어요'}(${result.naverWarning}) — 잠시 뒤 이 일정을 열어 [저장]을 한 번 더 누르면 다시 올라가요.`,
+        );
+      } else showToast(target ? '수정했어요.' : '등록했어요.');
       refetch();
     });
   }
@@ -233,19 +241,28 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
       if (!result.ok) {
         showToast(result.error);
         refetch();
+      } else if (result.naverWarning) {
+        showWarn(
+          `"${ev.title}" ${nextStatus === '완료' ? '완료 체크' : '완료 해제'}는 앱에 저장했어요. 네이버 캘린더에는 못 바꿨어요(${result.naverWarning}) — 잠시 뒤 이 일정을 열어 [저장]을 한 번 더 눌러 주세요.`,
+        );
       }
     });
   }
 
   function handleDelete(id: string) {
     if (!confirm('이 일정을 삭제할까요?')) return;
+    const title = events.find((e) => e.id === id)?.title ?? '';
     startTransition(async () => {
       const result = await deleteEvent(id);
       if (result.ok) {
         setModalOpen(false);
         setEditing(null);
       }
-      showToast(result.ok ? '삭제했어요.' : result.error);
+      if (result.ok && result.naverWarning) {
+        showWarn(
+          `앱에서는 지웠어요. 네이버 캘린더에는 ${title ? `"${title}" 일정이 ` : ''}아직 남아 있어요(${result.naverWarning}) — 네이버 캘린더에서 직접 지워 주세요.`,
+        );
+      } else showToast(result.ok ? '삭제했어요.' : result.error);
       refetch();
     });
   }
@@ -547,7 +564,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
         onChanged={refetchConnectedCalendars}
       />
 
-      <div className={`toast${toast.show ? ' show' : ''}`}>
+      <div className={`toast${toast.show ? ' show' : ''}${toast.warn ? ' toast-warn' : ''}`} role={toast.warn ? 'alert' : undefined}>
         <span>{toast.msg}</span>
         <button type="button" className="toast-close" onClick={closeToast} aria-label="닫기">
           ×

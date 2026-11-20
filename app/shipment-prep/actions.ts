@@ -7,11 +7,15 @@ import {
   eventKindOf,
   guessCompany,
   isItPrepTarget,
+  isMissingStockIssuesColumn,
   parseEventTitle,
   parseItemsFromMemo,
+  prepStockView,
   prepTitleTags,
   type PrepChecks,
   type PrepStage,
+  type PrepStockIssues,
+  type PrepUnit,
 } from '@/lib/shipmentPrep';
 import { CALENDAR_TABLE, createAdminClient, isSupabaseConfigured } from '@/lib/supabase/server';
 
@@ -35,6 +39,8 @@ export type PrepEventRow = {
   prepChecks: PrepChecks;
   reportSent: boolean;
   photoCount: number;
+  /** 보낸 보고 중 IT재고 위치를 못 바꾼 기기 수(IT재고에 없음·실패·끊김) — 0이면 문제 없음 */
+  stockProblem: number;
 };
 
 export type PrepListResult = { ok: true; events: PrepEventRow[] } | { ok: false; error: string };
@@ -72,18 +78,29 @@ export async function listPrepEvents(): Promise<PrepListResult> {
   );
 
   const ids = rows.map((r) => r.id);
+  type ReportBrief = {
+    event_id: string;
+    sent_at: string | null;
+    photos: unknown[];
+    units: PrepUnit[] | null;
+    stock_applied: string[] | null;
+    stock_issues?: PrepStockIssues | null;
+    updated_at: string | null;
+  };
+  // 재고 반영 결과(stock_issues)도 같이 — SQL 실행 전이라 칸이 없을 때만 그 칸 빼고 다시 읽음
+  const loadReports = async () => {
+    const cols = 'event_id,sent_at,photos,units,stock_applied,updated_at';
+    const full = await supabase.from(PREP_REPORTS_TABLE).select(`${cols},stock_issues`).in('event_id', ids);
+    if (!isMissingStockIssuesColumn(full.error)) return full;
+    return supabase.from(PREP_REPORTS_TABLE).select(cols).in('event_id', ids);
+  };
   const [prepRes, reportRes] = ids.length
-    ? await Promise.all([
-        supabase.from(PREP_EVENTS_TABLE).select('event_id,prep_checks').in('event_id', ids),
-        supabase.from(PREP_REPORTS_TABLE).select('event_id,sent_at,photos').in('event_id', ids),
-      ])
+    ? await Promise.all([supabase.from(PREP_EVENTS_TABLE).select('event_id,prep_checks').in('event_id', ids), loadReports()])
     : [{ data: [] }, { data: [] }];
   const checksById = new Map(
     ((prepRes.data ?? []) as { event_id: string; prep_checks: PrepChecks }[]).map((r) => [r.event_id, r.prep_checks ?? {}]),
   );
-  const reportById = new Map(
-    ((reportRes.data ?? []) as { event_id: string; sent_at: string | null; photos: unknown[] }[]).map((r) => [r.event_id, r]),
-  );
+  const reportById = new Map(((reportRes.data ?? []) as unknown as ReportBrief[]).map((r) => [r.event_id, r]));
 
   return {
     ok: true,
@@ -107,6 +124,16 @@ export async function listPrepEvents(): Promise<PrepListResult> {
         prepChecks: checksById.get(r.id) ?? {},
         reportSent: !!rep?.sent_at,
         photoCount: Array.isArray(rep?.photos) ? rep!.photos.length : 0,
+        stockProblem: rep
+          ? prepStockView({
+              kind: eventKindOf(r.title),
+              units: rep.units ?? [],
+              applied: rep.stock_applied ?? [],
+              issues: rep.stock_issues ?? {},
+              attempted: !!rep.sent_at || (rep.stock_applied ?? []).length > 0 || Object.keys(rep.stock_issues ?? {}).length > 0,
+              updatedAt: rep.updated_at,
+            }).problemCount
+          : 0,
       };
     }),
   };

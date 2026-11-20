@@ -7,8 +7,10 @@ import {
   deletePhotoItem,
   deletePrepPhotos,
   getPrepReport,
+  getPrepStock,
   lookupUnitByAsset,
   markPrepReportSent,
+  retryPrepStock,
   savePrepReport,
   sendPrepReport,
   appendPrepPhotos,
@@ -16,7 +18,20 @@ import {
 } from '@/app/shipment-prep/reportActions';
 import PhotoLightbox from '@/components/PhotoLightbox';
 import { resizeImageFile } from '@/lib/imageResize';
-import { countUnits, KAKAO_ROOM, shortDateLabel, type PrepPhoto, type PrepUnit } from '@/lib/shipmentPrep';
+import {
+  countUnits,
+  KAKAO_ROOM,
+  prepStockView,
+  shortDateLabel,
+  type PrepPhoto,
+  type PrepReport,
+  type PrepStockIssues,
+  type PrepUnit,
+} from '@/lib/shipmentPrep';
+
+/** 저장된 보고의 재고 반영 기록(창에서 고치는 중인 기기 목록이 아니라 서버에 저장된 것 기준) */
+type StockRecord = { units: PrepUnit[]; applied: string[]; issues: PrepStockIssues; updatedAt: string | null };
+const toStockRecord = (r: PrepReport): StockRecord => ({ units: r.units, applied: r.stockApplied, issues: r.stockIssues, updatedAt: r.updatedAt });
 
 type Props = { event: PrepEventRow; people: string[]; onClose: () => void };
 
@@ -54,6 +69,39 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
   const [serialChoices, setSerialChoices] = useState<Record<number, string[]>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const touchedSerial = useRef<Set<number>>(new Set());
+  // IT재고 반영 결과 — 발송 뒤 응답 뒤(after)에 돌아서, 창이 몇 초마다 다시 읽어 보여 줌
+  const [stock, setStock] = useState<StockRecord | null>(null);
+  const [stockWatching, setStockWatching] = useState(false);
+  const [stockWatched, setStockWatched] = useState(false);
+  const [stockRetrying, setStockRetrying] = useState('');
+  // 다시 반영 결과 중 서버에 못 적은 것(SQL 실행 전 등) — 화면에서만 이유를 보여 주려고
+  const [retryIssues, setRetryIssues] = useState<PrepStockIssues>({});
+  const [stockNotes, setStockNotes] = useState<string[]>([]);
+  const [stockReadError, setStockReadError] = useState('');
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const stockView = stock
+    ? prepStockView({
+        kind: event.kind,
+        units: stock.units,
+        applied: stock.applied,
+        issues: { ...retryIssues, ...stock.issues },
+        // 보냈거나 · 이 창에서 "고치기만"으로 반영을 돌렸거나 · 반영 기록이 있으면
+        attempted:
+          !!sentAt ||
+          stockWatching ||
+          stockWatched ||
+          stock.applied.length > 0 ||
+          Object.keys(stock.issues).length > 0 ||
+          Object.keys(retryIssues).length > 0,
+        updatedAt: stock.updatedAt,
+      })
+    : null;
 
   useEffect(() => {
     (async () => {
@@ -75,6 +123,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
         setPhotos(r.photos);
         setChecked(r.checkedItems);
         setSentAt(r.sentAt);
+        setStock(toStockRecord(r));
       } else {
         setAuthor(doneBy);
         setUnits(Array.from({ length: countUnits(event.items) }, blankUnit));
@@ -95,8 +144,10 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     lookedUp.current[i] = id;
     setInfo(`${id} 조회 중…`);
     const found = await lookupUnitByAsset(id, `${event.title} ${event.items.join(' ')}`);
+    // 보내기 전에 미리 — IT재고에서 못 찾은 번호는 발송해도 재고 위치가 안 바뀜(철수는 원래 안 바꿈)
+    const stockNote = event.kind !== '철수' && found.source !== 'inventory' ? ' ⚠️ IT재고에서 못 찾은 번호라 보고를 보내도 IT재고 위치는 안 바뀔 수 있어요.' : '';
     if (!found.source) {
-      setInfo(`${id}: IT재고·임대리스트에서 못 찾았어요 — 직접 입력해주세요.`);
+      setInfo(`${id}: IT재고·임대리스트에서 못 찾았어요 — 직접 입력해주세요.${stockNote}`);
       return;
     }
     // 빈 칸만 채움 — 직접 친 값은 덮어쓰지 않음
@@ -119,7 +170,8 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     if (found.serials.length > 1) setSerialChoices((prev) => ({ ...prev, [i]: found.serials }));
     setInfo(
       `${id}: ${found.source === 'inventory' ? `IT재고(${found.category})` : '임대리스트'}에서 불러왔어요.` +
-        (found.duplicates?.length ? ` ⚠️ 같은 자산번호가 ${found.duplicates.join(', ')}에도 있어요 — 일정 품목에 맞는 쪽으로 채웠어요.` : ''),
+        (found.duplicates?.length ? ` ⚠️ 같은 자산번호가 ${found.duplicates.join(', ')}에도 있어요 — 일정 품목에 맞는 쪽으로 채웠어요.` : '') +
+        stockNote,
     );
   }
 
@@ -200,15 +252,105 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
       }
       if (mode === 'fix') {
         setInfo('수정 내용을 저장했어요(카톡은 안 보냈어요).');
+        if (res.stockPending > 0) void watchStock();
+        else void refreshStock();
         return;
       }
-      // 발송되면 창을 닫아요. 재고 위치 변경은 뒤에서 처리됨.
       setSentAt(new Date().toISOString());
+      // 재고 위치 변경은 뒤에서 처리됨 — 바꿀 기기가 있으면 창을 닫지 않고 결과를 보여 줌(닫아도 계속됨)
+      if (res.stockPending > 0) {
+        setInfo('카톡 보고를 보냈어요.');
+        void watchStock();
+        return;
+      }
       onClose();
     } catch (err) {
       setError(`처리 중 오류가 났어요: ${err instanceof Error ? err.message : String(err)} — 카톡이 이미 나갔는지 확인해주세요.`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** 저장된 재고 반영 기록을 다시 읽음. 못 읽으면 상자 안에 이유를 띄우고(다음에 읽히면 사라짐) null. */
+  async function refreshStock(): Promise<StockRecord | null> {
+    let res: Awaited<ReturnType<typeof getPrepStock>>;
+    try {
+      res = await getPrepStock(event.id);
+    } catch (err) {
+      if (alive.current) setStockReadError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+    if (!alive.current) return null;
+    if (!res.ok) {
+      setStockReadError(res.error);
+      return null;
+    }
+    setStockReadError('');
+    if (!res.report) return null;
+    const rec = toStockRecord(res.report);
+    setStock(rec);
+    return rec;
+  }
+
+  /** 발송 직후 — 응답 뒤에 도는 재고 반영을 3초마다 다시 읽어 진행·결과를 보여 줌(최대 90초). */
+  async function watchStock() {
+    setStockWatching(true);
+    setStockWatched(false);
+    setRetryIssues({});
+    setStockNotes([]);
+    const until = Date.now() + 90_000;
+    try {
+      while (alive.current && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const rec = await refreshStock();
+        if (!rec) continue;
+        const v = prepStockView({ kind: event.kind, units: rec.units, applied: rec.applied, issues: rec.issues, attempted: true, updatedAt: rec.updatedAt });
+        if (!v.pending.length) break;
+      }
+    } finally {
+      if (alive.current) {
+        setStockWatching(false);
+        setStockWatched(true);
+      }
+    }
+  }
+
+  /** [재고 다시 반영] — 아직 안 된 기기만 다시(카톡 안 보냄). 서버가 한 번에 6대씩, 남으면 이어서 부름. */
+  async function retryStock() {
+    setError('');
+    setStockNotes([]);
+    const tried: string[] = [];
+    const notes: string[] = [];
+    const failed: PrepStockIssues = {};
+    const total = stockView ? stockView.issues.length + stockView.pending.length : 0;
+    setStockRetrying(`재고 다시 반영 중… 0/${total}`);
+    setBusy(true); // 도는 동안 다른 발송·고치기와 겹치지 않게
+    try {
+      for (let round = 0; round < 30; round++) {
+        const res = await retryPrepStock(event.id, tried);
+        if (!res.ok) {
+          setError(`재고 다시 반영을 못 했어요: ${res.error}`);
+          break;
+        }
+        for (const o of res.outcomes) {
+          tried.push(o.id);
+          if (o.result !== 'applied') failed[o.id] = { reason: o.result, message: o.message, at: new Date().toISOString() };
+          if (o.recordError) notes.push(`${o.id}: 처리 결과를 보고에 못 적었어요(${o.recordError}) — IT 재고 리스트에서 직접 확인해 주세요.`);
+        }
+        if (alive.current) setStockRetrying(`재고 다시 반영 중… ${tried.length}/${Math.max(total, tried.length + res.remaining)}`);
+        if (!res.remaining || !res.outcomes.length || !alive.current) break;
+      }
+    } catch (err) {
+      setError(`재고 다시 반영 중 오류가 났어요: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      await refreshStock();
+      if (alive.current) {
+        setRetryIssues(failed);
+        setStockNotes(notes);
+        setStockRetrying('');
+        setStockWatched(true);
+        setBusy(false);
+      }
     }
   }
 
@@ -461,6 +603,67 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
           </>
         )}
 
+        {stockView && stockView.targets.length > 0 && (() => {
+          const v = stockView;
+          const pendingShown = v.pending.length > 0 && (v.pendingStale || stockWatched);
+          const problem = v.issues.length > 0 || pendingShown;
+          const idle = !stockWatching && !stockRetrying;
+          return (
+            <div
+              role={problem && idle ? 'alert' : undefined}
+              style={{
+                marginTop: 10,
+                padding: '10px 12px',
+                borderRadius: 8,
+                fontSize: 12.5,
+                lineHeight: 1.55,
+                border: `1px solid ${problem ? '#fdba74' : '#bbf7d0'}`,
+                background: problem ? '#fff7ed' : '#f0fdf4',
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>
+                📦 IT재고 반영 — {v.targets.length}대 중 {v.applied.length}대 임대중으로 바꿈
+              </div>
+              {stockWatching && <div>IT재고 위치를 바꾸는 중… {v.applied.length}/{v.targets.length} (창을 닫아도 계속돼요)</div>}
+              {stockRetrying && <div>{stockRetrying}</div>}
+              {idle && v.applied.length === v.targets.length && (
+                <div style={{ color: '#166534' }}>✅ {v.targets.length}대 모두 IT재고 위치를 임대중으로 바꿨어요.</div>
+              )}
+              {v.issues.map((i) => (
+                <div key={i.id} style={{ color: '#b45309' }}>
+                  ⚠️ {i.id}: {i.message}
+                </div>
+              ))}
+              {idle && v.pending.length > 0 && (
+                <div style={{ color: pendingShown ? '#b45309' : 'var(--ink-500)' }}>
+                  {pendingShown
+                    ? `⚠️ 결과가 안 남은 기기 ${v.pending.length}대(${v.pending.join(', ')}) — 처리 중에 끊겼거나 IT재고에 없는 번호일 수 있어요.`
+                    : `⏳ ${v.pending.length}대(${v.pending.join(', ')}) 처리 중이에요 — 잠시 뒤 창을 다시 열어 보세요.`}
+                </div>
+              )}
+              {stockNotes.map((n) => (
+                <div key={n} style={{ color: '#b45309' }}>
+                  ⚠️ {n}
+                </div>
+              ))}
+              {stockReadError && (
+                <div style={{ color: 'var(--red-600)' }}>
+                  반영 상태를 다시 읽지 못했어요({stockReadError}) — 위 숫자는 마지막으로 읽은 것이에요. 창을 닫았다 다시 열어 보세요.
+                </div>
+              )}
+              {idle && problem && (
+                <div style={{ marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-ghost" onClick={retryStock} disabled={busy}>
+                    🔁 재고 다시 반영
+                  </button>
+                  <span style={{ color: 'var(--ink-500)' }}>
+                    카톡은 다시 안 보내요. 자산번호가 틀렸으면 위 기기 칸을 고친 뒤 [✏️ 고치기만(카톡 안 보냄)]을 눌러요.
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {info && <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: '#166534', marginTop: 8 }}>{info}</div>}
         {error && <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: 'var(--red-600)', marginTop: 8 }}>{error}</div>}
 
@@ -494,7 +697,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
             type="button"
             className="btn btn-ghost"
             onClick={() => send('fix')}
-            disabled={busy || loading || !!uploading}
+            disabled={busy || loading || !!uploading || stockWatching}
           >
             ✏️ 고치기만(카톡 안 보냄)
           </button>
@@ -502,7 +705,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
             type="button"
             className="btn btn-ghost"
             onClick={() => send('resend')}
-            disabled={busy || loading || !!uploading || !sentAt}
+            disabled={busy || loading || !!uploading || !sentAt || stockWatching}
             title={sentAt ? '' : '발송한 뒤에 쓸 수 있어요'}
           >
             🔁 수정해서 다시 보내기

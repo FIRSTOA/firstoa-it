@@ -191,6 +191,10 @@ export default function ShipmentPrepPage() {
         onClick={() => setReportEvent(ev)}
       >
         {ev.reportSent ? `✅ 카톡 발송됨 · 사진 ${ev.photoCount}장` : ev.photoCount ? `📷 완료 보고 (미발송) · 사진 ${ev.photoCount}장` : `📷 완료 보고`}
+        {ev.stockProblem > 0 && (
+          // 창을 열면 어떤 기기가 왜 안 됐는지와 [재고 다시 반영] 버튼이 보임
+          <span style={{ marginLeft: 6, color: '#b45309', fontWeight: 700 }}>⚠️ 재고 반영 안 됨 {ev.stockProblem}대</span>
+        )}
       </button>
     );
   }
