@@ -26,18 +26,25 @@ async function ContractsBody({ tab }: { tab: ContractTab }) {
   );
 }
 
+/** 계약관리 메뉴 아래 두 화면 — 왼쪽 메뉴에서 따로 고름(주소 ?tab=sw / ?tab=pcm) */
+const TAB_SHELL = {
+  sw: { menu: '소프트웨어 계약', title: '💿 소프트웨어 계약', note: '거래처별 소프트웨어 라이선스·좌석 — 거래처 목록은 firstoa-works에서 바로 읽어요' },
+  pcm: { menu: 'PC 유지보수', title: '🛠️ PC 유지보수', note: 'PC 유지보수 거래처 방문 기록 — 준비 중(2단계)' },
+} as const;
+
 export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const sp = await searchParams;
   const tab: ContractTab = sp.tab === 'pcm' ? 'pcm' : 'sw';
+  const shell = TAB_SHELL[tab];
   if (!isSupabaseConfigured()) {
     return (
-      <Shell activeMenu="계약 관리" title="📑 계약 관리">
+      <Shell activeMenu={shell.menu} title={shell.title}>
         <SetupGuide schemaFile="supabase/contracts_schema.sql" />
       </Shell>
     );
   }
   return (
-    <Shell activeMenu="계약 관리" title="📑 계약 관리" note="소프트웨어 계약·PC 유지보수 — 거래처 목록은 firstoa-works에서 바로 읽어요">
+    <Shell activeMenu={shell.menu} title={shell.title} note={shell.note}>
       <Suspense key={tab} fallback={<PageLoading />}>
         <ContractsBody tab={tab} />
       </Suspense>

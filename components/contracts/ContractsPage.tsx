@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getContractsOverview } from '@/app/contracts/actions';
@@ -29,7 +30,9 @@ function leftText(expiresAt: string | null, now: number | null): string {
 
 export default function ContractsPage({ initialTab, overview: initialOverview, overviewError, unlock: initialUnlock }: Props) {
   const router = useRouter();
-  const [tab, setTab] = useState<ContractTab>(initialTab);
+  // 소프트웨어 계약 / PC 유지보수는 왼쪽 메뉴에서 따로 고르는 화면(주소 ?tab=) — 탭이 바뀌면 page.tsx 의
+  // <Suspense key={tab}> 때문에 이 화면이 새로 만들어지므로 여기선 고정값
+  const tab = initialTab;
   const [overview, setOverview] = useState<ContractsOverview | null>(initialOverview);
   const [error, setError] = useState<string | null>(overviewError);
   const [loading, setLoading] = useState(false);
@@ -132,19 +135,6 @@ export default function ContractsPage({ initialTab, overview: initialOverview, o
     if (unlock.unlocked && unlock.expiresAt && now !== null && now >= Date.parse(unlock.expiresAt)) onNeedUnlock();
   }, [now, unlock.unlocked, unlock.expiresAt, onNeedUnlock]);
 
-  function switchTab(t: ContractTab) {
-    if (t === tab) return;
-    setTab(t);
-    try {
-      const url = new URL(window.location.href);
-      url.searchParams.set('tab', t);
-      window.history.replaceState(null, '', url.toString());
-    } catch {
-      /* 주소 바꾸기 실패 — 화면은 그대로 바뀜 */
-    }
-    if (t === 'sw' && unlock.unlocked) void load('sw', false);
-  }
-
   const fail = useCallback(
     (r: { error: string; needUnlock?: boolean }) => {
       if (r.needUnlock) onNeedUnlock();
@@ -183,14 +173,15 @@ export default function ContractsPage({ initialTab, overview: initialOverview, o
     <ContractsCtx.Provider value={ctx}>
       <div className="app">
         <div className="ct-topline">
-          <div className="chip-group" role="tablist">
-            <button type="button" role="tab" aria-selected={tab === 'sw'} className={`chip${tab === 'sw' ? ' active' : ''}`} onClick={() => switchTab('sw')}>
-              소프트웨어 계약
-            </button>
-            <button type="button" role="tab" aria-selected={tab === 'pcm'} className={`chip${tab === 'pcm' ? ' active' : ''}`} onClick={() => switchTab('pcm')}>
-              PC 유지보수
-            </button>
-          </div>
+          {/* 왼쪽 메뉴(계약관리 → 소프트웨어 계약 / PC 유지보수)와 같은 이동 — 핸드폰에서 서랍을 안 열고 오가게 */}
+          <nav className="chip-group" aria-label="계약관리 화면">
+            <Link href="/contracts?tab=sw" aria-current={tab === 'sw' ? 'page' : undefined} className={`chip${tab === 'sw' ? ' active' : ''}`}>
+              💿 소프트웨어 계약
+            </Link>
+            <Link href="/contracts?tab=pcm" aria-current={tab === 'pcm' ? 'page' : undefined} className={`chip${tab === 'pcm' ? ' active' : ''}`}>
+              🛠️ PC 유지보수
+            </Link>
+          </nav>
           <div className="ct-status">
             {!gateOn && tab === 'sw' && overview && overview.source === 'works' && (
               <span className="ct-source good">

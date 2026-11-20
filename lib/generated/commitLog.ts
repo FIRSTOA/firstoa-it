@@ -3,6 +3,18 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "2dff636930",
+    "date": "2026-11-20",
+    "time": "18:12",
+    "subject": "계약 관리 · 시트 옮기기 빼기·수정 + 옮긴 뒤 한꺼번에 지우기 — 미리보기에서 묶음째 \"옮기지 않기\"(시트는 그대로), 묶음 펼쳐 줄마다 ☑ 빼기·[수정](상품명·매입처·사용자·부서·설치 PC·2차인증·날짜, 계약 묶기 전에 적용, 원문은 source_raw 에 보존), 결과 표에 뺀 줄·뺀 묶음을 \"빠진 것\"과 따로 · 좌석 여러 개 골라 지우기(deleteSwSeats, 최대 500·비밀 칸 함께)·\"이 상품 지우기\" · 좌석 [편집] → \"✏️ 수정\" · 이미 옮긴 줄은 미리보기에서 못 고침(화면에서)",
+    "crew": [
+      "developer",
+      "ui-designer",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "959b694893",
     "date": "2026-11-20",
     "time": "17:34",

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import InstallAppButton from '@/components/InstallAppButton';
 import MobileTableCards from '@/components/MobileTableCards';
 
@@ -27,22 +27,45 @@ const SIDEBAR_SECTIONS = [
     items: [
       { label: '임대리스트', href: '/rentals' },
       { label: '청구리스트', href: '/billing' },
-      { label: '계약 관리', href: '/contracts' },
+    ],
+  },
+  {
+    label: '계약관리',
+    items: [
+      { label: '소프트웨어 계약', href: '/contracts?tab=sw' },
+      { label: 'PC 유지보수', href: '/contracts?tab=pcm' },
     ],
   },
 ] as const;
 
 type SidebarItem = (typeof SIDEBAR_SECTIONS)[number]['items'][number];
 
+/** 위 메뉴 — 재고관리·임대·청구·계약관리는 왼쪽 메뉴 묶음과 같은 이름(그 묶음의 첫 화면으로 감) */
 const TOP_TABS = [
   { label: '홈', href: '/home' },
   { label: '통합 캘린더', href: '/calendar' },
   { label: '재고관리', href: '/' },
+  { label: '임대·청구', href: '/rentals' },
+  { label: '계약관리', href: '/contracts?tab=sw' },
+  { label: '사용설명서', href: '/manual' },
 ] as const;
+
+type TopTabLabel = (typeof TOP_TABS)[number]['label'];
+
+/** 주소로 위 메뉴 고르기 — 목록에 없는 화면은 전부 재고관리 */
+function tabForPath(pathname: string | null): TopTabLabel {
+  const p = pathname ?? '/';
+  if (p.startsWith('/home')) return '홈';
+  if (p.startsWith('/calendar')) return '통합 캘린더';
+  if (p.startsWith('/rentals') || p.startsWith('/billing')) return '임대·청구';
+  if (p.startsWith('/contracts')) return '계약관리';
+  if (p.startsWith('/manual')) return '사용설명서';
+  return '재고관리';
+}
 
 type Props = {
   children: ReactNode;
-  activeMenu: SidebarItem['label'] | '통합 캘린더' | '홈';
+  activeMenu: SidebarItem['label'] | '통합 캘린더' | '홈' | '사용설명서';
   title: string;
   note?: string;
 };
@@ -50,18 +73,32 @@ type Props = {
 /** ERP 공통 껍데기 — 왼쪽 사이드바 + 상단 네비 + 브레드크럼. 여러 페이지가 공유합니다. */
 export default function Shell({ children, activeMenu, title, note }: Props) {
   const pathname = usePathname();
-  const activeTab = pathname?.startsWith('/home') ? '홈' : pathname?.startsWith('/calendar') ? '통합 캘린더' : '재고관리';
+  const activeTab = tabForPath(pathname);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // 메뉴를 누른 뒤 다음 화면이 뜰 때까지(서버에서 화면을 만드느라 몇 초 걸림) 진행 막대 + 누른 메뉴 빙글 표시.
   const [pendingHref, setPendingHref] = useState<string | null>(null);
 
+  // 새 화면이 그려지면 끔. 같은 화면에서 주소 뒤쪽만 바뀌는 이동(계약관리 ?tab=sw ↔ ?tab=pcm)은 Next가 Shell 을
+  // 새로 만들지 않고 pathname 도 그대로라, 그릴 때마다 실제 주소(경로+?뒤)를 지난번과 비교해 바뀌었으면 끔.
+  // (Next 가 주소창을 그리기 직후 useInsertionEffect 로 바꾸므로 여기 useEffect 에선 이미 새 주소)
+  const lastUrlRef = useRef('');
   useEffect(() => {
+    const url = `${window.location.pathname}${window.location.search}`;
+    if (url === lastUrlRef.current) return;
+    lastUrlRef.current = url;
     setPendingHref(null);
-  }, [pathname]);
+  });
+
+  // 핸드폰에선 위 메뉴 6개가 옆으로 넘침 → 지금 메뉴가 보이게 그 자리로 밀어 둠
+  useEffect(() => {
+    const el = document.querySelector<HTMLElement>('.topnav-tab.active');
+    el?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [activeTab]);
 
   function startNav(e: MouseEvent<HTMLAnchorElement>, href: string) {
     // 새 탭으로 여는 클릭(Ctrl/⌘/Shift)이나 지금 보고 있는 화면이면 표시하지 않음
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || href === pathname) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (href === `${window.location.pathname}${window.location.search}`) return;
     setPendingHref(href);
   }
 
@@ -86,7 +123,7 @@ export default function Shell({ children, activeMenu, title, note }: Props) {
           자주 쓰는 메뉴를 추가하세요
         </div>
         {SIDEBAR_SECTIONS.map((section) => (
-          <div key={section.label}>
+          <div key={section.label} className={section.label === activeTab ? 'sidebar-section current' : 'sidebar-section'}>
             <div className="sidebar-section-label">{section.label}</div>
             <ul className="sidebar-menu">
               {section.items.map(({ label, href }) => {

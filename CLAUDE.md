@@ -45,6 +45,22 @@
 - 홈 카드: `components/home/AgentTeamCard.tsx`(클라이언트, 부서 펼침) · 한 일 계산 `lib/agentWork.ts`(서버 — 커밋 기록 전체를 브라우저로 안 보냄).
   카드 폭 900px 이상이면 가로 조직도, 좁으면 나무 모양(CSS 컨테이너 쿼리 `agentteam`).
 
+## 메뉴 구성 · 사용설명서 (/manual) — 2026-11-20
+
+사용자 요청: 위 메뉴 = 홈 · 통합 캘린더 · 재고관리 · 임대·청구 · 계약관리 · 사용설명서, 계약관리 안은 소프트웨어 / PC 유지보수로 나눔.
+참고 화면: CS팀 FIELD 웹앱 사용설명서(왼쪽 묶음별 카드 + 오른쪽 검은 소개 상자·색 카드·목차) + 전략영업 매뉴얼(번호 꼭지).
+- **메뉴**(`components/Shell.tsx`): `TOP_TABS` 6개, 왼쪽 `SIDEBAR_SECTIONS` 묶음 3개(재고관리·임대·청구·계약관리 — 위 메뉴 이름과 같음).
+  위 메뉴 고르기 `tabForPath`(주소 앞부분), 지금 묶음 이름은 남색. 왼쪽 메뉴는 묶음과 상관없이 늘 전부 보임(핸드폰 서랍에서 찾기 쉽게).
+  새 화면을 만들면 `SIDEBAR_SECTIONS`·`tabForPath` 둘 다 볼 것(목록에 없는 주소는 전부 '재고관리'로 칠해짐).
+- **계약관리 두 메뉴** = 같은 화면 `/contracts?tab=sw|pcm`. page.tsx 가 탭별로 Shell 의 activeMenu·제목을 바꾸고, 화면 위 칩도 `Link`(예전 replaceState 아님).
+  `<Suspense key={tab}>` 라 탭이 바뀌면 ContractsPage 가 새로 만들어짐 → `tab` 은 state 아님.
+  주의: Next 는 주소 ?뒤만 바뀌면 page 를 새로 만들지 않고 pathname 도 그대로 → Shell 의 진행 표시(pendingHref)는 실제 주소(경로+?뒤)가 바뀌었을 때 끔.
+- **사용설명서**: 설명서마다 정적 주소 `/manual/<key>`(빌드 때 미리 만듦, `dynamicParams=false`), `/manual` = 첫 설명서(처음 시작하기).
+  틀(Shell + 왼쪽 목록 `ManualFrame`)은 `app/manual/layout.tsx` 라 설명서를 바꿔도 펼친 묶음 유지. 본문은 서버에서 그림(`ManualDocView` — 본문 글이 브라우저 JS 로 안 감).
+  내용 = `lib/manual/docs/*.ts`(형식 `lib/manual/types.ts` — 글 안 `**굵게**`, `` `버튼` ``), 순서 = `lib/manual/index.ts` ORDER(왼쪽 메뉴 순서). key·꼭지 id 가 겹치면 빌드가 멈춤.
+  **화면을 바꾸면 그 화면 설명서도 같이 고치고 `updated` 날짜를 바꿀 것** — 특히 버튼이 시트·네이버·카톡·works 에 쓰는지 여부. 새 화면이면 설명서 하나 추가 + ORDER.
+  key 를 바꾸면 카톡으로 보낸 링크가 깨짐. 설명서에 실제 고객사·사람 이름·시트 ID·키 값 쓰지 말 것(예시는 OO상사·홍길동).
+
 ## 계약 관리 (/contracts) — 소프트웨어 계약(1단계) · PC 유지보수(2단계 예정) — 2026-11-20
 
 설계 `docs/tasks/2026-11-20-contract-management.md`(맨 위 D1~D12 결정 표가 우선). 사용자 결정: IT 웹앱에 둠(CS팀 FIELD 앱에 안 붙임), 시트는 한 번 옮기고 앱이 원본,
