@@ -15,9 +15,11 @@ type Props = {
   pending: boolean;
   onClose: () => void;
   onChanged: () => void;
+  /** 🧹 복제본 정리 창 열기(예전 버그로 네이버에 생긴 복제본) */
+  onOpenDuplicates?: () => void;
 };
 
-export default function CalendarConnectionsModal({ open, connected, pending, onClose, onChanged }: Props) {
+export default function CalendarConnectionsModal({ open, connected, pending, onClose, onChanged, onOpenDuplicates }: Props) {
   const [picking, setPicking] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [options, setOptions] = useState<NaverCalendarOption[]>([]);
@@ -113,6 +115,17 @@ export default function CalendarConnectionsModal({ open, connected, pending, onC
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {onOpenDuplicates && (
+          <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px dashed var(--ink-200)' }}>
+            <button type="button" className="btn btn-ghost" style={{ width: '100%' }} onClick={onOpenDuplicates} disabled={pending}>
+              🧹 복제본 정리
+            </button>
+            <div className="sub" style={{ marginTop: '6px' }}>
+              예전 오류로 네이버에 같은 일정이 하나 더 생겼거나 앱에 두 줄로 보일 때 — 찾기는 읽기만 하고, 체크한 것만 정리해요.
             </div>
           </div>
         )}

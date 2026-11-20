@@ -6,6 +6,7 @@ import { createEvent, deleteEvent, listConnectedCalendars, listEventsInRange, up
 import {
   CALENDAR_EVENT_KINDS,
   calendarColorIndex,
+  calendarEventOrigin,
   groupEventsByDate,
   isITEvent,
   monthGridRange,
@@ -19,8 +20,22 @@ import CalendarConnectionsModal from './CalendarConnectionsModal';
 import DayEventList from './DayEventList';
 import DayEventsModal from './DayEventsModal';
 import EventModal from './EventModal';
+import NaverDuplicatesModal from './NaverDuplicatesModal';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+
+/** 네이버 원본 지우기 로그에 남길 이름 — 다른 화면에서 적어 둔 이름이 있으면(로그인 전이라 자기 신고). */
+function savedActorName(): string {
+  try {
+    for (const key of ['firstoa-it.feedback-name', 'firstoa-it.contracts-name', 'firstoa_stocktake_started_by']) {
+      const v = (localStorage.getItem(key) ?? '').trim();
+      if (v) return v;
+    }
+  } catch {
+    // localStorage 를 못 쓰는 브라우저(사생활 보호 모드 등) — 이름 없이 지움
+  }
+  return '';
+}
 
 type Props = {
   initialYear: number;
@@ -40,6 +55,7 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
   const [connectedCalendars, setConnectedCalendars] = useState(initialConnectedCalendars);
   const [modalOpen, setModalOpen] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
   const [defaultDate, setDefaultDate] = useState<string>(todayYmd());
   const [toast, setToast] = useState({ msg: '', show: false, warn: false });
@@ -211,7 +227,9 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
       }
       setModalOpen(false);
       setEditing(null);
-      if (result.naverWarning) {
+      if ('warning' in result && result.warning) {
+        showWarn(result.warning);
+      } else if (result.naverWarning) {
         showWarn(
           `앱에는 ${target ? '수정' : '등록'}했어요. 네이버 캘린더에는 못 ${target ? '바꿨어요' : '올렸어요'}(${result.naverWarning}) — 잠시 뒤 이 일정을 열어 [저장]을 한 번 더 누르면 다시 올라가요.`,
         );
@@ -241,6 +259,8 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
       if (!result.ok) {
         showToast(result.error);
         refetch();
+      } else if (result.warning) {
+        showWarn(result.warning);
       } else if (result.naverWarning) {
         showWarn(
           `"${ev.title}" ${nextStatus === '완료' ? '완료 체크' : '완료 해제'}는 앱에 저장했어요. 네이버 캘린더에는 못 바꿨어요(${result.naverWarning}) — 잠시 뒤 이 일정을 열어 [저장]을 한 번 더 눌러 주세요.`,
@@ -250,15 +270,39 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
   }
 
   function handleDelete(id: string) {
+    const ev = events.find((e) => e.id === id) ?? (editing?.id === id ? editing : null);
+    const origin = ev ? calendarEventOrigin(ev) : 'app';
+    if (origin === 'broken') {
+      showWarn('이 일정은 예전 오류로 네이버에 복제본이 생긴 일정이라 지금은 못 지워요. 🔗 캘린더 연결 → 🧹 복제본 정리에서 먼저 정리해 주세요.');
+      return;
+    }
+    if (origin === 'locked') {
+      showWarn('네이버에서 복사된 일정이라 앱에서 못 지워요 — 네이버에서 지워 주세요.');
+      return;
+    }
     if (!confirm('이 일정을 삭제할까요?')) return;
-    const title = events.find((e) => e.id === id)?.title ?? '';
+    const naverOrigin = origin === 'naver';
+    if (naverOrigin) {
+      const calName = ev?.calendarId ? calendarNameById.get(ev.calendarId) : '';
+      const ask = [
+        `이 일정은 네이버 캘린더${calName ? `(${calName})` : ''}에서 직접 만든 일정이에요.`,
+        '지우면 네이버에서도 지워져, 같은 캘린더를 쓰는 사람들 화면에서도 사라져요.',
+        '이 일정에 출고 준비 기록·완료 보고가 있으면 같이 지워지고, 카톡으로 보낸 사진 앨범 링크도 더는 안 열려요(사진 파일은 저장소에 남아요).',
+        '',
+        '정말 네이버에서도 지울까요?',
+      ].join('\n');
+      if (!confirm(ask)) return;
+    }
+    const title = ev?.title ?? '';
     startTransition(async () => {
-      const result = await deleteEvent(id);
+      const result = await deleteEvent(id, naverOrigin ? { confirmNaverDelete: true, actor: savedActorName() } : {});
       if (result.ok) {
         setModalOpen(false);
         setEditing(null);
       }
-      if (result.ok && result.naverWarning) {
+      if (result.ok && result.warning) {
+        showWarn(result.warning);
+      } else if (result.ok && result.naverWarning) {
         showWarn(
           `앱에서는 지웠어요. 네이버 캘린더에는 ${title ? `"${title}" 일정이 ` : ''}아직 남아 있어요(${result.naverWarning}) — 네이버 캘린더에서 직접 지워 주세요.`,
         );
@@ -562,7 +606,13 @@ export default function CalendarPage({ initialYear, initialMonth, initialEvents,
         pending={pending}
         onClose={() => setConnectionsOpen(false)}
         onChanged={refetchConnectedCalendars}
+        onOpenDuplicates={() => {
+          setConnectionsOpen(false);
+          setDuplicatesOpen(true);
+        }}
       />
+
+      <NaverDuplicatesModal open={duplicatesOpen} onClose={() => setDuplicatesOpen(false)} onDone={refetch} />
 
       <div className={`toast${toast.show ? ' show' : ''}${toast.warn ? ' toast-warn' : ''}`} role={toast.warn ? 'alert' : undefined}>
         <span>{toast.msg}</span>

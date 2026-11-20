@@ -1,4 +1,8 @@
 import 'server-only';
+import { icalEscape } from './icsPatch';
+
+// 원문 다루기(이스케이프·줄 접기·출고 태그·바뀐 칸만 고치기)는 순수 함수라 lib/icsPatch.ts 에 있음
+export { icalEscape, rewriteSummaryTags } from './icsPatch';
 
 /**
  * 통합캘린더(lib/calendar.ts) Phase 2 — 네이버 캘린더 CalDAV 클라이언트.
@@ -46,15 +50,12 @@ function eventUrl(calendarId: string, uid: string): string {
   return `${calendarUrl(calendarId)}${encodeURIComponent(uid)}.ics`;
 }
 
-// ── iCalendar 빌드 ──────────────────────────────────────────────
-
-export function icalEscape(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
+/** 앱에서 만든 일정(it-<id>)의 리소스 주소(href, 도메인 뺀 경로) — getEventWithEtag·putEventByHref 등에 씀. */
+export function eventHref(calendarId: string, uid: string): string {
+  return eventUrl(calendarId, uid).slice(CALDAV_BASE.length);
 }
+
+// ── iCalendar 빌드 ──────────────────────────────────────────────
 
 type IcalInput = {
   uid: string;
@@ -198,17 +199,8 @@ export function parseEventBlock(ics: string): ParsedEvent | null {
   };
 }
 
-/**
- * 기존 이벤트를 부분 수정합니다. DTSTART/DTEND/SUMMARY/LOCATION/DESCRIPTION만 새 값으로
- * 바꾸고 나머지 줄(RRULE 등)은 원문 그대로 보존한 뒤, 원래 VCALENDAR 껍데기에 다시 끼워넣습니다.
- */
-export function mergeUpdate(existingIcs: string, patch: IcalInput): string {
-  const newEvent = buildIcal(patch).match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/)![0];
-  if (/BEGIN:VEVENT[\s\S]*?END:VEVENT/.test(existingIcs)) {
-    return existingIcs.replace(/BEGIN:VEVENT[\s\S]*?END:VEVENT/, newEvent);
-  }
-  return buildIcal(patch);
-}
+// (예전 mergeUpdate 는 VEVENT 를 통째로 새로 만들어 끼워서 네이버에서 단 별표·알림·참석자가 지워졌음 —
+//  이제 앱 수정은 lib/icsPatch.ts patchEventProps 로 바뀐 줄만 고침)
 
 // ── CalDAV 요청 ─────────────────────────────────────────────────
 
@@ -377,63 +369,32 @@ export async function putEventByHref(href: string, ics: string, etag: string | n
   return 'ok';
 }
 
-// ── 출고 준비 태그(제목 앞 "이름준비중" 등) ─────────────────────────
-
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const unescapeIcsText = (s: string) =>
-  s.replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\').trim();
-
-/** RFC 5545 줄 접기 · 75바이트 단위(한글이 잘리지 않게 글자 단위). */
-function foldLine(line: string, nl: string): string {
-  const enc = new TextEncoder();
-  const out: string[] = [];
-  let cur = '';
-  let bytes = 0;
-  for (const ch of line) {
-    const b = enc.encode(ch).length;
-    if (bytes + b > 75) {
-      out.push(cur);
-      cur = ' ' + ch;
-      bytes = 1 + b;
-    } else {
-      cur += ch;
-      bytes += b;
-    }
-  }
-  out.push(cur);
-  return out.join(nl);
+/** href로 일정 원문 + etag를 읽습니다 — 없으면(404) null. 통합 캘린더 수정·삭제·복제본 정리용. */
+export async function readEventByHref(href: string): Promise<{ ics: string; etag: string | null } | null> {
+  const res = await fetch(`${CALDAV_BASE}${href}`, {
+    headers: { Authorization: authHeader() },
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
+  });
+  if (res.status === 404) return null;
+  if (res.status === 401) throw new Error('네이버 인증 실패(401) — 앱 비밀번호가 무효이거나 해외 로그인 차단이에요.');
+  if (!res.ok) throw new Error(`네이버 일정 읽기 실패(${res.status})`);
+  return { ics: await res.text(), etag: res.headers.get('etag') };
 }
 
 /**
- * 일정 본문의 SUMMARY 줄만(알림 VALARM 안의 SUMMARY는 제외) 태그 반영해 교체합니다.
- * names에 있는 사람의 "이름오버홀/준비중/완료" 태그만 지우고 붙이므로 다른 시스템
- * (백오피스)이 붙인 자기 담당자 태그는 건드리지 않습니다. 바뀔 게 없으면 null.
+ * href의 일정을 지웁니다(If-Match). 412 → 'conflict'(그 사이 누가 고침 — 다시 읽고 비교한 뒤에만 재시도),
+ * 404 → 'gone'(이미 없음).
  */
-export function rewriteSummaryTags(ics: string, names: string[], tags: string[]): { ics: string; title: string } | null {
-  const evStart = ics.search(/^BEGIN:VEVENT/m);
-  const evEnd = ics.search(/^END:VEVENT/m);
-  if (evStart < 0 || evEnd < 0) throw new Error('VEVENT 없음');
-  const alarms: Array<[number, number]> = [];
-  for (const am of ics.slice(evStart, evEnd).matchAll(/BEGIN:VALARM[\s\S]*?END:VALARM/g)) {
-    alarms.push([evStart + (am.index ?? 0), evStart + (am.index ?? 0) + am[0].length]);
-  }
-  const re = /^SUMMARY([^:\r\n]*):([^\r\n]*(?:\r?\n[ \t][^\r\n]*)*)/gm;
-  re.lastIndex = evStart;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(ics)) && m.index < evEnd) {
-    const at = m.index;
-    if (alarms.some(([s, e]) => at >= s && at < e)) continue;
-    const value = m[2].replace(/\r?\n[ \t]/g, '');
-    const stripped = names.length
-      ? value.replace(new RegExp(`(?:${names.map(escapeRe).join('|')})(?:오버홀|준비중|완료)\\s*`, 'g'), '').trimStart()
-      : value;
-    const next = (tags.length ? tags.join(' ') + ' ' : '') + stripped;
-    if (next === value) return null;
-    const nl = ics.includes('\r\n') ? '\r\n' : '\n';
-    return {
-      ics: ics.slice(0, at) + foldLine(`SUMMARY${m[1]}:${next}`, nl) + ics.slice(at + m[0].length),
-      title: unescapeIcsText(next),
-    };
-  }
-  throw new Error('일정 제목(SUMMARY) 없음');
+export async function deleteEventByHref(href: string, etag: string | null): Promise<'ok' | 'conflict' | 'gone'> {
+  const res = await fetch(`${CALDAV_BASE}${href}`, {
+    method: 'DELETE',
+    headers: { Authorization: authHeader(), ...(etag ? { 'If-Match': etag } : {}) },
+    signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
+  });
+  if (res.status === 412) return 'conflict';
+  if (res.status === 404) return 'gone';
+  if (res.status === 403) throw new Error('네이버 일정 삭제 권한이 없어요(403) — 이 캘린더에 쓰기 권한이 있는 계정인지 확인해주세요.');
+  if (res.status === 401) throw new Error('네이버 인증 실패(401) — 앱 비밀번호를 확인해주세요.');
+  if (!res.ok) throw new Error(`네이버 일정 삭제 실패(${res.status})`);
+  return 'ok';
 }

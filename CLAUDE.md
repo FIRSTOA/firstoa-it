@@ -156,6 +156,16 @@
 - **최선노력 반영도 실패는 삼키지 말고 경고로 돌려줌**(2026-11-20): 앱 저장은 성공으로 두되 결과에 `naverWarning`(캘린더)·`sheetWarning`(판매리스트)
   같은 이유를 실어 화면이 주황 알림(`.toast.toast-warn`, 저절로 안 닫힘)으로 "앱에는 저장, ○○는 실패 — 이렇게 하세요"를 보여 줌. 이유 문구는 `lib/syncFailure.ts`.
   응답 뒤(`after()`)에 도는 일은 결과를 DB에 적어 화면이 읽게(출고 재고 `stock_issues`). 새 최선노력 반영을 만들 때도 같은 방식.
+- **앱 → 네이버 쓰기는 일정 출처로 먼저 나눔**(2026-11-20, `lib/calendar.ts` `calendarEventOrigin`: app / naver / broken / locked).
+  예전엔 모든 일정을 `it-<id>.ics`로 올려서 네이버에서 만든 일정을 고치면 네이버에 복제본이 생기고 앱 줄 `naver_uid`가 `it-<id>`로 덮어써져 앱에 두 줄이 됐음.
+  - **네이버 원본은 `naver_uid`를 절대 바꾸지 말 것.** 주소는 상태 표에서 `uid = naver_uid` + `calendar_id`로 좁혀 찾고(없으면 "네이버에서 하세요"),
+    원문을 읽어 반복이면 거절 → 바꾼 칸마다 네이버 지금 값 = DB의 고치기 전 값인지(공백 정규화, 412 뒤 2회째도) → `lib/icsPatch.ts` `patchEventProps`로
+    **바뀐 줄만** If-Match PUT → 성공한 뒤에 앱 저장. 날짜·시간·캘린더는 잠금. 상태 표 etag는 쓰지 않음(동기화가 갱신). 앱 전용 칸만 바뀌면 네이버 호출 0.
+  - 지우기: 화면 확인 2번 + 서버도 `confirmNaverDelete` 필요, 제목·날짜 비교 → If-Match DELETE → 상태 표 줄 → 앱 줄(실패하면 상태 표 줄 되돌림). 네이버 실패면 앱도 안 지움. 감사는 서버 로그.
+  - 앱 일정(it-)도 VEVENT 통째 교체 금지(`mergeUpdate` 없앰 — 네이버의 별표·알림이 지워졌음). 반영이 실패하면 `naver_synced_at`을 비워 다음 [저장] 때 네이버와 다른 칸을 다시 맞춤.
+  - `rewriteSummaryTags`(출고 태그)도 `lib/icsPatch.ts`의 같은 줄 찾기(VALARM 제외)를 씀 — 예전 결과와 글자까지 같은지 Node 로 확인함. 이 파일은 import 없는 순수 함수.
+  - 예전 복제본 정리: `app/calendar/duplicateActions.ts`(🔗 캘린더 연결 → 🧹 복제본 정리). 순서 ①Y ②X 원복 ③복제본 상태 줄 ④네이버 복제본 If-Match 삭제 ⑤출고 태그 —
+    **네이버 복제본을 먼저 지우면 동기화 정리 단계가 `it-<id>`로 앱 줄을 지워 출고 준비 기록·완료 보고가 cascade 로 사라짐**(사람에게도 "네이버에서 직접 지우지 마세요").
 
 ## 속도 (2026-11-18)
 

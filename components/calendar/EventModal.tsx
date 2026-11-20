@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { lookupKnownAsset } from '@/app/actions';
 import {
   CALENDAR_STATUSES,
+  calendarEventOrigin,
   type CalendarEvent,
   type CalendarEventInput,
   type CalendarEventItem,
@@ -72,6 +73,19 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
   const set = <K extends keyof CalendarEventInput>(key: K, value: CalendarEventInput[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  // 네이버에서 만든 일정: 날짜·시간·캘린더 잠금(서버도 거절) / 정리 필요·복사본: 네이버로 가는 칸 전부 잠금
+  const origin = editing ? calendarEventOrigin(editing) : 'app';
+  const lockTime = origin !== 'app';
+  const lockNaverFields = origin === 'broken' || origin === 'locked';
+  const originNote =
+    origin === 'naver'
+      ? '📌 네이버에서 만든 일정이에요 — 날짜·시간·캘린더는 네이버에서 바꿔요. 제목·장소·설명·상태는 바꾼 칸만 네이버 원본에 고쳐 써요(그 사이 네이버에서 바뀌었으면 저장하지 않고 알려 줘요).'
+      : origin === 'broken'
+        ? '⚠️ 예전 오류로 네이버에 복제본이 생긴 일정이에요 — 🔗 캘린더 연결 → 🧹 복제본 정리에서 먼저 정리해 주세요. 지금은 ★ 중요·품목·등록자만 고칠 수 있어요.'
+        : origin === 'locked'
+          ? '네이버에서 복사된 일정이라 네이버 쪽 내용은 네이버에서 고쳐요. 지금은 ★ 중요·품목·등록자만 고칠 수 있어요.'
+          : '';
+
   function handleSave() {
     onSave({ ...form, title: form.title.trim(), time: allDay ? '' : form.time });
   }
@@ -85,16 +99,31 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
     >
       <div className="modal" style={{ width: '480px' }}>
         <h2>{editing ? '일정 수정' : '일정 추가'}</h2>
+        {originNote && (
+          <div
+            style={{
+              fontSize: '12.5px',
+              lineHeight: 1.5,
+              padding: '8px 10px',
+              borderRadius: '8px',
+              marginBottom: '10px',
+              background: origin === 'naver' ? '#f8fafc' : '#fff7ed',
+              border: `1px solid ${origin === 'naver' ? 'var(--ink-200)' : '#fdba74'}`,
+            }}
+          >
+            {originNote}
+          </div>
+        )}
         <div className="form-grid">
           <div className="form-field full">
             <label>
               제목 <span className="required">*</span>
             </label>
-            <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="예: 서버실 점검" />
+            <input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="예: 서버실 점검" disabled={lockNaverFields} />
           </div>
           <div className="form-field">
             <label>날짜</label>
-            <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} />
+            <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} disabled={lockTime} />
           </div>
           <div className="form-field">
             <label>시간</label>
@@ -104,15 +133,16 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
                   type="checkbox"
                   checked={allDay}
                   onChange={(e) => setAllDay(e.target.checked)}
+                  disabled={lockTime}
                 />
                 종일
               </label>
-              {!allDay && <input type="time" value={form.time} onChange={(e) => set('time', e.target.value)} />}
+              {!allDay && <input type="time" value={form.time} onChange={(e) => set('time', e.target.value)} disabled={lockTime} />}
             </div>
           </div>
           <div className="form-field">
             <label>상태</label>
-            <select value={form.status} onChange={(e) => set('status', e.target.value)}>
+            <select value={form.status} onChange={(e) => set('status', e.target.value)} disabled={lockNaverFields}>
               {CALENDAR_STATUSES.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -135,6 +165,7 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
             <select
               value={form.calendarId ?? ''}
               onChange={(e) => set('calendarId', e.target.value || null)}
+              disabled={lockTime}
             >
               <option value="">연결 안 함(앱에만 저장)</option>
               {connectedCalendars.map((c) => (
@@ -146,7 +177,7 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
           </div>
           <div className="form-field full">
             <label>장소</label>
-            <input value={form.location} onChange={(e) => set('location', e.target.value)} />
+            <input value={form.location} onChange={(e) => set('location', e.target.value)} disabled={lockNaverFields} />
           </div>
           <div className="form-field full">
             <label>품목</label>
@@ -173,6 +204,7 @@ export default function EventModal({ open, editing, defaultDate, connectedCalend
             <textarea
               value={form.description}
               onChange={(e) => set('description', e.target.value)}
+              disabled={lockNaverFields}
               rows={3}
               style={{
                 width: '100%',

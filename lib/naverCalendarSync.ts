@@ -22,7 +22,8 @@ import { CALENDAR_TABLE, createAdminClient, isSupabaseConfigured } from './supab
 const NAVER_CALENDARS_TABLE = 'it_naver_calendars';
 const SYNC_STATE_TABLE = 'it_naver_sync_state';
 const MAX_CHANGED_PER_CALENDAR = 240;
-const FETCH_CONCURRENCY = 8;
+/** 네이버 일정 본문을 동시에 몇 개씩 읽는지(복제본 정리 찾기도 같은 값) */
+export const FETCH_CONCURRENCY = 8;
 
 function todayPlus(days: number): string {
   const d = new Date();

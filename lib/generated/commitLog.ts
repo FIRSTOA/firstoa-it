@@ -3,6 +3,19 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "2849c79073",
+    "date": "2026-11-20",
+    "time": "19:40",
+    "subject": "실패하면 알려 줌 — 최선노력 반영이 실패를 삼키던 세 곳: 통합 캘린더 네이버 반영 실패 → naverWarning(\"앱에는 저장, 네이버엔 못 올림(이유) — 다시 [저장]\", 삭제는 동작 그대로 \"네이버에서 직접 지워 주세요\"), 판매리스트 시트 쓰기·지우기 실패 → sheetWarning(묶음은 순번 범위, 여러 건 삭제는 모아서) · 출고 준비 완료 보고 뒤 IT재고 반영(응답 뒤 after)을 applyStockUnit 으로 빼고 결과를 보고 행에 기록(stock_applied / 새 칸 stock_issues — 칸 없으면 좁게 판정해 기기−stock_applied 로 셈), 발송 뒤 창이 3초마다 최대 90초 진행·실패 표시, [🔁 재고 다시 반영](retryPrepStock — 카톡 안 보냄, 6대씩), 목록·홈 \"재고 반영 안 됨\", 읽은 줄 자산번호가 다르면 안 씀 · 실패 이유 쉬운 말 lib/syncFailure.ts · 주황 알림 .toast-warn · 설명서·CLAUDE.md 갱신 · SQL supabase/shipment_prep_schema.sql 맨 끝 블록(사용자 실행 필요)",
+    "crew": [
+      "debugger",
+      "integration-rules",
+      "sql-review",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "d8755ed37a",
     "date": "2026-11-20",
     "time": "19:13",

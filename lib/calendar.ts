@@ -74,6 +74,8 @@ export type CalendarEventRow = {
   naver_uid: string | null;
   source: string;
   calendar_id: string | null;
+  /** 네이버에 마지막으로 맞춘 때 — 앱 일정은 반영이 실패하면 null 로 둬서 다음 [저장] 때 다시 맞춤 */
+  naver_synced_at?: string | null;
 };
 
 export function rowToCalendarEvent(row: CalendarEventRow): CalendarEvent {
@@ -95,6 +97,22 @@ export function rowToCalendarEvent(row: CalendarEventRow): CalendarEvent {
 }
 
 export type CalendarEventInput = Omit<CalendarEvent, 'id' | 'naverUid' | 'source'>;
+
+/**
+ * 일정이 어디서 왔는지 — 앱 수정·삭제가 네이버의 어느 리소스를 고칠지 가름(app/calendar/actions.ts).
+ * - app: 앱에서 만든 일정(네이버에는 it-<id>.ics 로 올림)
+ * - naver: 네이버에서 만든 원본(naver_uid = 네이버 UID) — 주소+If-Match 로 바뀐 칸만, 날짜·시간·캘린더는 잠금
+ * - broken: 예전 버그로 naver_uid 가 it-<자기 id> 로 덮어써진 네이버 일정(네이버에 복제본이 있음) — 정리 전엔 네이버 쪽 안 고침
+ * - locked: 그 밖의 네이버 줄(예: 네이버에서 복사된 앱 일정 it-…#…) — 네이버 쪽 안 고침
+ */
+export type CalendarOrigin = 'app' | 'naver' | 'broken' | 'locked';
+
+export function calendarEventOrigin(ev: Pick<CalendarEvent, 'id' | 'source' | 'naverUid'>): CalendarOrigin {
+  if (ev.source !== 'naver') return 'app';
+  if (ev.naverUid && !ev.naverUid.startsWith('it-')) return 'naver';
+  if (ev.naverUid === `it-${ev.id}`) return 'broken';
+  return 'locked';
+}
 
 export function calendarEventInputToRow(input: CalendarEventInput) {
   return {
