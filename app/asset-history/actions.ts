@@ -2,6 +2,7 @@
 
 import { findAsRecords, isAsSheetConfigured, type AsRecord } from '@/lib/as/sheet';
 import { computeRentalTerm, groupRentalRows, rowToBillingLine, sumConfirmedBilling, type BillingLineRow } from '@/lib/billing';
+import { assignedRentalRowsForAsset } from '@/lib/billingAllocation';
 import { parseKoreanWon } from '@/lib/currency';
 import { getAssetFromSheets, isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import { rowToReceiving, type ReceivingRow } from '@/lib/receiving';
@@ -74,9 +75,16 @@ export async function getAssetLifecycle(rawQuery: string): Promise<LifecycleResu
 
   // 2) 임대리스트(firstoa-works 사본) — 자산번호 또는 시리얼.
   const lookupKeys = [query, asset?.assetId?.toUpperCase() ?? ''].filter((k) => k && SAFE_KEY.test(k));
-  const orFilter = [...new Set(lookupKeys)]
-    .flatMap((k) => [`asset_code.eq.${k}`, `serial_number.eq.${k}`])
-    .join(',');
+  // 자산번호를 직접 지정한 임대 건(works 자산번호가 빈 건)도 포함 — 정수 행 번호만 필터에 넣음
+  const assignedRows = (
+    await Promise.all([...new Set(lookupKeys)].map((k) => assignedRentalRowsForAsset(k)))
+  )
+    .flat()
+    .filter((n) => Number.isInteger(n));
+  const orFilter = [
+    ...[...new Set(lookupKeys)].flatMap((k) => [`asset_code.eq.${k}`, `serial_number.eq.${k}`]),
+    ...(assignedRows.length > 0 ? [`sheet_row.in.(${[...new Set(assignedRows)].join(',')})`] : []),
+  ].join(',');
   const rentalRes = orFilter
     ? await supabase
         .from(RENTAL_TABLE)

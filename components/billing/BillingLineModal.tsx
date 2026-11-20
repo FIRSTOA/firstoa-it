@@ -69,12 +69,15 @@ export default function BillingLineModal({ open, editing, pending, onClose, onSa
     setLookupMsg(result.found ? `${assetId} 자산을 찾았어요(${result.category}·${result.model}).` : `${assetId}을(를) 찾지 못했어요 — 자산번호를 확인해주세요.`);
   }
 
+  // works 임대 건 줄은 자산번호를 "자산번호 확인"에서만 지정 — 여기선 잠금
+  const locked = !!editing && editing.sourceInvoiceId === 'works-asset' && editing.rentalSheetRow !== null;
+
   function handleSave() {
-    const assetId = (form.assetId ?? '').trim();
+    const assetId = locked ? (editing?.assetId ?? '') : (form.assetId ?? '').trim();
     onSave({
       ...form,
       assetId: assetId || null,
-      allocationStatus: assetId ? 'confirmed' : 'needs_review',
+      allocationStatus: locked ? (editing?.allocationStatus ?? 'needs_review') : assetId ? 'confirmed' : 'needs_review',
       amount: Number(amountText.replace(/[^0-9.-]/g, '')) || 0,
     });
   }
@@ -97,7 +100,11 @@ export default function BillingLineModal({ open, editing, pending, onClose, onSa
               onChange={(e) => set('assetId', e.target.value)}
               onBlur={handleAssetIdBlur}
               placeholder="예: X8420"
+              disabled={locked}
             />
+            {locked && (
+              <div style={{ fontSize: '11px', color: 'var(--amber-600)', marginTop: '4px' }}>임대 건으로 확인에서 지정하세요.</div>
+            )}
             {lookupMsg && <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>{lookupMsg}</div>}
           </div>
           <div className="form-field">

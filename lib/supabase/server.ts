@@ -49,3 +49,5 @@ export const STOCK_CHECK_OVERRIDES_TABLE = 'it_stock_check_overrides';
 export const SAFETY_STOCK_TABLE = 'it_safety_stock';
 export const ASSET_PURCHASE_INFO_TABLE = 'it_asset_purchase_info';
 export const BILLING_LINES_TABLE = 'it_billing_lines';
+/** 임대 건별 사람이 정한 자산번호(supabase/rental_asset_assignments_schema.sql) — 청구 "자산번호 확인" */
+export const RENTAL_ASSET_ASSIGNMENTS_TABLE = 'it_rental_asset_assignments';

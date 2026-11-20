@@ -3,6 +3,16 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "e625da88f8",
+    "date": "2026-11-19",
+    "time": "17:05",
+    "subject": "IT AI 에이전트 팀 — 팀장 클로드 + AI 직원 10명(.claude/agents/: 기획실 도면우 · 디자인실 고화질 · 데이터실 정규화 · 개발실 구동민/원인규 · 품질실 이상무 · 검사실 안정빈/방화벽/연동희 · 운영실 경보람), CLAUDE.md 맨 위에 요청 종류별 호출 순서·모델 배정·작업 끝 규칙 · 홈 업데이트 위에 조직도 카드(부서 누르면 직원 카드·오늘 한 일, 일 흐름 5단계, 모델 구성 — 넓으면 가로 조직도, 좁으면 나무 모양) · 업데이트 칸 아래 \"개발 기록\"(커밋에서 자동 — 누적·버전·날짜별, 누르면 긴 제목 펼침) · prebuild scripts/gen-commit-log.mjs 가 lib/generated/commitLog.ts 생성 + 명단 대조(다르면 빌드 멈춤) · .gitignore 는 .claude/agents/ 만 추적",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "ab6fe90125",
     "date": "2026-11-19",
     "time": "14:53",

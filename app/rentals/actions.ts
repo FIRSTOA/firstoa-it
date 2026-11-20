@@ -3,8 +3,14 @@
 import { revalidatePath } from 'next/cache';
 import { readWorksAssetRows, type WorksAssetRow } from '@/lib/rentals/worksSync';
 import { readWorksBillingLines, WORKS_BILLING_SOURCE_ID } from '@/lib/rentals/worksBilling';
+import { decideAllocation } from '@/lib/rentals/allocationRule';
 import { billingLineInputToRow } from '@/lib/billing';
-import { createAdminClient, RENTAL_TABLE, BILLING_LINES_TABLE } from '@/lib/supabase/server';
+import {
+  createAdminClient,
+  RENTAL_TABLE,
+  BILLING_LINES_TABLE,
+  RENTAL_ASSET_ASSIGNMENTS_TABLE,
+} from '@/lib/supabase/server';
 
 function toDbRow(r: WorksAssetRow) {
   return {
@@ -50,6 +56,12 @@ export type CompareResult =
       billingChangedCount: number;
       billingRemovedCount: number;
       billingUnchangedCount: number;
+      /** 우리가 정한 자산번호로 확정된 청구 줄(임대 건 지정 'assignment' + 임대 건 모르는 줄의 줄 지정 'kept') */
+      billingKeptCount: number;
+      /** works 자산번호와 우리 지정이 다른 임대 건 수(works 번호로 집계, 지정은 남겨 둠) */
+      assignmentConflictCount: number;
+      /** 지정표(it_rental_asset_assignments) SQL 미실행 — 빈 지정표로 대조함 */
+      assignmentsTableMissing: boolean;
     }
   | { ok: false; error: string };
 
@@ -116,6 +128,36 @@ function billingKey(b: {
   return [b.assetId ?? '', b.rentalSheetRow ?? '', b.vendorName, b.billingDate, Number(b.amount), b.status, b.allocationStatus].join('|');
 }
 
+/**
+ * 지정표가 아직 없음(SQL 미실행)인지 — app/home/feedbackActions.ts isMissingTable 과 같은 방식.
+ * 표 이름이 들어간 다른 오류(권한 등)까지 "없음"으로 보면 빈 지정표로 반영해 사람이 정한 줄이 풀리므로,
+ * 메시지로 판단할 때는 "없음" 문구가 같이 있을 때만.
+ */
+function isMissingAssignmentsTable(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { message?: string; code?: string };
+  if (e.code === '42P01' || e.code === 'PGRST205') return true;
+  const message = e.message ?? '';
+  return message.includes(RENTAL_ASSET_ASSIGNMENTS_TABLE) && /does not exist|could not find|schema cache/i.test(message);
+}
+
+/** 임대 건별 사람이 정한 자산번호 전체(rental_sheet_row → asset_id). 표가 없으면 빈 맵 + missing. 쓰기 없음. */
+async function readAssignments(supabase: Supabase): Promise<{ map: Map<number, string>; missing: boolean }> {
+  try {
+    const rows = await selectAll<{ rental_sheet_row: number; asset_id: string }>((from, to) =>
+      supabase
+        .from(RENTAL_ASSET_ASSIGNMENTS_TABLE)
+        .select('rental_sheet_row, asset_id')
+        .order('rental_sheet_row')
+        .range(from, to),
+    );
+    return { map: new Map(rows.map((r) => [r.rental_sheet_row, r.asset_id])), missing: false };
+  } catch (err) {
+    if (isMissingAssignmentsTable(err)) return { map: new Map(), missing: true };
+    throw err;
+  }
+}
+
 type SyncPlan = {
   assetRows: WorksAssetRow[];
   rentalNew: number;
@@ -127,6 +169,9 @@ type SyncPlan = {
   billingUpdates: (ReturnType<typeof billingLineInputToRow> & { id: string })[];
   billingStaleIds: string[];
   billingUnchanged: number;
+  billingKept: number;
+  assignmentConflicts: number;
+  assignmentsTableMissing: boolean;
 };
 
 /** firstoa-works와 우리 DB를 둘 다 끝까지 읽어서 "무엇을 넣고/바꾸고/지울지" 계산합니다(쓰기 없음). */
@@ -157,19 +202,24 @@ async function buildSyncPlan(supabase: Supabase): Promise<SyncPlan> {
   }
   const rentalStale = existingRentals.map((r) => r.sheet_row).filter((n) => !currentSheetRows.has(n));
 
-  const existingBilling = await selectAll<ExistingBilling>((from, to) =>
-    supabase
-      .from(BILLING_LINES_TABLE)
-      .select('id, source_line_id, asset_id, rental_sheet_row, vendor_name, billing_date, amount, status, allocation_status')
-      .eq('source_invoice_id', WORKS_BILLING_SOURCE_ID)
-      .order('id')
-      .range(from, to),
-  );
+  const [existingBilling, assignments] = await Promise.all([
+    selectAll<ExistingBilling>((from, to) =>
+      supabase
+        .from(BILLING_LINES_TABLE)
+        .select('id, source_line_id, asset_id, rental_sheet_row, vendor_name, billing_date, amount, status, allocation_status')
+        .eq('source_invoice_id', WORKS_BILLING_SOURCE_ID)
+        .order('id')
+        .range(from, to),
+    ),
+    readAssignments(supabase),
+  ]);
   const existingByLineId = new Map(existingBilling.map((b) => [b.source_line_id, b]));
 
   const billingInserts: SyncPlan['billingInserts'] = [];
   const billingUpdates: SyncPlan['billingUpdates'] = [];
   let billingUnchanged = 0;
+  let billingKept = 0;
+  const conflictRows = new Set<number>();
   const seenLineIds = new Set<string>();
 
   for (const line of billingLines) {
@@ -178,8 +228,20 @@ async function buildSyncPlan(supabase: Supabase): Promise<SyncPlan> {
     // 임대 건을 FK로 가리키면 저장이 실패하므로 연결만 비워 둡니다.
     const rentalSheetRow =
       line.rentalSheetRow !== null && currentSheetRows.has(line.rentalSheetRow) ? line.rentalSheetRow : null;
-    const input = { ...line, rentalSheetRow };
     const prev = existingByLineId.get(line.sourceLineId);
+    // 자산번호는 규칙(lib/rentals/allocationRule.ts)으로 정한 뒤에 비교 — 사람이 정한 줄이
+    // 다음 대조에서 다시 "변경"으로 잡히지 않게(works 값으로 덮지 않게).
+    const decision = decideAllocation({
+      worksCode: line.assetId,
+      rentalSheetRow,
+      assignment: rentalSheetRow !== null ? assignments.map.get(rentalSheetRow) ?? null : null,
+      prev: prev
+        ? { assetId: prev.asset_id, allocationStatus: prev.allocation_status, rentalSheetRow: prev.rental_sheet_row }
+        : null,
+    });
+    if (decision.reason === 'assignment' || decision.reason === 'kept') billingKept++;
+    if (decision.conflict && rentalSheetRow !== null) conflictRows.add(rentalSheetRow);
+    const input = { ...line, rentalSheetRow, assetId: decision.assetId, allocationStatus: decision.status };
     if (!prev) {
       billingInserts.push(billingLineInputToRow(input));
       continue;
@@ -209,6 +271,9 @@ async function buildSyncPlan(supabase: Supabase): Promise<SyncPlan> {
     billingUpdates,
     billingStaleIds,
     billingUnchanged,
+    billingKept,
+    assignmentConflicts: conflictRows.size,
+    assignmentsTableMissing: assignments.missing,
   };
 }
 
@@ -227,6 +292,9 @@ export async function compareWorksSync(): Promise<CompareResult> {
       billingChangedCount: plan.billingUpdates.length,
       billingRemovedCount: plan.billingStaleIds.length,
       billingUnchangedCount: plan.billingUnchanged,
+      billingKeptCount: plan.billingKept,
+      assignmentConflictCount: plan.assignmentConflicts,
+      assignmentsTableMissing: plan.assignmentsTableMissing,
     };
   } catch (err) {
     console.error('[rentals] compareWorksSync 실패:', err);
@@ -278,6 +346,7 @@ async function writeChunks<T>(
  * 청구 명세는 (source_invoice_id, source_line_id) 고유 인덱스가 부분 인덱스(where <> '')라
  * ON CONFLICT 대상으로 못 써서, 새 행은 insert / 바뀐 행은 기본키(id)로 upsert / 사라진 행은
  * delete로 나눠서 반영합니다.
+ * 임대 건 지정표(it_rental_asset_assignments)는 읽기만 하고 쓰지 않습니다 — 지정은 청구리스트 "자산번호 확인"에서.
  */
 export async function applyWorksSync(): Promise<ApplyResult> {
   try {

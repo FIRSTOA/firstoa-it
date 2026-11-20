@@ -96,6 +96,26 @@ export default function RentalSyncModal({ open, sheetUrl, onClose, onApplied }: 
                 <b>{state.result.billingRemovedCount.toLocaleString()}건</b>
                 <span style={{ color: 'var(--ink-400)' }}> · 변동없음 {state.result.billingUnchangedCount.toLocaleString()}건</span>
               </div>
+              {(state.result.billingKeptCount > 0 || state.result.assignmentConflictCount > 0) && (
+                <div style={{ color: 'var(--ink-500)' }}>
+                  {state.result.billingKeptCount > 0 && (
+                    <span>
+                      ✋ 우리가 지정한 자산번호 유지 <b>{state.result.billingKeptCount.toLocaleString()}줄</b>
+                    </span>
+                  )}
+                  {state.result.billingKeptCount > 0 && state.result.assignmentConflictCount > 0 && ' · '}
+                  {state.result.assignmentConflictCount > 0 && (
+                    <span style={{ color: 'var(--amber-600)' }}>
+                      ⚠ works와 다른 지정 <b>{state.result.assignmentConflictCount.toLocaleString()}건</b>
+                    </span>
+                  )}
+                </div>
+              )}
+              {state.result.assignmentsTableMissing && (
+                <div style={{ color: 'var(--ink-400)' }}>
+                  지정표 SQL 미실행 — supabase/rental_asset_assignments_schema.sql
+                </div>
+              )}
             </div>
           )}
           {state.status === 'applied' && (

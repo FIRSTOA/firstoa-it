@@ -45,6 +45,25 @@
 - 홈 카드: `components/home/AgentTeamCard.tsx`(클라이언트, 부서 펼침) · 한 일 계산 `lib/agentWork.ts`(서버 — 커밋 기록 전체를 브라우저로 안 보냄).
   카드 폭 900px 이상이면 가로 조직도, 좁으면 나무 모양(CSS 컨테이너 쿼리 `agentteam`).
 
+## 청구 배분 — 임대 건 단위 자산번호 지정 (/billing?view=review) — 2026-11-20
+
+설계 `docs/tasks/2026-11-19-billing-allocation.md`(§8 팀장 결정이 우선). 사용자 결정: 지정표 새로 만듦, works 번호 우선, 옛 줄 단위 입력 옮기기 없음, 일괄 확정은 체크한 것만.
+- **배경**: 청구(`it_billing_lines`)는 firstoa-works 대조·반영으로 들어옴(`lib/rentals/worksBilling.ts`). works 자산에 asset_code가 비면 그 청구 줄은 `needs_review`(배분 확인 필요).
+  예전엔 청구리스트에서 줄마다 넣은 자산번호가 다음 반영 때 works 값(null)으로 덮였음.
+- **지정표** `it_rental_asset_assignments`(`supabase/rental_asset_assignments_schema.sql`): 임대 건(`rental_sheet_row` = works assets.id = it_rental_list.sheet_row)마다 사람이 정한 자산번호.
+  FK 없음 — 반영이 works에 없는 임대 건 행을 지우므로(restrict면 반영 실패, cascade면 사람이 한 일이 사라짐).
+- **반영 규칙** `lib/rentals/allocationRule.ts` `decideAllocation`(import 없는 순수 함수 — Node 24로 바로 돌려 볼 수 있음), 위에서부터:
+  ① works 자산번호 있음 → 그것(지정과 다르면 conflict 표시, 지정은 안 지움) ② 임대 건 + 지정 → 지정 번호 ③ 임대 건 모르는 줄에 사람이 넣은 값 → 유지 ④ needs_review.
+  규칙을 적용한 **뒤에** `billingKey`로 비교 → 지정한 줄은 다시 대조해도 "변동없음". 반영은 지정표에 쓰지 않음(읽기만).
+  지정표 "없음" 판정은 동기화 쪽에서 좁게(코드 42P01/PGRST205 또는 "does not exist" 류 문구) — 권한 오류를 "없음"으로 보면 빈 지정표로 반영해 지정이 풀림.
+- **화면**: 청구리스트 보기 칩 [청구 명세] [자산번호 확인] [지정한 것](`components/billing/BillingAllocationView.tsx`).
+  확정 = 지정표 upsert + 그 임대 건의 needs_review 줄 confirmed. 되돌리기 = 지정 삭제 + works 번호가 비어 있으면 그 번호였던 works 줄을 needs_review로.
+  works 줄 중 임대 건이 있는 줄은 줄 단위 확인 대신 "임대 건으로 확인 →"(서버도 거절), 수정 창에서 자산번호 칸 잠금.
+- **추천**: 같은 시리얼의 다른 임대 건·같은 임대 건의 확정 줄(시트 안 읽음). IT재고 시리얼은 "IT재고에서 시리얼로 찾기" 버튼을 누를 때만 `listAllAssets` 1번.
+- **숫자**: 홈 청구 카드·청구리스트 위 숫자는 `summarizeReview`(`lib/billingAllocation.ts` — needs_review 줄을 페이지로 끝까지 읽어 임대 건 수). 청구 명세 목록 자체는 여전히 최근 500줄.
+- 자산 상세·자산 이력은 지정된 임대 건도 포함(`assignedRentalRowsForAsset`).
+- 배포 순서: SQL 실행 → 배포 → 임대리스트 "firstoa-works 대조" → 반영 → 다시 대조(청구 "변경"이 0에 가까운지).
+
 ## 출고 준비 리스트 (/shipment-prep) — 2026-11 구축
 
 원본: first-as-search 백오피스의 출고 준비 기능(지침서 `C:\ref\first-as-search\00_READ_FIRST_guide.md`, 읽기 전용).

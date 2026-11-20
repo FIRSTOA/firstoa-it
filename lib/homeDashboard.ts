@@ -7,6 +7,7 @@ import 'server-only';
  */
 import { listPrepEvents, type PrepEventRow } from '@/app/shipment-prep/actions';
 import { listConfirmDocs } from '@/app/confirmForm/sheetActions';
+import { summarizeReview } from '@/lib/billingAllocation';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import { isPrepDone, isPrepInProgress, shortDateLabel } from '@/lib/shipmentPrep';
@@ -257,8 +258,8 @@ export async function loadBillingCard(today: string): Promise<WorkCard> {
     // 이번 달 청구는 1000줄을 넘음 — 건수는 DB에서 세고, 금액은 페이지로 끝까지 읽어 더함
     const thisMonth = () =>
       supabase.from(BILLING_LINES_TABLE).select('amount').gte('billing_date', monthStart).lte('billing_date', today).neq('status', '취소');
-    const [reviewRes, countRes, amounts] = await Promise.all([
-      supabase.from(BILLING_LINES_TABLE).select('id', { count: 'exact', head: true }).eq('allocation_status', 'needs_review'),
+    const [summary, countRes, amounts] = await Promise.all([
+      summarizeReview(),
       supabase
         .from(BILLING_LINES_TABLE)
         .select('id', { count: 'exact', head: true })
@@ -267,22 +268,22 @@ export async function loadBillingCard(today: string): Promise<WorkCard> {
         .neq('status', '취소'),
       readAllPages<{ amount: number | string }>((from, to) => thisMonth().order('id').range(from, to)),
     ]);
-    if (reviewRes.error) throw reviewRes.error;
     if (countRes.error) throw countRes.error;
     const monthCount = countRes.count ?? amounts.length;
     const sum = amounts.reduce((s, l) => s + Number(l.amount || 0), 0);
-    const review = reviewRes.count ?? 0;
+    const review = summary.rentals;
     return {
       key: 'billing',
       title: '청구',
       icon: '🧾',
-      href,
+      href: review ? '/billing?view=review' : href,
       metrics: [
-        { label: '배분 확인 필요', value: review, tone: review ? 'warn' : 'good' },
+        { label: '자산번호 없는 임대 건', value: review, tone: review ? 'warn' : 'good' },
+        ...(summary.orphanLines > 0 ? [{ label: '임대 건 모르는 줄', value: summary.orphanLines }] : []),
         { label: '이번 달 건수', value: monthCount },
         { label: '이번 달 금액', value: `${shortWon(sum)}원` },
       ],
-      alert: review ? `자산번호 배분 확인이 필요한 청구 ${review}건` : null,
+      alert: review ? `자산번호 없는 임대 건 ${review}개` : null,
       tone: review ? 'warn' : 'good',
     };
   } catch (err) {
