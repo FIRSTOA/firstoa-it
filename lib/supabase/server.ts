@@ -51,3 +51,10 @@ export const ASSET_PURCHASE_INFO_TABLE = 'it_asset_purchase_info';
 export const BILLING_LINES_TABLE = 'it_billing_lines';
 /** 임대 건별 사람이 정한 자산번호(supabase/rental_asset_assignments_schema.sql) — 청구 "자산번호 확인" */
 export const RENTAL_ASSET_ASSIGNMENTS_TABLE = 'it_rental_asset_assignments';
+/** 계약 관리(supabase/contracts_schema.sql, 설계 docs/tasks/2026-11-20-contract-management.md) */
+export const CONTRACT_CLIENTS_TABLE = 'it_contract_clients';
+export const SW_CONTRACTS_TABLE = 'it_sw_contracts';
+export const SW_SEATS_TABLE = 'it_sw_seats';
+/** 비밀 칸 암호문 — lib/contracts/secrets.ts 한 파일만 읽고 씀 */
+export const CONTRACT_SECRETS_TABLE = 'it_contract_secrets';
+export const CONTRACT_SECRET_LOG_TABLE = 'it_contract_secret_log';

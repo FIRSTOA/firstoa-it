@@ -27,6 +27,7 @@ const SIDEBAR_SECTIONS = [
     items: [
       { label: '임대리스트', href: '/rentals' },
       { label: '청구리스트', href: '/billing' },
+      { label: '계약 관리', href: '/contracts' },
     ],
   },
 ] as const;

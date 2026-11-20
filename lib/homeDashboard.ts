@@ -8,6 +8,7 @@ import 'server-only';
 import { listPrepEvents, type PrepEventRow } from '@/app/shipment-prep/actions';
 import { listConfirmDocs } from '@/app/confirmForm/sheetActions';
 import { summarizeReview } from '@/lib/billingAllocation';
+import { buildContractsOverview } from '@/lib/contracts/clients';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import { isPrepDone, isPrepInProgress, shortDateLabel } from '@/lib/shipmentPrep';
@@ -288,6 +289,41 @@ export async function loadBillingCard(today: string): Promise<WorkCard> {
     };
   } catch (err) {
     return errorCard('billing', '청구', '🧾', href, errMsg(err));
+  }
+}
+
+/**
+ * 계약 — 소프트웨어 계약의 30일 안 갱신·만료 / 날짜 지남 / 상세 미입력. firstoa-works 를 읽으므로 홈에선 Suspense 로.
+ * works 를 못 읽어 임대리스트 사본으로 대신하면 제목에 "(사본 기준)". bad(빨강)는 안 씀 — warn 까지만.
+ */
+export async function loadContractsCard(): Promise<WorkCard> {
+  const href = '/contracts';
+  if (!isSupabaseConfigured()) return errorCard('contracts', '계약', '📑', href, 'Supabase 설정이 필요해요.');
+  try {
+    const o = await buildContractsOverview('sw');
+    if (o.tablesMissing) {
+      return errorCard('contracts', '계약', '📑', href, '계약 표를 아직 안 만들었어요 — supabase/contracts_schema.sql 먼저 실행');
+    }
+    if (o.source === 'none') return errorCard('contracts', '계약', '📑', href, o.sourceError ?? '거래처 목록을 못 읽었어요');
+    const live = o.clients.filter((c) => c.state !== 'ended');
+    const due = live.filter((c) => c.renewal === 'due30').length;
+    const expired = live.filter((c) => c.renewal === 'expired').length;
+    const needsDetail = live.filter((c) => c.needsDetail).length;
+    return {
+      key: 'contracts',
+      title: o.source === 'rental_copy' ? '계약 (사본 기준)' : '계약',
+      icon: '📑',
+      href,
+      metrics: [
+        { label: '30일 안 갱신·만료', value: due, tone: due ? 'warn' : 'good' },
+        { label: '날짜 지남', value: expired, tone: expired ? 'warn' : 'good' },
+        { label: '상세 미입력', value: needsDetail },
+      ],
+      alert: expired ? `날짜 지난 계약 ${expired}곳` : due ? `30일 안 갱신·만료 ${due}곳` : null,
+      tone: expired || due ? 'warn' : 'good',
+    };
+  } catch (err) {
+    return errorCard('contracts', '계약', '📑', href, errMsg(err));
   }
 }
 

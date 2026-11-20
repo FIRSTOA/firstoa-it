@@ -3,6 +3,17 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "0ef8666472",
+    "date": "2026-11-20",
+    "time": "16:27",
+    "subject": "청구 자산번호 확인 — 자산번호 없는 works 청구를 임대 건 단위로 한 번 지정(지정표 it_rental_asset_assignments, FK 없음), 반영 규칙 decideAllocation(works 번호 우선·지정·사람 값 유지·needs_review) 뒤에 billingKey 비교 → 지정한 줄은 다시 대조해도 변동없음, 청구리스트 보기 칩 [청구 명세][자산번호 확인][지정한 것], 일괄 확정·되돌리기, 같은 시리얼 추천·IT재고 시리얼 찾기, 홈 청구 카드 숫자는 페이지로 끝까지 · CLAUDE.md 청구 배분 절",
+    "crew": [
+      "feature-planner",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "e625da88f8",
     "date": "2026-11-19",
     "time": "17:05",

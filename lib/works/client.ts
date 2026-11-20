@@ -72,3 +72,33 @@ export async function fetchAllWorksRows<T>(table: string, selectCols: string): P
   }
   return pagesAll.flat();
 }
+
+/**
+ * assets 에서 품목(item_category)이 items 중 하나인 줄만 읽습니다 — 계약 관리(lib/contracts/worksSource.ts) 전용.
+ * - 값은 encodeURIComponent, 큰따옴표로 감싼 in.("…","…") 필터 + order=id.asc(페이지가 섞이지 않게).
+ * - 건수 요청 없이 Range 1000줄씩 순서대로 읽고, 받은 줄이 1000 미만이면 끝.
+ * - 항상 새로 읽음(cache: 'no-store') + 요청마다 시간 제한(기본 8초). 실패하면 throw — 일부만 돌려주지 않음.
+ */
+export async function fetchWorksAssetsByItems<T>(
+  items: readonly string[],
+  selectCols: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<T[]> {
+  const { url } = requireConfig();
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const list = items.map((i) => `"${i.replace(/"/g, '')}"`).join(',');
+  const filter = `item_category=${encodeURIComponent(`in.(${list})`)}`;
+  const out: T[] = [];
+  for (let offset = 0, page = 0; page < 100; offset += PAGE_SIZE, page++) {
+    const res = await fetch(`${url}/rest/v1/assets?select=${selectCols}&${filter}&order=id.asc`, {
+      headers: { ...headers(), Range: `${offset}-${offset + PAGE_SIZE - 1}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) throw new Error(`firstoa-works assets 조회 실패(offset=${offset}): ${res.status}`);
+    const rows = (await res.json()) as T[];
+    out.push(...rows);
+    if (rows.length < PAGE_SIZE) return out;
+  }
+  throw new Error('firstoa-works assets 조회가 100페이지를 넘었어요.');
+}

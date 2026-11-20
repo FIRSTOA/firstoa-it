@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { PrepEventRow } from '@/app/shipment-prep/actions';
 import {
   loadConfirmCard,
+  loadContractsCard,
   loadInventoryCard,
   loadSystemStatus,
   prepStatusOf,
@@ -66,6 +67,10 @@ export function WorkCardLoading({ title, icon }: { title: string; icon: string }
 
 export async function InventoryCardAsync() {
   return <WorkCardView card={await loadInventoryCard()} />;
+}
+
+export async function ContractsCardAsync() {
+  return <WorkCardView card={await loadContractsCard()} />;
 }
 
 export async function ConfirmCardAsync({ today }: { today: string }) {

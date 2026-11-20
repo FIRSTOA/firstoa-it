@@ -6,6 +6,7 @@ import FeedbackBoard from '@/components/home/FeedbackBoard';
 import { buildTeamWork } from '@/lib/agentWork';
 import {
   ConfirmCardAsync,
+  ContractsCardAsync,
   InventoryCardAsync,
   ReleaseNotes,
   SystemStatusAsync,
@@ -79,6 +80,9 @@ export default async function HomePage() {
           </Suspense>
           <WorkCardView card={stocktake} />
           <WorkCardView card={billing} />
+          <Suspense fallback={<WorkCardLoading title="계약" icon="📑" />}>
+            <ContractsCardAsync />
+          </Suspense>
         </div>
 
         <div className="home-grid2">
