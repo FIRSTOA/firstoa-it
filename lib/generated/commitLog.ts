@@ -3,6 +3,20 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "c0e02386f8",
+    "date": "2026-11-20",
+    "time": "17:28",
+    "subject": "계약 관리 · 소프트웨어 계약 잠금 단순하게(D13) — 사용자 요청 \"소프트웨어 메뉴 누르면 비밀번호 넣고 다 보이게\": [소프트웨어 계약] 탭 전체를 비밀번호 하나로 잠금(처음 들어갈 때 화면에서 정함, ⋯ 관리에서 바꾸기), 열면 2시간 동안 라이선스 키·마스터 계정까지 그대로 보이고 고침 · 칸마다 보기·60초 가림·Vercel 열쇠·/contracts/setup 없앰 · 비밀 칸은 사용자 선택대로 암호화 없이 서버 전용 표에(value_text), 비밀번호는 PBKDF2 해시로 it_contract_settings 에 · 서버가 sw 개요·상세·모든 쓰기에서 잠금 확인, 틀린 시도 제한·기록 유지 · SQL 예전 판(sealed) 실행한 DB 도 다시 실행하면 맞게 바뀜",
+    "crew": [
+      "db-schema",
+      "ui-designer",
+      "developer",
+      "qa-checker",
+      "sql-review",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "58db2ba383",
     "date": "2026-11-20",
     "time": "16:48",

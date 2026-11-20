@@ -11,6 +11,52 @@ function minutesUntil(iso: string): number {
   return Math.max(1, Math.ceil((Date.parse(iso) - Date.now()) / 60000));
 }
 
+type PasswordInputProps = {
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: 'current-password' | 'new-password';
+  id?: string;
+  placeholder?: string;
+  ariaLabel?: string;
+  autoFocus?: boolean;
+  disabled?: boolean;
+};
+
+/** 비밀번호 칸 + 👁 버튼(누르면 적은 글자가 보이고, 다시 누르면 가림). 칸마다 따로 */
+function PasswordInput({ value, onChange, autoComplete, id, placeholder, ariaLabel, autoFocus, disabled }: PasswordInputProps) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="ct-pw">
+      <input
+        id={id}
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        // 글자가 보이는 동안 핸드폰이 첫 글자를 대문자로 바꾸거나 맞춤법을 고치지 않게
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        autoFocus={autoFocus}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        disabled={disabled}
+      />
+      <button
+        type="button"
+        className="ct-pw-eye"
+        onClick={() => setShow((s) => !s)}
+        aria-label={show ? '비밀번호 가리기' : '비밀번호 보기'}
+        aria-pressed={show}
+        title={show ? '가리기' : '보기'}
+        disabled={disabled}
+      >
+        {show ? '🙈' : '👁'}
+      </button>
+    </div>
+  );
+}
+
 type GateProps = {
   unlock: UnlockState;
   onUnlocked: (state: UnlockState) => void;
@@ -88,25 +134,17 @@ export default function PasswordGate({ unlock, onUnlocked }: GateProps) {
             <p className="ct-muted">한 번 열면 {UNLOCK_HOURS}시간 동안 열려 있어요.</p>
           </>
         )}
-        <input
-          type="password"
+        <PasswordInput
           value={pw}
-          onChange={(e) => setPw(e.target.value)}
+          onChange={setPw}
           autoComplete={creating ? 'new-password' : 'current-password'}
           autoFocus
           placeholder={creating ? '정할 비밀번호' : '비밀번호'}
-          aria-label="비밀번호"
+          ariaLabel="비밀번호"
           disabled={locked}
         />
         {creating && (
-          <input
-            type="password"
-            value={pw2}
-            onChange={(e) => setPw2(e.target.value)}
-            autoComplete="new-password"
-            placeholder="한 번 더"
-            aria-label="비밀번호 한 번 더"
-          />
+          <PasswordInput value={pw2} onChange={setPw2} autoComplete="new-password" placeholder="한 번 더" ariaLabel="비밀번호 한 번 더" />
         )}
         {creating && <p className="ct-muted">남이 맞히기 쉬운 1234·0000 보다는 6자리 이상을 권해요. (4자 이상이면 돼요)</p>}
         {locked && lockedUntil && <div className="ct-error">틀린 시도가 많아 잠겼어요. {minutesUntil(lockedUntil)}분 뒤 다시 해 주세요.</div>}
@@ -197,15 +235,15 @@ export function PasswordChangeDialog({ open, onClose }: ChangeProps) {
         <div className="form-grid">
           <div className="form-field full">
             <label htmlFor="ct-pw-cur">지금 비밀번호</label>
-            <input id="ct-pw-cur" type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
+            <PasswordInput id="ct-pw-cur" value={cur} onChange={setCur} autoComplete="current-password" />
           </div>
           <div className="form-field full">
             <label htmlFor="ct-pw-new">새 비밀번호</label>
-            <input id="ct-pw-new" type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+            <PasswordInput id="ct-pw-new" value={next} onChange={setNext} autoComplete="new-password" />
           </div>
           <div className="form-field full">
             <label htmlFor="ct-pw-new2">새 비밀번호 한 번 더</label>
-            <input id="ct-pw-new2" type="password" value={next2} onChange={(e) => setNext2(e.target.value)} autoComplete="new-password" />
+            <PasswordInput id="ct-pw-new2" value={next2} onChange={setNext2} autoComplete="new-password" />
           </div>
         </div>
         {error && (
