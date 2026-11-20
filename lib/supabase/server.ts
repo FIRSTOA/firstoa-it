@@ -58,3 +58,5 @@ export const SW_SEATS_TABLE = 'it_sw_seats';
 /** 비밀 칸 암호문 — lib/contracts/secrets.ts 한 파일만 읽고 씀 */
 export const CONTRACT_SECRETS_TABLE = 'it_contract_secrets';
 export const CONTRACT_SECRET_LOG_TABLE = 'it_contract_secret_log';
+/** 소프트웨어 탭 비밀번호 해시·쿠키 서명 값(D13) — lib/contracts/secrets.ts 만 읽고 씀 */
+export const CONTRACT_SETTINGS_TABLE = 'it_contract_settings';

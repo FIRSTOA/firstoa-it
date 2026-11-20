@@ -13,12 +13,14 @@ export const dynamic = 'force-dynamic';
 
 /** 틀(탭·제목)은 먼저, works 를 읽는 목록은 도착하면 채움 */
 async function ContractsBody({ tab }: { tab: ContractTab }) {
-  const [overview, unlock] = await Promise.all([getContractsOverview(tab), getUnlockState()]);
+  // D13: 소프트웨어 탭은 비밀번호가 풀려 있어야 목록을 읽음 — 잠겨 있으면 works 도 안 읽고 overview null(비밀번호 화면)
+  const unlock = await getUnlockState();
+  const overview = tab === 'sw' && !unlock.unlocked ? null : await getContractsOverview(tab);
   return (
     <ContractsPage
       initialTab={tab}
-      overview={overview.ok ? overview.overview : null}
-      overviewError={overview.ok ? null : overview.error}
+      overview={overview?.ok ? overview.overview : null}
+      overviewError={overview && !overview.ok ? overview.error : null}
       unlock={unlock}
     />
   );

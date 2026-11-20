@@ -48,23 +48,25 @@
 ## 계약 관리 (/contracts) — 소프트웨어 계약(1단계) · PC 유지보수(2단계 예정) — 2026-11-20
 
 설계 `docs/tasks/2026-11-20-contract-management.md`(맨 위 D1~D12 결정 표가 우선). 사용자 결정: IT 웹앱에 둠(CS팀 FIELD 앱에 안 붙임), 시트는 한 번 옮기고 앱이 원본,
-비번·라이선스 키도 전부 앱으로(인증 비밀번호로 열람·수정), 거래처 목록은 **실시간**, 유지보수 대상은 품목 'PC유지보수'만, 2차인증은 평문.
+비번·라이선스 키도 전부 앱으로(소프트웨어 탭 비밀번호로), 거래처 목록은 **실시간**, 유지보수 대상은 품목 'PC유지보수'만, 2차인증은 평문.
 - **거래처 목록 = firstoa-works 실시간**: `lib/contracts/worksSource.ts` `loadContractAssets()` — 화면 열 때마다 works assets 에서 품목 소프트웨어·PC유지보수만
   (`fetchWorksAssetsByItems` — 기존 `fetchAllWorksRows` 는 그대로). 실패하면 `it_rental_list` 사본(읽기만, 주황 띠) → 둘 다 실패면 저장된 거래처만.
   읽기 실패가 우리 표에 쓰지 않음. 임대리스트 화면의 대조→반영 방식은 그대로(범위 밖).
 - **거래처 맞추기 순서**: works assets.id(`seen_asset_ids`) → 거래처 코드(`vendor_codes`, ecount_code 정리 — 주민번호 꼴은 버림, 브라우저로 안 보냄) → 정규화 이름(`name_key`·`alias_keys`).
   저장할 때만 맞은 id·코드를 더함(화면 열기만으론 안 씀). 기록은 자동으로 안 지움 — 종료는 화면 계산값.
-- **비밀 칸**(`it_contract_secrets` — `lib/contracts/secrets.ts` 한 파일만 읽고 씀): AES-256-GCM + AAD(주인·칸), 열쇠 Vercel env `CONTRACT_SECRET_KEY`,
-  인증 비밀번호는 PBKDF2 해시 env `CONTRACT_PASSWORD_HASH`(`/contracts/setup` 에서 브라우저 안에서 만듦 → Vercel Production 에 넣고 재배포). 둘 다 없으면 비밀 기능만 꺼짐.
-  열람 = 쿠키 `it_ct_unlock`(httpOnly·strict·10분) → 누른 칸만 복호화. 틀린 비밀번호 같은 기기 15분 5회 / 전체 30회면 15분 잠금. 열람·수정 기록 `it_contract_secret_log`(값 없음, 칸 이름 `event_count`).
-  목록·상세 응답엔 비밀 값이 아예 안 실림. 비밀 칸: 라이선스 키·마스터 계정·갱신형 사용자/관리자 계정·결제 카드. 2차인증은 좌석 `mfa_note` 평문(사용자 결정).
-- ⚠️ **`CONTRACT_SECRET_KEY` 를 잃으면 앱의 비번·키는 아무도 못 풂**. 백업(종이·금고)은 사용자가 "나중에" 하기로 함 — 시트 비밀 칸을 지우기 전에 꼭 다시 권할 것.
-  열쇠 값·비밀번호는 코드·문서·커밋·채팅 어디에도 남기지 않음(저장소 공개). Preview 배포엔 두 env 를 넣지 않음.
-- **시트 옮기기**(한 번, 배포된 앱, 열람 중일 때만): IT재고 워크북(`GOOGLE_INVENTORY_SHEET_ID`) 탭 `SW자산_갱신형`(머리줄 1행)·`SW자산_비갱신형`(머리줄 2행)을 batchGet 1회.
-  미리보기 → 묶음별 거래처 고르기(건너뛰기 없음, 못 정하면 "미분류") → 반영(시트 다시 읽어 지문 같을 때만) → 복호화해 시트 값과 대조 → 결과 표 "빠진 것 0".
+- **잠금(D13 — 사용자가 "너무 어렵다"고 해서 처음 설계 §3-4를 대체)**: [소프트웨어 계약] 탭 전체를 비밀번호 하나로 잠금 → 맞게 넣으면 2시간 동안
+  목록·라이선스 키·마스터 계정이 **그냥 보임**(칸마다 보기·가림 없음). 비밀번호는 화면에서 처음 정하고 ⋯ 관리 → 비밀번호 바꾸기.
+  해시는 표 `it_contract_settings`('sw_password_hash', PBKDF2) — 평문 없음. 쿠키 `it_ct_unlock`(httpOnly·strict) 서명 값도 같은 표('cookie_secret').
+  서버가 'sw' 개요·상세·모든 쓰기에서 잠금 해제를 확인(서버 액션은 누구나 부를 수 있으므로). 틀린 비밀번호 같은 기기 15분 5회 / 전체 30회면 15분 잠금.
+  **비밀번호를 잊으면**: Supabase SQL Editor 에서 `delete from it_contract_settings where key = 'sw_password_hash';` → 화면에서 새로 정함(값은 그대로).
+- **비밀 칸 저장**: 사용자 선택 "그냥 저장" — `it_contract_secrets.value_text` 에 암호화 없이(다른 대장처럼 서버 전용 표, RLS·revoke). `lib/contracts/secrets.ts` 한 파일만 읽고 씀.
+  Supabase 관리 화면에 들어가는 사람은 값을 볼 수 있음(사용자에게 설명함). Vercel 환경변수·설정 화면 없음.
+  비밀 칸: 라이선스 키·마스터 계정·갱신형 사용자/관리자 계정·결제 카드. 2차인증은 좌석 `mfa_note`(일반 칸). 열람·수정 기록 `it_contract_secret_log`(값 없음, 칸 이름 `event_count`).
+- **시트 옮기기**(한 번, 배포된 앱, 잠금을 푼 상태에서): IT재고 워크북(`GOOGLE_INVENTORY_SHEET_ID`) 탭 `SW자산_갱신형`(머리줄 1행)·`SW자산_비갱신형`(머리줄 2행)을 batchGet 1회.
+  미리보기 → 묶음별 거래처 고르기(건너뛰기 없음, 못 정하면 "미분류") → 반영(시트 다시 읽어 지문 같을 때만) → 저장값을 다시 읽어 시트 값과 대조 → 결과 표 "빠진 것 0".
   `source_key` 로 여러 번 눌러도 중복 없음. 실측(2026-11-20): 갱신형 32줄·비갱신형 229줄, 비밀 칸 456(+카드 40).
   시트 조사 때 비밀 칸(비갱신형 9·10·14, 갱신형 6·7) 값은 출력하지 말 것.
-- 표 SQL `supabase/contracts_schema.sql`(5개 표, RLS·revoke, sealed 모양 check). 화면 `components/contracts/*`, 액션 `app/contracts/{actions,secretActions,importActions}.ts`.
+- 표 SQL `supabase/contracts_schema.sql`(6개 표, RLS·revoke — 예전 판(sealed 암호문)을 실행한 DB 는 다시 실행하면 value_text 로 바뀜). 화면 `components/contracts/*`, 액션 `app/contracts/{actions,secretActions,importActions}.ts`.
 
 ## 청구 배분 — 임대 건 단위 자산번호 지정 (/billing?view=review) — 2026-11-20
 

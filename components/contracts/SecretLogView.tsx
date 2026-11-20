@@ -40,17 +40,15 @@ type Props = { open: boolean; onClose: () => void };
 
 /** 열람 기록 — 최근 200건. 값은 기록에 없고 누가·언제·무엇만. */
 export default function SecretLogView({ open, onClose }: Props) {
-  const { askUnlock } = useContractsCtx();
+  const { onNeedUnlock } = useContractsCtx();
   const [rows, setRows] = useState<SecretLogRow[] | null>(null);
   const [failed24h, setFailed24h] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [needUnlock, setNeedUnlock] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    setNeedUnlock(false);
     try {
       const r = await listSecretLog(200);
       if (r.ok) {
@@ -59,7 +57,7 @@ export default function SecretLogView({ open, onClose }: Props) {
       } else {
         setRows(null);
         setError(r.error);
-        setNeedUnlock(!!r.needUnlock);
+        if (r.needUnlock) onNeedUnlock();
       }
     } catch {
       setRows(null);
@@ -67,7 +65,7 @@ export default function SecretLogView({ open, onClose }: Props) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onNeedUnlock]);
 
   useEffect(() => {
     if (open) void load();
@@ -87,7 +85,7 @@ export default function SecretLogView({ open, onClose }: Props) {
             ×
           </button>
         </div>
-        <div className="sub">비밀 칸을 열고 본 기록이에요. 값은 기록에 남지 않아요. 최근 200건만 보여요.</div>
+        <div className="sub">누가 언제 소프트웨어 계약을 열고(틀린 비밀번호 포함) 비밀 칸을 고치거나 지웠는지 기록이에요. 값은 기록에 남지 않아요. 최근 200건만 보여요.</div>
 
         {loading && !rows && (
           <div className="empty-state">
@@ -99,11 +97,6 @@ export default function SecretLogView({ open, onClose }: Props) {
             <div>⚠️</div>
             {error}
             <div style={{ marginTop: '12px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              {needUnlock && (
-                <button type="button" className="btn btn-primary" onClick={() => askUnlock(() => void load())}>
-                  🔒 열기
-                </button>
-              )}
               <button type="button" className="btn btn-ghost" onClick={() => void load()}>
                 다시 불러오기
               </button>

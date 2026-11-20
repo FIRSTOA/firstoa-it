@@ -38,7 +38,7 @@ function infoOf(d: ClientDetail): InfoForm {
 }
 
 export default function SwClientModal({ clientKey, clients, onClose, onChanged }: Props) {
-  const { toast } = useContractsCtx();
+  const { toast, fail, onNeedUnlock } = useContractsCtx();
   const [key, setKey] = useState(clientKey);
   const [detail, setDetail] = useState<ClientDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +63,8 @@ export default function SwClientModal({ clientKey, clients, onClose, onChanged }
         setDetail(r.detail);
         if (!silent) setInfo(infoOf(r.detail)); // 조용히 다시 읽을 땐 쓰던 칸을 덮지 않음
         setError('');
+      } else if (r.needUnlock) {
+        onNeedUnlock();
       } else {
         if (!silent) setDetail(null);
         setError(r.error);
@@ -75,7 +77,7 @@ export default function SwClientModal({ clientKey, clients, onClose, onChanged }
     } finally {
       if (id === reqRef.current) setLoading(false);
     }
-  }, []);
+  }, [onNeedUnlock]);
 
   useEffect(() => {
     void load(key, false);
@@ -116,7 +118,7 @@ export default function SwClientModal({ clientKey, clients, onClose, onChanged }
         actor,
       );
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('거래처 정보를 저장했어요.');
@@ -143,7 +145,7 @@ export default function SwClientModal({ clientKey, clients, onClose, onChanged }
     try {
       const r = await addClientAlias(detail.client.id, mergeKey, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('같은 거래처로 묶었어요.');
@@ -169,7 +171,7 @@ export default function SwClientModal({ clientKey, clients, onClose, onChanged }
     try {
       const r = await deleteClient(detail.client.id, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('거래처를 지웠어요.');

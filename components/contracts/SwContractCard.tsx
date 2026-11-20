@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { moveSwContract, renewSwContract, addSwSeats, deleteSwContract, saveSwContract, saveSwSeat } from '@/app/contracts/actions';
-import { deleteSwSeat, revealContractSecrets } from '@/app/contracts/secretActions';
+import { deleteSwSeat } from '@/app/contracts/secretActions';
 import {
   SW_CONTRACT_STATUSES,
   SW_SEAT_STATUSES,
@@ -14,7 +14,7 @@ import {
   type SwSeat,
   type SwSeatInput,
 } from '@/lib/contracts/types';
-import { SecretFields, secretKey, useAutoHide, type BulkSecrets } from './SecretValue';
+import { SecretFields } from './SecretValue';
 import { requireActor, useContractsCtx } from './UnlockDialog';
 
 export const RENEWAL_BADGE: Record<RenewalState, { cls: string; label: string }> = {
@@ -116,7 +116,7 @@ type Props = {
 };
 
 export default function SwContractCard({ contract, clientKey, clients, onChanged, onCancelNew }: Props) {
-  const { unlock, askUnlock, toast } = useContractsCtx();
+  const { toast, fail } = useContractsCtx();
   const isNew = contract === null;
   const [editing, setEditing] = useState(isNew);
   const [form, setForm] = useState<ContractForm>(() => formOf(contract));
@@ -126,15 +126,10 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
   const [addCount, setAddCount] = useState('1');
   const [moving, setMoving] = useState(false);
   const [moveTo, setMoveTo] = useState('');
-  const [bulk, setBulk] = useState<BulkSecrets | undefined>(undefined);
 
   const seats = contract?.seats ?? [];
   const set = <K extends keyof ContractForm>(k: K, v: ContractForm[K]) => setForm((f) => ({ ...f, [k]: v }));
   const setSeat = <K extends keyof SeatForm>(k: K, v: SeatForm[K]) => setSeatForm((f) => (f ? { ...f, [k]: v } : f));
-
-  const hasAnySecret = !!contract && (contract.secretFields.length > 0 || contract.seats.some((s) => s.secretFields.length > 0));
-  // 모두 보기로 받은 값은 60초 뒤·탭이 숨겨지면 비움(칸마다 자기 시간도 따로 있음)
-  useAutoHide(!!bulk, !!bulk, () => setBulk(undefined));
 
   function actorOrWarn(): string | null {
     const a = requireActor();
@@ -186,7 +181,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
     await run(async () => {
       const r = await saveSwContract(input, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('저장했어요.');
@@ -203,7 +198,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
     await run(async () => {
       const r = await renewSwContract(contract.id, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast(r.renewsOn ? `갱신 처리했어요. 다음 갱신일 ${r.renewsOn}` : '갱신 처리했어요.');
@@ -220,7 +215,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
     await run(async () => {
       const r = await moveSwContract(contract.id, moveTo, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('옮겼어요.');
@@ -235,7 +230,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
     await run(async () => {
       const r = await deleteSwContract(contract.id);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('지웠어요.');
@@ -255,7 +250,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
     await run(async () => {
       const r = await addSwSeats(contract.id, n, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast(`좌석 ${r.ids.length}개를 만들었어요.`);
@@ -292,7 +287,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
     await run(async () => {
       const r = await saveSwSeat(input, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('좌석을 저장했어요.');
@@ -303,8 +298,9 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
   }
 
   async function removeSeat(seat: SwSeat) {
-    const msg = seat.secretFields.length > 0
-      ? `${seat.userName || '이 좌석'}을(를) 지울까요? 저장된 비밀 칸 ${seat.secretFields.length}개도 같이 지워져요. 되돌릴 수 없어요.`
+    const n = Object.values(seat.secrets).filter((v) => (v ?? '') !== '').length;
+    const msg = n > 0
+      ? `${seat.userName || '이 좌석'}을(를) 지울까요? 저장된 비밀 칸 ${n}개도 같이 지워져요. 되돌릴 수 없어요.`
       : `${seat.userName || '이 좌석'}을(를) 지울까요? 되돌릴 수 없어요.`;
     if (!window.confirm(msg)) return;
     await run(async () => {
@@ -314,32 +310,8 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
         onChanged();
         return;
       }
-      if (r.needUnlock) {
-        toast('비밀 칸이 있는 좌석은 열람 중에만 지울 수 있어요.');
-        askUnlock(() => void removeSeat(seat));
-        return;
-      }
-      toast(r.error);
+      fail(r);
     }, '좌석을 지우지 못했어요. 잠시 뒤 다시 해 주세요.');
-  }
-
-  async function revealAll() {
-    if (!contract) return;
-    await run(async () => {
-      const r = await revealContractSecrets(contract.id);
-      if (r.ok) {
-        const values: Record<string, string> = {};
-        for (const v of r.values) values[secretKey(v.owner, v.field)] = v.value;
-        setBulk({ nonce: Date.now(), values });
-        toast(`${r.values.length}개 칸을 열었어요. 60초 뒤 다시 가려져요.`);
-        return;
-      }
-      if (r.needUnlock) {
-        askUnlock(() => void revealAll());
-        return;
-      }
-      toast(r.error);
-    }, '값을 읽지 못했어요. 잠시 뒤 다시 해 주세요.');
   }
 
   // ---------- 편집 칸(상품) ----------
@@ -524,14 +496,9 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
 
       {/* 계약 단위 비밀 칸(관리 콘솔 계정·결제 카드 등) */}
       <div className="ct-section-title">
-        <span>🔒 상품 비밀 칸 (관리 콘솔 계정·결제 카드 등)</span>
-        {hasAnySecret && (
-          <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void revealAll()}>
-            이 상품 모두 보기
-          </button>
-        )}
+        <span>🔑 상품 비밀 칸 (관리 콘솔 계정·결제 카드 등)</span>
       </div>
-      <SecretFields owner={{ contractId: c.id }} fields={c.secretFields} bulk={bulk} onChanged={() => onChanged()} />
+      <SecretFields owner={{ contractId: c.id }} secrets={c.secrets} onChanged={() => onChanged()} />
 
       <div className="ct-section-title">
         <span>사용자(좌석) {seats.length}개</span>
@@ -545,7 +512,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
             <th data-m="inline" data-label="부서">부서</th>
             <th data-m="sub" data-label="날짜">날짜</th>
             <th data-m="full" data-label="2차인증">2차인증 메모</th>
-            <th data-m="full nolabel">비밀 칸</th>
+            <th data-m="full" data-label="비밀 칸">비밀 칸</th>
             <th data-m="actions"></th>
           </tr>
         </thead>
@@ -573,7 +540,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
               </td>
               <td style={{ whiteSpace: 'pre-wrap' }}>{s.mfaNote || '-'}</td>
               <td>
-                <SecretFields owner={{ seatId: s.id }} fields={s.secretFields} bulk={bulk} onChanged={() => onChanged()} />
+                <SecretFields owner={{ seatId: s.id }} secrets={s.secrets} onChanged={() => onChanged()} />
               </td>
               <td>
                 <div className="row-actions">
@@ -589,7 +556,7 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
                     편집
                   </button>
                   <button type="button" className="btn btn-ghost ct-small ct-danger" disabled={busy} onClick={() => void removeSeat(s)}>
-                    {s.secretFields.length > 0 && !unlock.unlocked ? '🔒 삭제' : '삭제'}
+                    삭제
                   </button>
                 </div>
               </td>
@@ -604,7 +571,6 @@ export default function SwContractCard({ contract, clientKey, clients, onChanged
           )}
         </tbody>
       </table>
-      {bulk && <div className="ct-muted ct-bulk-note">모두 보기로 연 칸 {Object.keys(bulk.values).length}개 — 60초 뒤 가려져요.</div>}
 
       {editingSeat && seatForm && (
         <div className="ct-card ct-card-edit">

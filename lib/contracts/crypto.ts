@@ -1,55 +1,32 @@
 import 'server-only';
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  createHmac,
-  hkdfSync,
-  pbkdf2,
-  randomBytes,
-  timingSafeEqual,
-} from 'node:crypto';
+import { createHash, createHmac, hkdfSync, pbkdf2, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
- * 계약 관리 비밀 칸 — 암호 계산만 모아 둔 곳(설계 docs/tasks/2026-11-20-contract-management.md §3-4).
- * DB·쿠키·요청을 모름. 열쇠·비밀번호 해시는 Vercel 환경변수(Production 만)에서 읽고, 값은 어디에도 찍지 않는다.
+ * 계약 관리 소프트웨어 탭 잠금 — 암호 계산만 모아 둔 곳(설계 docs/tasks/2026-11-20-contract-management.md §3-4, D13).
+ * D13: 비밀 칸은 암호화하지 않음(서버 전용 표에 그대로). 여기는 비밀번호 해시·잠금 해제 쿠키 서명·IP 해시·틀린 시도 계산만.
+ * DB·쿠키·요청을 모름 — 값(쿠키 서명용 무작위 값)은 부르는 쪽(lib/contracts/secrets.ts)이 it_contract_settings 에서 읽어 넘김.
  *
- * 순수 계산(열쇠를 인자로 받는 함수)은 Node 로 바로 시험할 수 있다:
+ * 순수 계산이라 Node 로 바로 시험할 수 있다:
  *   node --conditions=react-server <시험.mts>   (server-only 가 react-server 조건에서 빈 모듈이 됨)
- * 시험 열쇠는 그 자리에서 randomBytes 로 만든다 — 코드·문서에 열쇠 값을 적지 않는다.
+ * 시험 값은 그 자리에서 randomBytes 로 만든다 — 코드·문서에 실제 값을 적지 않는다.
  *
- * 형식(설정 화면 components/contracts/SecretSetupTool.tsx 와 반드시 같게):
- *   CONTRACT_SECRET_KEY    = 무작위 32바이트의 표준 base64(패딩 포함 44자)
- *   CONTRACT_PASSWORD_HASH = pbkdf2-sha256$<반복 횟수>$<salt>$<hash>
- *                            salt = 16바이트, hash = 32바이트, 둘 다 base64url(패딩 없음, RFC 4648 §5)
- *                            비밀번호 = NFC 로 정리한 문자열의 UTF-8 바이트, PRF = HMAC-SHA-256, 반복 600,000
- *   암호문(sealed)          = v1.<iv 12바이트>.<tag 16바이트>.<암호문> — 셋 다 base64url(패딩 없음)
- *   AAD                    = it-contracts:v1:<seat|contract>:<owner id 소문자>:<field>
- * 주의: .env.local 에 해시를 넣으면 Next 가 `$이름`을 변수로 바꿔 버림 → `\$`로 적어야 함(Vercel 값은 그대로).
+ * 형식:
+ *   비밀번호 해시(it_contract_settings 'sw_password_hash') = pbkdf2-sha256$<반복 횟수>$<salt>$<hash>
+ *     salt = 16바이트, hash = 32바이트, 둘 다 base64url(패딩 없음, RFC 4648 §5)
+ *     비밀번호 = NFC 로 정리한 문자열의 UTF-8 바이트, PRF = HMAC-SHA-256, 반복 600,000 (서버에서 만듦)
+ *   쿠키 서명용 값('cookie_secret') = 무작위 32바이트 base64url(패딩 없음, 43자) → HKDF 로 쿠키 서명 열쇠·IP 해시 열쇠를 따로 뽑음
+ *   쿠키 = base64url(JSON{v:1, exp, name, pw}).base64url(HMAC-SHA256), pw = 비밀번호 해시 문자열의 지문 8자
  */
 
-export const SECRET_KEY_ENV = 'CONTRACT_SECRET_KEY';
-export const PASSWORD_HASH_ENV = 'CONTRACT_PASSWORD_HASH';
-
-export const SEALED_VERSION = 'v1';
 export const PBKDF2_PREFIX = 'pbkdf2-sha256';
 export const PBKDF2_ITERATIONS = 600_000;
 export const PASSWORD_SALT_BYTES = 16;
 export const PASSWORD_HASH_BYTES = 32;
-/** 환경변수 해시의 반복 횟수 허용 범위(설정 화면은 항상 600,000) */
+export const COOKIE_SECRET_BYTES = 32;
+/** 저장된 해시의 반복 횟수 허용 범위(이 앱이 만드는 해시는 항상 600,000) */
 const MIN_ITERATIONS = 100_000;
 const MAX_ITERATIONS = 5_000_000;
-const IV_BYTES = 12;
-const TAG_BYTES = 16;
 const HKDF_SALT = Buffer.from('it-contracts:v1', 'utf8');
-
-/** 복호화 실패 — 이유를 나누지 않음(어느 칸이 왜 틀렸는지 알려 주지 않기 위해) */
-export class SecretOpenError extends Error {
-  constructor() {
-    super('열쇠가 다르거나 값이 손상됨');
-    this.name = 'SecretOpenError';
-  }
-}
 
 // ── base64url ─────────────────────────────────────────────────────────
 
@@ -64,67 +41,38 @@ export function fromB64url(text: string): Buffer | null {
   return buf.toString('base64url') === text ? buf : null;
 }
 
-// ── 암호화 열쇠 ───────────────────────────────────────────────────────
+// ── 쿠키 서명용 무작위 값 → 용도별 열쇠 ───────────────────────────────
 
-/** CONTRACT_SECRET_KEY 값 → 32바이트 열쇠. 모양·길이가 틀리면 null(= 비밀 칸 기능 꺼짐) */
-export function parseSecretKey(raw: string | null | undefined): Buffer | null {
-  const text = (raw ?? '').trim();
-  if (!/^[A-Za-z0-9+/]{43}=$/.test(text)) return null;
-  const buf = Buffer.from(text, 'base64');
-  return buf.length === 32 ? buf : null;
+/** 처음 한 번 만들어 it_contract_settings 'cookie_secret' 에 넣는 값 */
+export function newCookieSecret(): string {
+  return toB64url(randomBytes(COOKIE_SECRET_BYTES));
 }
 
-/** 큰 열쇠에서 용도별 열쇠를 따로 뽑음 — 쿠키 서명·IP 해시가 암호화 열쇠를 그대로 쓰지 않게 */
+/** 저장된 'cookie_secret' 값 → 32바이트. 모양이 틀리면 null */
+export function parseCookieSecret(raw: string | null | undefined): Buffer | null {
+  const buf = fromB64url((raw ?? '').trim());
+  return buf && buf.length === COOKIE_SECRET_BYTES ? buf : null;
+}
+
+/** 한 값에서 용도별 열쇠를 따로 뽑음 — 쿠키 서명과 IP 해시가 같은 열쇠를 쓰지 않게 */
 export function deriveSubKey(master: Buffer, info: 'unlock-cookie' | 'ip-hash'): Buffer {
   return Buffer.from(hkdfSync('sha256', master, HKDF_SALT, Buffer.from(info, 'utf8'), 32));
 }
 
-// ── 비밀 칸 암호화 (AES-256-GCM + AAD) ───────────────────────────────
-
-export type SecretOwnerKind = 'seat' | 'contract';
-
-/** 암호문을 다른 줄·칸에 옮겨 붙이면 안 풀리게 하는 꼬리표 */
-export function secretAad(kind: SecretOwnerKind, ownerId: string, field: string): string {
-  return `it-contracts:${SEALED_VERSION}:${kind}:${ownerId.trim().toLowerCase()}:${field}`;
+export function deriveUnlockKeys(master: Buffer): { cookieKey: Buffer; ipKey: Buffer } {
+  return { cookieKey: deriveSubKey(master, 'unlock-cookie'), ipKey: deriveSubKey(master, 'ip-hash') };
 }
 
-export function sealWithKey(key: Buffer, plain: string, aad: string): string {
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: TAG_BYTES });
-  cipher.setAAD(Buffer.from(aad, 'utf8'));
-  const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `${SEALED_VERSION}.${toB64url(iv)}.${toB64url(tag)}.${toB64url(ct)}`;
-}
-
-/** 실패하면 SecretOpenError 하나로만 던짐(원인·값은 싣지 않음) */
-export function openWithKey(key: Buffer, sealed: string, aad: string): string {
-  const parts = typeof sealed === 'string' ? sealed.split('.') : [];
-  if (parts.length !== 4 || parts[0] !== SEALED_VERSION) throw new SecretOpenError();
-  const iv = fromB64url(parts[1]);
-  const tag = fromB64url(parts[2]);
-  const ct = fromB64url(parts[3]);
-  if (!iv || iv.length !== IV_BYTES || !tag || tag.length !== TAG_BYTES || !ct) throw new SecretOpenError();
-  try {
-    const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: TAG_BYTES });
-    decipher.setAAD(Buffer.from(aad, 'utf8'));
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(ct), decipher.final()]).toString('utf8');
-  } catch {
-    throw new SecretOpenError();
-  }
-}
-
-// ── 인증 비밀번호 (PBKDF2-SHA256) ────────────────────────────────────
+// ── 비밀번호 (PBKDF2-SHA256) ─────────────────────────────────────────
 
 export type ParsedPasswordHash = { iterations: number; salt: Buffer; hash: Buffer };
 
-/** 브라우저 설정 화면과 같은 규칙 — 한글 등 같은 글자가 다른 바이트로 들어와도 같게 */
+/** 한글 등 같은 글자가 다른 바이트(NFD)로 들어와도 같은 비밀번호로 */
 export function normalizePassword(password: string): string {
   return password.normalize('NFC');
 }
 
-/** CONTRACT_PASSWORD_HASH 값 → 반복 횟수·salt·hash. 모양이 틀리면 null(= 비밀 칸 기능 꺼짐) */
+/** 저장된 해시 → 반복 횟수·salt·hash. 모양이 틀리면 null */
 export function parsePasswordHash(raw: string | null | undefined): ParsedPasswordHash | null {
   const text = (raw ?? '').trim();
   const m = /^pbkdf2-sha256\$(\d{6,7})\$([A-Za-z0-9_-]+)\$([A-Za-z0-9_-]+)$/.exec(text);
@@ -149,17 +97,23 @@ export function pbkdf2Sha256(password: string, salt: Uint8Array, iterations: num
   });
 }
 
+/** 새 비밀번호 → 저장할 해시 문자열(무작위 salt 16바이트, 600,000회) */
+export async function makePasswordHash(password: string): Promise<string> {
+  const salt = randomBytes(PASSWORD_SALT_BYTES);
+  return formatPasswordHash(salt, await pbkdf2Sha256(password, salt, PBKDF2_ITERATIONS));
+}
+
 export async function checkPassword(parsed: ParsedPasswordHash, password: string): Promise<boolean> {
   const got = await pbkdf2Sha256(password, parsed.salt, parsed.iterations, parsed.hash.length);
   return got.length === parsed.hash.length && timingSafeEqual(got, parsed.hash);
 }
 
-/** 해시 지문 8자 — 쿠키에 넣어 두면 비밀번호(해시)를 바꾸는 순간 열려 있던 쿠키가 모두 무효 */
+/** 해시 지문 8자 — 쿠키에 넣어 두면 비밀번호(해시)를 바꾸는 순간 다른 기기의 쿠키가 모두 무효 */
 export function passwordHashFingerprint(raw: string): string {
   return createHash('sha256').update(raw.trim(), 'utf8').digest('hex').slice(0, 8);
 }
 
-// ── 열람 쿠키 서명 ───────────────────────────────────────────────────
+// ── 잠금 해제 쿠키 서명 ──────────────────────────────────────────────
 
 export type UnlockClaims = { name: string; exp: number };
 
@@ -233,37 +187,4 @@ export function lockoutUntil(failTimes: number[], now: number, max: number, wind
     }
   }
   return until !== null && until > now ? until : null;
-}
-
-// ── 환경변수 ─────────────────────────────────────────────────────────
-
-export type ContractKeys = {
-  secretKey: Buffer;
-  cookieKey: Buffer;
-  ipKey: Buffer;
-  password: ParsedPasswordHash;
-  pwFingerprint: string;
-};
-
-/** 두 환경변수가 각각 쓸 수 있는 모양인지(값은 돌려주지 않음) */
-export function contractEnvStatus(): { key: boolean; passwordHash: boolean } {
-  return {
-    key: parseSecretKey(process.env[SECRET_KEY_ENV]) !== null,
-    passwordHash: parsePasswordHash(process.env[PASSWORD_HASH_ENV]) !== null,
-  };
-}
-
-/** 열쇠·해시를 읽어 용도별 열쇠까지. 하나라도 없거나 모양이 틀리면 null */
-export function readContractKeys(): ContractKeys | null {
-  const secretKey = parseSecretKey(process.env[SECRET_KEY_ENV]);
-  const rawHash = process.env[PASSWORD_HASH_ENV] ?? '';
-  const password = parsePasswordHash(rawHash);
-  if (!secretKey || !password) return null;
-  return {
-    secretKey,
-    cookieKey: deriveSubKey(secretKey, 'unlock-cookie'),
-    ipKey: deriveSubKey(secretKey, 'ip-hash'),
-    password,
-    pwFingerprint: passwordHashFingerprint(rawHash),
-  };
 }

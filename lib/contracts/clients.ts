@@ -7,7 +7,7 @@ import 'server-only';
  * - 화면을 여는 것만으로는 표에 쓰지 않음. 저장할 때(app/contracts/actions.ts 등)만 addMatchedKeys 로
  *   그 순간 맞은 works 줄 id·거래처 코드를 seen_asset_ids·vendor_codes 에 "더함"(빼지 않음).
  * - 거래처 코드(vendorCodeKey)는 서버 안에서만 — 반환 모양(types.ts)에 싣지 않음.
- * - 비밀 칸 값은 읽지 않음. 상세에서만 secretFlags(어느 칸에 비밀이 있는지)를 부름.
+ * - 비밀 칸 값은 여기서 읽지 않음 — 상세의 secrets 는 빈 채로 두고, 잠금 확인 뒤 app/contracts/actions.ts 가 채움.
  * - 계약 표 select 는 칸 이름을 적음(* 금지).
  */
 import {
@@ -20,7 +20,6 @@ import {
 import { groupWorksRows, matchClients, type GroupRow, type SavedClientKeys, type WorksGroup } from './grouping';
 import { nameKey } from './nameKey';
 import { clientRenewal, kstTodayYmd, type RenewalContract } from './renewal';
-import { secretFlags, secretsConfigured } from './secrets';
 import {
   PCM_ITEMS,
   SW_ITEMS,
@@ -32,7 +31,6 @@ import {
   type EndedReason,
   type LicenseType,
   type MatchedBy,
-  type SecretField,
   type SwContract,
   type SwSeat,
   type WorksLine,
@@ -393,7 +391,6 @@ export async function buildContractsOverview(tab: ContractTab): Promise<Contract
     sourceError: assets.error,
     readAt: new Date().toISOString(),
     tablesMissing: db.missing,
-    secretsConfigured: secretsConfigured(),
   };
 }
 
@@ -486,9 +483,6 @@ export async function buildClientDetail(key: string): Promise<ClientDetail> {
       }
     }
   }
-  const flags = await secretFlags({ contractIds: contracts.map((c) => c.id), seatIds: seats.map((s) => s.id) });
-  const flagsOf = (id: string): SecretField[] => flags.get(id) ?? [];
-
   const seatsByContract = group(seats, (s) => s.contract_id);
   const swContracts: SwContract[] = contracts.map((c) => {
     const cs = seatsByContract.get(c.id) ?? [];
@@ -511,7 +505,7 @@ export async function buildClientDetail(key: string): Promise<ClientDetail> {
       status: c.status,
       memo: c.memo,
       source: c.source,
-      secretFields: flagsOf(c.id),
+      secrets: {},
       seats: cs.map(
         (s): SwSeat => ({
           id: s.id,
@@ -527,7 +521,7 @@ export async function buildClientDetail(key: string): Promise<ClientDetail> {
           endsOn: s.ends_on,
           status: s.status,
           memo: s.memo,
-          secretFields: flagsOf(s.id),
+          secrets: {},
           sourceRaw: rawToStrings(s.source_raw),
           updatedAt: s.updated_at,
         }),

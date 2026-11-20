@@ -3,6 +3,21 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "58db2ba383",
+    "date": "2026-11-20",
+    "time": "16:48",
+    "subject": "계약 관리 1단계 — 소프트웨어 계약(/contracts): firstoa-works 품목 소프트웨어·PC유지보수 거래처를 화면 열 때마다 실시간으로 읽음(fetchWorksAssetsByItems, 실패하면 임대리스트 사본·주황 띠), 거래처 맞추기 works assets.id → 거래처 코드(주민번호 꼴 버림) → 정규화 이름, 계약 상품·좌석(사용자·설치 PC·2차인증 평문) · 비밀 칸(라이선스 키·마스터 계정·관리자 계정·결제 카드) AES-256-GCM 암호화 저장, 인증 비밀번호(PBKDF2 해시 env) → 10분 열람 쿠키 → 누른 칸만 복호화, 틀린 시도 잠금·열람 기록 · /contracts/setup 열쇠·해시 만들기(브라우저 안에서만) · SW자산 시트 두 탭 한 번 옮기기(미리보기 → 거래처 맞추기 → 반영 → 복호화 대조, 빠진 것 0) · 홈 계약 카드(30일 안 갱신·만료) · supabase/contracts_schema.sql 표 5개 · CLAUDE.md 계약 관리 절",
+    "crew": [
+      "feature-planner",
+      "db-schema",
+      "ui-designer",
+      "developer",
+      "qa-checker",
+      "sql-review",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "0ef8666472",
     "date": "2026-11-20",
     "time": "16:27",

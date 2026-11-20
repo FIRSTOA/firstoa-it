@@ -55,12 +55,11 @@ type Props = {
 };
 
 export default function SheetImportModal({ open, clients, onClose, onDone }: Props) {
-  const { askUnlock, unlock } = useContractsCtx();
+  const { onNeedUnlock } = useContractsCtx();
   const [mobile, setMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches);
   const [phase, setPhase] = useState<Phase>('loading');
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [error, setError] = useState('');
-  const [needUnlock, setNeedUnlock] = useState(false);
   const [picks, setPicks] = useState<Record<string, Pick>>({});
   const [prodRen, setProdRen] = useState<Record<string, string>>({});
   const [supRen, setSupRen] = useState<Record<string, string>>({});
@@ -78,14 +77,13 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
   async function loadPreview() {
     setPhase('loading');
     setError('');
-    setNeedUnlock(false);
     setApplyError('');
     setResult(null);
     try {
       const r = await previewSheetImport();
       if (!r.ok) {
         setError(r.error);
-        setNeedUnlock(!!r.needUnlock);
+        if (r.needUnlock) onNeedUnlock();
         setPhase('error');
         return;
       }
@@ -108,7 +106,7 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
   }
 
   useEffect(() => {
-    if (open && !mobile && unlock.unlocked) void loadPreview();
+    if (open && !mobile) void loadPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mobile]);
 
@@ -156,7 +154,7 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
         return;
       }
       setApplyError(r.error);
-      if (r.needUnlock) setNeedUnlock(true);
+      if (r.needUnlock) onNeedUnlock();
       setPhase('confirm');
     } catch {
       setApplyError('옮기는 도중 연결이 끊겼어요. 반영됐는지 알 수 없으니 "미리보기 다시"로 숫자를 확인해 주세요.');
@@ -261,7 +259,7 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
                       저장 새로 {s.inserted} · 이미 {s.existing}
                     </div>
                     <div>
-                      복호화 확인 {s.verified} {ok ? '✓' : '✗'}
+                      저장 확인 {s.verified} {ok ? '✓' : '✗'}
                     </div>
                   </td>
                 );
@@ -313,15 +311,6 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
           <div className="empty-state">
             <div>💻</div>시트 옮기기는 PC에서 해 주세요. 한 번만 하는 큰 작업이라 핸드폰에서는 막아 뒀어요.
           </div>
-        ) : !unlock.unlocked ? (
-          <div className="empty-state">
-            <div>🔒</div>비밀 칸까지 옮기는 일이라 열람 중일 때만 할 수 있어요.
-            <div style={{ marginTop: '12px' }}>
-              <button type="button" className="btn btn-primary" onClick={() => askUnlock(() => void loadPreview())}>
-                🔒 열기
-              </button>
-            </div>
-          </div>
         ) : (
           <>
             <div className="ct-steps" aria-label="진행 단계">
@@ -342,11 +331,6 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
                 <div>⚠️</div>
                 {error}
                 <div style={{ marginTop: '12px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                  {needUnlock && (
-                    <button type="button" className="btn btn-primary" onClick={() => askUnlock(() => void loadPreview())}>
-                      🔒 열기
-                    </button>
-                  )}
                   <button type="button" className="btn btn-ghost" onClick={() => void loadPreview()}>
                     다시 읽기
                   </button>
@@ -532,18 +516,11 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
                   <li>
                     이름 합치기: 상품 {Object.keys(plan.productRenames).length}개 · 매입처 {Object.keys(plan.supplierRenames).length}개
                   </li>
-                  <li>이미 옮긴 것은 다시 만들지 않고, 앱에서 고친 값은 덮어쓰지 않아요. 비밀 칸은 암호화해 저장하고 옮긴 뒤 풀어서 시트와 같은지 확인해요.</li>
+                  <li>이미 옮긴 것은 다시 만들지 않고, 앱에서 고친 값은 덮어쓰지 않아요. 옮긴 뒤 저장된 값이 시트와 같은지 다시 읽어 확인해요.</li>
                 </ul>
                 {applyError && (
                   <div className="ct-error" role="alert">
                     {applyError}
-                    {needUnlock && (
-                      <div style={{ marginTop: '8px' }}>
-                        <button type="button" className="btn btn-primary" onClick={() => askUnlock(() => setNeedUnlock(false))}>
-                          🔒 다시 열기
-                        </button>
-                      </div>
-                    )}
                   </div>
                 )}
                 {busy && <div className="ct-band muted">옮기는 중이에요… 창을 닫거나 새로 고침하지 마세요.</div>}
@@ -565,7 +542,7 @@ export default function SheetImportModal({ open, clients, onClose, onDone }: Pro
               <>
                 <div className={`ct-band ${resultOk(result) ? 'good' : 'bad'}`}>
                   {resultOk(result)
-                    ? '시트의 값을 모두 옮겼고, 풀어서 시트와 같은지도 확인했어요. 빠진 것 0.'
+                    ? '시트의 값을 모두 옮겼고, 저장된 값이 시트와 같은지도 확인했어요. 빠진 것 0.'
                     : '확인이 필요한 것이 있어요. 아래 빨간 칸과 빠진 것 목록을 보세요.'}
                 </div>
                 <div className="ct-muted" style={{ marginBottom: '8px' }}>

@@ -1,5 +1,5 @@
 -- ==================================================================
--- 계약 관리 1단계 — 소프트웨어 계약 표 5개 (2026-11-20)
+-- 계약 관리 1단계 — 소프트웨어 계약 표 6개 (2026-11-20, 같은 날 D13 으로 고침)
 --
 -- 목적: /contracts 화면(소프트웨어 계약)이 쓰는 우리 기록.
 --       거래처 목록 자체는 화면을 열 때마다 firstoa-works 에서 읽고(여기 저장 안 함),
@@ -8,14 +8,17 @@
 --         ② it_sw_contracts         거래처의 계약 상품(소프트웨어 한 종류)
 --         ③ it_sw_seats             라이선스 한 개 = 사용자 배정 한 줄
 --                                   (2차인증 mfa_note 는 가리지 않는 평문 칸 — 사용자 결정 D9)
---         ④ it_contract_secrets     비밀 칸 암호문(라이선스 키·마스터 계정·관리자 계정·결제 카드·기타)
---         ⑤ it_contract_secret_log  비밀 칸 열람·수정·인증 기록(값은 적지 않음)
+--         ④ it_contract_secrets     비밀 칸 값(라이선스 키·마스터 계정·관리자 계정·결제 카드·기타)
+--         ⑤ it_contract_secret_log  잠금 해제·비밀 칸 수정·인증 기록(값은 적지 않음)
+--         ⑥ it_contract_settings    소프트웨어 탭 비밀번호 해시·쿠키 서명용 무작위 값(화면에서 처음 정함)
 --       설계: docs/tasks/2026-11-20-contract-management.md §3-3 (맨 위 D1~D12 결정이 우선)
 --
--- 비밀 값: 앱(lib/contracts/secrets.ts)이 AES-256-GCM 으로 암호화해 ④에 넣습니다.
---          이 파일에도, 이 표들에도 평문 비밀은 없습니다. 암호화 열쇠·인증 비밀번호 해시는
---          Vercel 환경변수에만 있고 DB 에는 없어서, DB 권한만으로는 풀 수 없습니다.
---          ④ sealed 칸은 "v1.<iv>.<tag>.<암호문>" 모양만 받습니다(평문이 실수로 들어가는 것을 DB 가 막음).
+-- 비밀 값(D13 — 사용자 결정 "그냥 저장"): ④에 암호화 없이 그대로 저장합니다. 다른 IT 대장(임대리스트·청구)처럼
+--          서버(관리자 키)만 읽을 수 있고, 화면에서는 소프트웨어 탭 비밀번호를 넣어야 보입니다.
+--          Supabase 관리 화면에 들어갈 수 있는 사람은 ④ 값을 볼 수 있습니다(시트를 볼 수 있던 것과 비슷한 수준).
+--          비밀번호는 ⑥에 PBKDF2 해시로만 저장. 비밀번호를 잊으면 ⑥의 'sw_password_hash' 줄을 지우고 화면에서 다시 정하면 됨
+--          (④ 값은 그대로 — 암호화가 아니라 잃을 것 없음).
+-- 이 파일을 예전 판(④ sealed 암호문 칸)으로 이미 실행했어도 다시 실행하면 맨 아래 "예전 판 고치기"가 칸 이름을 바꿉니다.
 --
 -- 실행 방법: Supabase SQL Editor 에서 한 번 실행 (New query 에 붙여넣고 Run).
 -- 여러 번 실행해도 안전합니다 (create table if not exists / create index if not exists /
@@ -27,8 +30,9 @@
 --       → 서버(관리자 키)로만 접근. 브라우저가 직접 읽는 길은 없습니다.
 --
 -- 되돌리기(롤백): 아래를 이 순서로(비밀 표 먼저). 색인·트리거·제약도 같이 지워집니다.
---   !! 지우면 앱에 옮긴 비번·라이선스 키(암호문)와 열람 기록이 영구히 사라집니다.
+--   !! 지우면 앱에 옮긴 비번·라이선스 키와 기록이 영구히 사라집니다.
 --      데이터가 있으면 먼저 Table Editor 에서 표마다 CSV 로 내보내 두세요. !!
+--   drop table if exists public.it_contract_settings;
 --   drop table if exists public.it_contract_secret_log;
 --   drop table if exists public.it_contract_secrets;
 --   drop table if exists public.it_sw_seats;
@@ -198,7 +202,7 @@ create index if not exists it_sw_seats_works_asset_id_idx on public.it_sw_seats 
 
 
 -- ------------------------------------------------------------------
--- ④ 비밀 칸 암호문 — lib/contracts/secrets.ts 한 파일만 읽고 씀
+-- ④ 비밀 칸 값(D13 그대로 저장) — lib/contracts/secrets.ts 한 파일만 읽고 씀
 --    한 줄 = (계약 상품 또는 좌석 하나) × (칸 하나). 2차인증은 여기 없음(D9 — ③ mfa_note).
 -- ------------------------------------------------------------------
 create table if not exists public.it_contract_secrets (
@@ -216,12 +220,9 @@ create table if not exists public.it_contract_secrets (
                constraint it_contract_secrets_field_check
                check (field in ('license_key', 'account', 'admin_account', 'card', 'other')),
 
-  -- 암호문 "v1.<iv>.<tag>.<암호문>"(base64url). 점으로 나뉜 네 조각이 아니면 거절 → 평문이 실수로 못 들어옴.
-  sealed       text not null
-               constraint it_contract_secrets_sealed_format
-               check (sealed ~ '^v[0-9]+\.[^.]+\.[^.]+\.[^.]+$'),
-  key_version  smallint not null default 1
-               constraint it_contract_secrets_key_version_check check (key_version >= 1),
+  -- 값 그대로(D13). 빈 값은 저장하지 않음(지우기 = 줄 삭제).
+  value_text   text not null
+               constraint it_contract_secrets_value_not_blank check (value_text <> ''),
 
   updated_by   text not null default '',
   created_at   timestamptz not null default now(),
@@ -266,8 +267,43 @@ create index if not exists it_contract_secret_log_ip_hash_at_idx on public.it_co
 
 
 -- ------------------------------------------------------------------
+-- ⑥ 설정 — key 'sw_password_hash' = 소프트웨어 탭 비밀번호 PBKDF2 해시("pbkdf2-sha256$반복$salt$hash"),
+--          key 'cookie_secret' = 잠금 해제 쿠키 서명·IP 해시용 무작위 값(앱이 처음 한 번 만듦).
+--    비밀번호 평문은 어디에도 없음. 잊었으면: delete from public.it_contract_settings where key = 'sw_password_hash';
+-- ------------------------------------------------------------------
+create table if not exists public.it_contract_settings (
+  key         text primary key,
+  value       text not null,
+  updated_by  text not null default '',
+  updated_at  timestamptz not null default now()
+);
+
+
+-- ------------------------------------------------------------------
+-- 예전 판 고치기 — 이 파일의 예전 판(④ 칸 sealed = 암호문, key_version)을 이미 실행한 DB 만 해당.
+-- 새로 실행하는 DB 에서는 아무 일도 안 함. 데이터가 없는 상태에서만 실행됨(앱 배포 전이라 비어 있음).
+-- ------------------------------------------------------------------
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'it_contract_secrets' and column_name = 'sealed') then
+    if exists (select 1 from public.it_contract_secrets) then
+      raise exception 'it_contract_secrets 에 예전 암호문이 있어요 — 자동으로 바꾸지 않습니다. 팀장에게 알려 주세요.';
+    end if;
+    alter table public.it_contract_secrets drop constraint if exists it_contract_secrets_sealed_format;
+    alter table public.it_contract_secrets drop constraint if exists it_contract_secrets_key_version_check;
+    alter table public.it_contract_secrets drop column if exists key_version;
+    alter table public.it_contract_secrets rename column sealed to value_text;
+    alter table public.it_contract_secrets
+      add constraint it_contract_secrets_value_not_blank check (value_text <> '');
+  end if;
+end
+$$;
+
+
+-- ------------------------------------------------------------------
 -- updated_at 자동 갱신(schema.sql 의 것과 내용이 똑같음 — 없을 때를 대비해 다시 만들어 둠)
--- ⑤ 기록 표는 쓰기만 하고 고치지 않아서 updated_at 이 없음.
+-- ⑤ 기록 표는 updated_at 이 없음(잠금 해제 시도 줄의 note·action 만 앱이 고침).
 -- ------------------------------------------------------------------
 create or replace function public.set_updated_at() returns trigger language plpgsql as $$
 begin
@@ -296,6 +332,11 @@ create trigger it_contract_secrets_set_updated_at
   before update on public.it_contract_secrets
   for each row execute function public.set_updated_at();
 
+drop trigger if exists it_contract_settings_set_updated_at on public.it_contract_settings;
+create trigger it_contract_settings_set_updated_at
+  before update on public.it_contract_settings
+  for each row execute function public.set_updated_at();
+
 
 -- ------------------------------------------------------------------
 -- 보안: RLS 켜고 정책은 만들지 않음 + anon·authenticated 권한 회수 → 서버(관리자 키)로만 접근.
@@ -306,13 +347,15 @@ alter table public.it_sw_contracts        enable row level security;
 alter table public.it_sw_seats            enable row level security;
 alter table public.it_contract_secrets    enable row level security;
 alter table public.it_contract_secret_log enable row level security;
+alter table public.it_contract_settings   enable row level security;
 
 revoke all on table
   public.it_contract_clients,
   public.it_sw_contracts,
   public.it_sw_seats,
   public.it_contract_secrets,
-  public.it_contract_secret_log
+  public.it_contract_secret_log,
+  public.it_contract_settings
 from anon, authenticated;
 
 -- ⑤의 번호(identity) 시퀀스도 같은 이유로 회수(시퀀스 이름은 DB 에서 직접 찾음).
@@ -331,7 +374,8 @@ $$;
 comment on table public.it_contract_clients    is '계약 관리 — 계약 거래처(works 소프트웨어·PC유지보수 거래처에 사람이 붙인 정보)';
 comment on table public.it_sw_contracts        is '계약 관리 — 거래처의 소프트웨어 계약 상품';
 comment on table public.it_sw_seats            is '계약 관리 — 라이선스 한 개 = 사용자 배정 한 줄(mfa_note 는 평문)';
-comment on table public.it_contract_secrets    is '계약 관리 — 비밀 칸 암호문(앱이 암호화, 평문 없음). lib/contracts/secrets.ts 만 읽고 씀';
-comment on table public.it_contract_secret_log is '계약 관리 — 비밀 칸 열람·수정·인증 기록(값 없음)';
+comment on table public.it_contract_secrets    is '계약 관리 — 비밀 칸 값(서버 전용, 화면은 소프트웨어 탭 비밀번호로). lib/contracts/secrets.ts 만 읽고 씀';
+comment on table public.it_contract_secret_log is '계약 관리 — 잠금 해제·비밀 칸 수정·인증 기록(값 없음)';
+comment on table public.it_contract_settings   is '계약 관리 — 소프트웨어 탭 비밀번호 해시·쿠키 서명 값(평문 비밀번호 없음)';
 
 notify pgrst, 'reload schema';

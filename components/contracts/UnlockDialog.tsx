@@ -1,10 +1,14 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, type FormEvent } from 'react';
-import { unlockSecrets } from '@/app/contracts/secretActions';
+import { createContext, useContext } from 'react';
 import type { UnlockState } from '@/lib/contracts/types';
 
-/** 이름을 이 브라우저에 기억하는 칸 — 열람 이름과 수정한 사람 이름이 같다 */
+/*
+ * 계약 관리 화면이 같이 쓰는 것 — 쓰는 사람 이름 기억, 열림 상태, 알림, "잠겨 있었음" 처리.
+ * (D13: 칸마다 인증 창은 없앰. 비밀번호는 PasswordGate.tsx 한 곳에서만 받음)
+ */
+
+/** 이름을 이 브라우저에 기억하는 칸 — 수정한 사람 기록에 씀 */
 export const CONTRACTS_NAME_KEY = 'firstoa-it.contracts-name';
 
 export function readStoredName(): string {
@@ -33,135 +37,20 @@ export function requireActor(): string | null {
   return typed;
 }
 
-/** 화면 여러 곳이 같이 쓰는 것 — 열람 상태, 인증 창 열기, 알림 */
 export type ContractsCtxValue = {
   unlock: UnlockState;
-  /** 인증 창을 띄움. 인증에 성공하면 after 를 부름 */
-  askUnlock: (after?: () => void) => void;
   toast: (message: string) => void;
+  /** 서버가 needUnlock 을 돌려줬을 때(시간이 지나 잠김) — 비밀번호 화면으로 돌아감 */
+  onNeedUnlock: () => void;
+  /** 실패 결과 처리: 잠겨 있었으면 비밀번호 화면으로, 아니면 오류 문구를 알림 */
+  fail: (r: { error: string; needUnlock?: boolean }) => void;
 };
 
 export const ContractsCtx = createContext<ContractsCtxValue>({
-  unlock: { configured: false, unlocked: false, name: '', expiresAt: null, lockedUntil: null },
-  askUnlock: () => {},
+  unlock: { passwordSet: false, unlocked: false, expiresAt: null, lockedUntil: null },
   toast: () => {},
+  onNeedUnlock: () => {},
+  fail: () => {},
 });
 
 export const useContractsCtx = () => useContext(ContractsCtx);
-
-function minutesUntil(iso: string): number {
-  const ms = Date.parse(iso) - Date.now();
-  return Math.max(1, Math.ceil(ms / 60000));
-}
-
-type Props = {
-  open: boolean;
-  onClose: () => void;
-  onUnlocked: (state: UnlockState) => void;
-};
-
-export default function UnlockDialog({ open, onClose, onUnlocked }: Props) {
-  const [name, setName] = useState('');
-  const [pw, setPw] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [remaining, setRemaining] = useState<number | null>(null);
-  const [lockedUntil, setLockedUntil] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setName(readStoredName());
-    setPw('');
-    setError('');
-    setRemaining(null);
-    setLockedUntil(null);
-  }, [open]);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (busy) return;
-    const who = name.trim();
-    if (who.length < 2) {
-      setError('이름을 2자 이상 적어 주세요.');
-      return;
-    }
-    if (!pw) {
-      setError('인증 비밀번호를 적어 주세요.');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    setRemaining(null);
-    setLockedUntil(null);
-    try {
-      const r = await unlockSecrets(pw, who);
-      setPw('');
-      if (r.ok) {
-        saveStoredName(who);
-        onUnlocked(r.state);
-        return;
-      }
-      setError(r.error);
-      setRemaining(typeof r.remaining === 'number' ? r.remaining : null);
-      setLockedUntil(r.lockedUntil ?? null);
-    } catch {
-      setPw('');
-      setError('확인하지 못했어요. 잠시 뒤 다시 해 주세요.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div
-      className={`modal-overlay ct-top${open ? ' open' : ''}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !busy) onClose();
-      }}
-    >
-      <form className="modal ct-unlock" onSubmit={submit} autoComplete="off">
-        <h2>🔒 비밀 칸 열기</h2>
-        <div className="sub">이름과 인증 비밀번호를 넣으면 10분 동안 비밀 칸을 보고 고칠 수 있어요. 누가 언제 봤는지는 기록돼요.</div>
-        <div className="form-grid">
-          <div className="form-field full">
-            <label htmlFor="ct-unlock-name">이름 (2자 이상)</label>
-            <input
-              id="ct-unlock-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoComplete="off"
-              placeholder="예: 홍길동"
-            />
-          </div>
-          <div className="form-field full">
-            <label htmlFor="ct-unlock-pw">인증 비밀번호</label>
-            <input
-              id="ct-unlock-pw"
-              type="password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              autoComplete="current-password"
-              autoFocus={!!name}
-            />
-          </div>
-        </div>
-        {error && (
-          <div className="ct-error" role="alert">
-            {error}
-            {remaining !== null && <div>남은 시도 {remaining}회</div>}
-            {lockedUntil && <div>{minutesUntil(lockedUntil)}분 뒤에 다시 해 주세요.</div>}
-          </div>
-        )}
-        <div className="modal-footer">
-          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
-            닫기
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? '확인 중…' : '열기'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}

@@ -1,7 +1,9 @@
 /**
  * 계약 관리(/contracts) — 화면·서버가 주고받는 모양.
- * 설계: docs/tasks/2026-11-20-contract-management.md §3-7 (D9: 2차인증은 비밀 칸 아님 → 좌석 mfaNote 평문).
- * server-only 아님 — 클라이언트 컴포넌트도 import. 비밀 값·works 거래처 코드는 여기 어느 모양에도 싣지 않는다.
+ * 설계: docs/tasks/2026-11-20-contract-management.md §3-7 (D9: 2차인증 평문 / **D13: 소프트웨어 탭 전체를 비밀번호 하나로 잠금,
+ *   열면 비밀 칸 값도 그냥 보임, 비밀 칸은 암호화 없이 서버 전용 표에 저장, 비밀번호는 화면에서 정함(DB 해시)**).
+ * server-only 아님 — 클라이언트 컴포넌트도 import. works 거래처 코드는 어느 모양에도 싣지 않는다.
+ * 비밀 값(secrets)은 ClientDetail 안에만 — 서버가 잠금 해제를 확인한 뒤에만 채움.
  * 바꿀 필요가 생기면 직원은 고치지 말고 팀장에게 보고.
  */
 
@@ -73,7 +75,6 @@ export type ContractsOverview = {
   sourceError: string | null;
   readAt: string;
   tablesMissing: boolean;
-  secretsConfigured: boolean;
 };
 
 export type SwSeat = {
@@ -90,7 +91,7 @@ export type SwSeat = {
   endsOn: string | null;
   status: string;
   memo: string;
-  secretFields: SecretField[];
+  secrets: Partial<Record<SecretField, string>>; // 잠금 해제 상태에서 서버가 채운 값(빈 칸은 키 없음)
   sourceRaw: Record<string, string> | null;
   updatedAt: string;
 };
@@ -113,7 +114,7 @@ export type SwContract = {
   status: string;
   memo: string;
   source: string;
-  secretFields: SecretField[];
+  secrets: Partial<Record<SecretField, string>>; // 계약 단위 비밀(관리 콘솔 계정·결제 카드 등)
   seats: SwSeat[];
   nextDate: string | null;
   renewal: RenewalState;
@@ -133,13 +134,14 @@ export type ClientDetail = {
   contracts: SwContract[];
 };
 
+/** 소프트웨어 탭 잠금 상태 (D13) */
 export type UnlockState = {
-  configured: boolean;
+  passwordSet: boolean; // false = 아직 비밀번호를 안 정함 → 처음 정하기 화면
   unlocked: boolean;
-  name: string;
   expiresAt: string | null;
-  lockedUntil: string | null;
+  lockedUntil: string | null; // 틀린 시도가 많아 잠긴 경우 풀리는 시각
 };
+export const UNLOCK_HOURS = 2;
 export type SecretOwner = { contractId: string } | { seatId: string };
 export type SecretLogRow = {
   at: string;
@@ -268,7 +270,7 @@ export type UnlockResult =
 
 /*
  * 서버 액션 이름·인자 (고정 — 화면은 이것만 부름)
- * app/contracts/actions.ts (개발 B)
+ * app/contracts/actions.ts (개발 B) — D13: 'sw' 개요·상세·모든 쓰기는 서버에서 잠금 해제 확인(아니면 needUnlock:true)
  *   getContractsOverview(tab: ContractTab): ActionResult<{ overview: ContractsOverview }>
  *   getClientDetail(key: string): ActionResult<{ detail: ClientDetail }>
  *   saveClient(input: ClientInput, actor: string): ActionResult<{ id: string }>
@@ -281,15 +283,16 @@ export type UnlockResult =
  *   saveSwSeat(input: SwSeatInput, actor: string): ActionResult<{ id: string }>
  *   addSwSeats(contractId: string, count: number, actor: string): ActionResult<{ ids: string[] }>  // 최대 200
  *   renewSwContract(id: string, actor: string): ActionResult<{ renewsOn: string | null }>
- * app/contracts/secretActions.ts (개발 A) — 비밀 관련은 전부 서버에서 쿠키 확인
+ * app/contracts/secretActions.ts (개발 A) — D13: 비밀번호 하나로 소프트웨어 탭 전체 잠금(2시간 쿠키)
  *   getUnlockState(): Promise<UnlockState>
- *   unlockSecrets(password: string, name: string): Promise<UnlockResult>
+ *   setFirstPassword(password: string, name?: string): Promise<UnlockResult>   // 아직 안 정했을 때만(4자 이상) → 바로 열림
+ *   unlockSecrets(password: string, name?: string): Promise<UnlockResult>      // 틀린 시도 같은 기기 15분 5회 / 전체 30회 → 15분 잠금
  *   lockSecrets(): ActionResult
- *   revealSecret(owner: SecretOwner, field: SecretField): ActionResult<{ value: string }>      // 잠겨 있으면 needUnlock:true
- *   revealContractSecrets(contractId: string): ActionResult<{ values: { owner: SecretOwner; field: SecretField; value: string }[] }>
- *   saveSecret(owner: SecretOwner, field: SecretField, value: string): ActionResult           // 빈 값 = 삭제
- *   deleteSwSeat(id: string): ActionResult                                                    // 비밀 있으면 열람 중이어야
- *   listSecretLog(limit?: number): ActionResult<{ rows: SecretLogRow[]; failed24h: number }> // 열람 중이어야
+ *   changePassword(current: string, next: string): ActionResult               // 열람 중 + 지금 비밀번호 확인 → 다른 기기 쿠키 무효, 이 기기는 다시 열림
+ *   saveSecret(owner: SecretOwner, field: SecretField, value: string): ActionResult   // 열람 중, 빈 값 = 삭제
+ *   deleteSwSeat(id: string): ActionResult                                    // 열람 중
+ *   listSecretLog(limit?: number): ActionResult<{ rows: SecretLogRow[]; failed24h: number }>  // 열람 중
+ *   (revealSecret / revealContractSecrets 는 없앰 — 열면 getClientDetail 이 값을 같이 줌)
  * app/contracts/importActions.ts (개발 C) — 둘 다 열람 중이어야
  *   previewSheetImport(): ActionResult<{ preview: ImportPreview }>
  *   applySheetImport(plan: ImportPlan): ActionResult<{ result: ImportResult }>

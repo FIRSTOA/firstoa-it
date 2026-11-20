@@ -15,6 +15,7 @@ type Props = {
   onOpen: (key: string) => void;
   onOpenImport: () => void;
   onOpenLog: () => void;
+  onOpenPassword: () => void;
   /** 새 거래처를 만든 뒤 목록 다시 읽기 */
   onChanged: () => void;
 };
@@ -38,8 +39,8 @@ function statusBadge(c: ClientSummary): { cls: string; label: string } {
   return { cls: 'badge-상품화완료', label: '정상' };
 }
 
-export default function SwClientList({ overview, refreshing, onOpen, onOpenImport, onOpenLog, onChanged }: Props) {
-  const { toast } = useContractsCtx();
+export default function SwClientList({ overview, refreshing, onOpen, onOpenImport, onOpenLog, onOpenPassword, onChanged }: Props) {
+  const { toast, fail } = useContractsCtx();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -99,7 +100,7 @@ export default function SwClientList({ overview, refreshing, onOpen, onOpenImpor
     try {
       const r = await createManualClient(name, actor);
       if (!r.ok) {
-        toast(r.error);
+        fail(r);
         return;
       }
       toast('거래처를 추가했어요.');
@@ -177,6 +178,16 @@ export default function SwClientList({ overview, refreshing, onOpen, onOpenImpor
                     }}
                   >
                     ＋ works에 없는 거래처 추가
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenPassword();
+                    }}
+                  >
+                    🔑 비밀번호 바꾸기
                   </button>
                 </div>
               </>
