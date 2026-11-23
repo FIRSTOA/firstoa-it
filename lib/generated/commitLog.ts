@@ -3,6 +3,18 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "7b22f49d04",
+    "date": "2026-11-20",
+    "time": "20:47",
+    "subject": "통합 캘린더 · 네이버에서 만든 일정 고치기·지우기 바로잡음 — 예전엔 앱에서 고치면 늘 it-<id> 로 PUT 해 네이버에 복제본이 생기고 naver_uid 가 덮여 원본 연결이 끊김(다음 동기화 때 앱에 두 줄) · 이제 네이버 원본은 상태 표 주소(uid+calendar_id)로 원문을 읽어 바뀐 칸만(patchEventProps — VALARM·RRULE·참석자·X-NAVER-* 바이트 그대로) If-Match PUT, 서버 DB 값과 네이버 현재 값 비교(다르면 저장 안 함, 412 후에도), 네이버 성공 뒤 앱 저장·naver_uid 안 바꿈, 날짜·시간·캘린더 잠금, 반복 일정 거절, ETag 없으면 거절 · 원본 지우기는 확인 두 번 + 서버 confirmNaverDelete, If-Match DELETE → 상태 줄 → 앱 줄(네이버 실패면 앱도 안 지움) · 앱 일정도 통째 교체(mergeUpdate) 대신 바뀐 줄만 · 🔗 캘린더 연결 → 🧹 복제본 정리(미리보기 → 체크한 것만, 건마다 재확인, 순서 앱 정리 → 상태 줄 → 네이버 복제본) · lib/icsPatch.ts 순수 함수(테스트 82개) · 설명서·CLAUDE.md 동기화 주의 갱신",
+    "crew": [
+      "debugger",
+      "integration-rules",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "2849c79073",
     "date": "2026-11-20",
     "time": "19:40",

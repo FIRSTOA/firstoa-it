@@ -339,15 +339,34 @@ export async function listCalendars(): Promise<NaverCalendarInfo[]> {
   return out;
 }
 
-/** href로 일정 원문 + etag(낙관적 잠금용)를 읽습니다. */
+/** href로 일정 원문 + etag(낙관적 잠금용)를 읽습니다 — 출고 준비 제목 태그용(없으면 오류). 버전은 readEventByHref 와 같은 방식. */
 export async function getEventWithEtag(href: string): Promise<{ ics: string; etag: string | null }> {
+  const r = await readEventByHref(href);
+  if (!r) throw new Error('네이버 일정 읽기 실패(404)');
+  return r;
+}
+
+/**
+ * 일정 하나의 버전(getetag)을 PROPFIND(Depth 0)로 읽습니다 — 못 읽으면 null(쓰는 쪽이 안전하게 거절).
+ *
+ * 네이버는 일정을 직접 읽을 때(GET) ETag 헤더를 주지 않아요(2026-11-23 실측 — 모든 일정). 버전은 PROPFIND·REPORT 의
+ * getetag 로만 오고, 값은 마지막 수정 시각을 따옴표로 감싼 것(예: "2026-11-17 14:54:23", 1초 단위).
+ * If-Match 에는 이 값을 따옴표째 그대로 넣음 — 실측: 틀린 값 → 412, 이 값 → 200(같은 내용을 다시 PUT 해서 확인).
+ * 주의: 네이버는 별표(★)·완료 체크만 바꾸면 이 값이 안 바뀜(lib/naverCalendarSync.ts) — 그래서 쓰기 전 내용 비교도 같이 함.
+ */
+async function propfindEtag(href: string): Promise<string | null> {
   const res = await fetch(`${CALDAV_BASE}${href}`, {
-    headers: { Authorization: authHeader() },
+    method: 'PROPFIND',
+    headers: { Authorization: authHeader(), 'Content-Type': 'application/xml; charset=utf-8', Depth: '0' },
+    body: '<?xml version="1.0" encoding="utf-8" ?><D:propfind xmlns:D="DAV:"><D:prop><D:getetag/></D:prop></D:propfind>',
     signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
   });
+  const text = await res.text().catch(() => '');
   if (res.status === 401) throw new Error('네이버 인증 실패(401) — 앱 비밀번호가 무효이거나 해외 로그인 차단이에요.');
-  if (!res.ok) throw new Error(`네이버 일정 읽기 실패(${res.status})`);
-  return { ics: await res.text(), etag: res.headers.get('etag') };
+  if (!res.ok) return null;
+  const raw = (text.match(/<[^>]*getetag>([^<]*)</i) || [])[1]?.trim() ?? '';
+  const etag = raw.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  return etag || null;
 }
 
 /** href에 원문을 그대로 PUT합니다(If-Match). 412면 'conflict'를 돌려줍니다. */
@@ -369,8 +388,13 @@ export async function putEventByHref(href: string, ics: string, etag: string | n
   return 'ok';
 }
 
-/** href로 일정 원문 + etag를 읽습니다 — 없으면(404) null. 통합 캘린더 수정·삭제·복제본 정리용. */
+/**
+ * href로 일정 원문 + etag를 읽습니다 — 없으면(404) null. 통합 캘린더 수정·삭제·복제본 정리·출고 태그용.
+ * 버전은 GET 헤더에 있으면 그것, 없으면(네이버는 늘 없음) PROPFIND getetag. 순서는 PROPFIND → GET —
+ * 그 사이 일정이 바뀌어도 버전이 본문보다 옛것이라 If-Match 가 412 로 막음(반대 순서면 옛 본문 + 새 버전으로 덮어쓸 수 있음).
+ */
 export async function readEventByHref(href: string): Promise<{ ics: string; etag: string | null } | null> {
+  const versionTag = await propfindEtag(href);
   const res = await fetch(`${CALDAV_BASE}${href}`, {
     headers: { Authorization: authHeader() },
     signal: AbortSignal.timeout(NAVER_TIMEOUT_MS),
@@ -378,7 +402,7 @@ export async function readEventByHref(href: string): Promise<{ ics: string; etag
   if (res.status === 404) return null;
   if (res.status === 401) throw new Error('네이버 인증 실패(401) — 앱 비밀번호가 무효이거나 해외 로그인 차단이에요.');
   if (!res.ok) throw new Error(`네이버 일정 읽기 실패(${res.status})`);
-  return { ics: await res.text(), etag: res.headers.get('etag') };
+  return { ics: await res.text(), etag: res.headers.get('etag') ?? versionTag };
 }
 
 /**
