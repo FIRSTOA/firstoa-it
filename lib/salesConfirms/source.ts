@@ -50,6 +50,8 @@ export async function fetchSalesConfirms(since: string, timeoutMs: number): Prom
     return { ok: false, code: 'unreachable', error: '영업 웹앱이 응답하지 않아요 — 3분 뒤 자동으로 다시 해요' };
   }
 
+  // 본문은 읽기만 — 오류 문구엔 형식(content-type)만, 본문 값은 안 넣음
+  const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim() || '형식 없음';
   try {
     return { ok: true, body: await res.json() };
   } catch (err) {
@@ -57,6 +59,11 @@ export async function fetchSalesConfirms(since: string, timeoutMs: number): Prom
     if (name === 'TimeoutError' || name === 'AbortError') {
       return { ok: false, code: 'unreachable', error: '영업 웹앱이 응답하지 않아요 — 3분 뒤 자동으로 다시 해요' };
     }
-    return { ok: false, code: 'bad_shape', error: '영업 웹앱이 보낸 모양이 달라요 — 하나도 가져오지 않았어요' };
+    console.warn(`[sales-import] 응답이 JSON 아님(${contentType})`);
+    return {
+      ok: false,
+      code: 'bad_shape',
+      error: `영업 웹앱이 보낸 모양이 달라요 — 하나도 가져오지 않았어요 (JSON 아님 · ${contentType})`,
+    };
   }
 }

@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
 import { createAdminClient, SALES_CONFIRMS_TABLE, SALES_CONFIRM_VERSIONS_TABLE, SALES_IMPORT_STATE_TABLE } from '@/lib/supabase/server';
-import { extractRecords, normalizeSalesConfirm, stableStringify } from './normalize';
+import { describeShape, extractRecords, normalizeSalesConfirm, stableStringify } from './normalize';
 import { fetchSalesConfirms } from './source';
 import {
   importStateFromRow,
@@ -115,6 +115,8 @@ export async function runSalesConfirmImport(opts: {
   force?: boolean;
   since?: string;
   trigger: SalesImportTrigger;
+  /** 결과에 받은 응답의 모양 요약(칸 이름·종류·건수만)을 붙임 — 실측용 */
+  diag?: boolean;
 }): Promise<SalesImportRouteResult> {
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -197,19 +199,28 @@ export async function runSalesConfirmImport(opts: {
     console.warn(`[sales-import] 받기 실패 ${got.code} (${opts.trigger})`);
     return finishError(got.code, got.error);
   }
+  // 모양 요약은 칸 이름·종류·건수만(값 없음) — 모양이 다를 때 이유 문구·⑤ 에 짧게, diag 면 결과에 전부
+  const shape = opts.diag ? describeShape(got.body) : undefined;
+  const withShape = async (r: Promise<SalesImportRouteResult> | SalesImportRouteResult) => {
+    const v = await r;
+    return shape ? { ...v, shape } : v;
+  };
   const records = extractRecords(got.body);
   if (!records) {
-    console.warn(`[sales-import] 응답 모양 다름 (${opts.trigger})`);
-    return finishError('bad_shape', '영업 웹앱이 보낸 모양이 달라요 — 하나도 가져오지 않았어요');
+    const brief = describeShape(got.body).slice(0, 300);
+    console.warn(`[sales-import] 응답 모양 다름 (${opts.trigger}) ${brief}`);
+    return withShape(finishError('bad_shape', `영업 웹앱이 보낸 모양이 달라요 — 하나도 가져오지 않았어요 (받은 모양: ${brief})`));
   }
 
   // 4) 모양 검사(건마다) — 같은 id 가 둘이면 ver 높은 쪽
   const byId = new Map<string, Prepared>();
   let skipped = 0;
+  const reasons = new Map<string, number>(); // 이유(칸 이름만) → 건수
   for (const raw of records) {
     const r = normalizeSalesConfirm(raw);
     if (!r.ok) {
       skipped += 1;
+      reasons.set(r.reason, (reasons.get(r.reason) ?? 0) + 1);
       console.warn(`[sales-import] 건너뜀 id=${r.id || '(없음)'} 이유=${r.reason}`);
       continue;
     }
@@ -219,8 +230,11 @@ export async function runSalesConfirmImport(opts: {
   }
   const counts: SalesImportCounts = { received: records.length, new: 0, updated: 0, unchanged: 0, older: 0, skipped };
 
+  const reasonText = [...reasons.entries()].map(([why, n]) => `${why} ${n}건`).join(', ');
   if (records.length > 0 && byId.size === 0) {
-    return finishError('bad_shape', `영업 웹앱이 보낸 ${records.length}건이 모두 모양이 달라요 — 하나도 가져오지 않았어요`, counts);
+    return withShape(
+      finishError('bad_shape', `영업 웹앱이 보낸 ${records.length}건이 모두 모양이 달라요 — 하나도 가져오지 않았어요 (${reasonText})`, counts),
+    );
   }
 
   // 5) 이미 가진 (id, ver, hash) 읽기
@@ -310,7 +324,7 @@ export async function runSalesConfirmImport(opts: {
 
   // 8) 성공 기록
   const partialBad = skipped > 0;
-  const error = partialBad ? `${skipped}건은 모양이 달라 건너뛰었어요` : '';
+  const error = partialBad ? `${skipped}건은 모양이 달라 건너뛰었어요 (${reasonText})` : '';
   const done = await sb
     .from(SALES_IMPORT_STATE_TABLE)
     .update({
@@ -325,14 +339,16 @@ export async function runSalesConfirmImport(opts: {
     .eq('id', STATE_ID);
   if (done.error) console.warn(`[sales-import] 성공 기록 실패(${done.error.code ?? '?'})`);
 
-  return result(
-    {
-      ok: true,
-      changed: counts.new + counts.updated,
-      errorCode: partialBad ? 'bad_shape' : null,
-      error,
-    },
-    await readSalesImportState(),
+  return withShape(
+    result(
+      {
+        ok: true,
+        changed: counts.new + counts.updated,
+        errorCode: partialBad ? 'bad_shape' : null,
+        error,
+      },
+      await readSalesImportState(),
+    ),
   );
 }
 

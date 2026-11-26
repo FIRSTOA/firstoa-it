@@ -45,16 +45,117 @@ function qtyOf(v: unknown): number {
   return Math.floor(n);
 }
 
-/** 배열이면 그대로, 객체면 items/confirms/data 중 배열인 키 하나. 그 밖이면 null(=모양 다름) */
+/** 객체 안에서 확인서 목록 배열 찾기 — 이름(items/confirms/data)으로, 아니면 "배열인 값이 딱 하나"일 때 그것(구조로만, 칸 이름 추측 없음) */
+function arrayIn(o: Record<string, unknown>): unknown[] | null {
+  for (const k of ['items', 'confirms', 'data']) {
+    const v = o[k];
+    if (Array.isArray(v)) return v;
+  }
+  const arrays = Object.values(o).filter((v): v is unknown[] => Array.isArray(v));
+  return arrays.length === 1 ? arrays[0] : null;
+}
+
+/**
+ * 응답 → 확인서 목록. 배열이면 그대로, 객체면 arrayIn, 그래도 없으면 data/result 객체 한 단계 안에서 arrayIn.
+ * 그 밖이면 null(=모양 다름). 목록 안 한 건마다 id·ver 검사는 normalizeSalesConfirm 이 함(없으면 그 건 건너뜀).
+ */
 export function extractRecords(body: unknown): unknown[] | null {
   if (Array.isArray(body)) return body;
-  if (isObj(body)) {
-    for (const k of ['items', 'confirms', 'data']) {
-      const v = body[k];
-      if (Array.isArray(v)) return v;
+  if (!isObj(body)) return null;
+  const direct = arrayIn(body);
+  if (direct) return direct;
+  for (const k of ['data', 'result']) {
+    const inner = body[k];
+    if (isObj(inner)) {
+      const got = arrayIn(inner);
+      if (got) return got;
     }
   }
   return null;
+}
+
+// ───────── 응답 모양 요약(칸 이름·종류만 — 값은 절대 안 넣음) ─────────
+
+/** 영문·숫자 꼴 칸 이름과 사양 칸 이름만 보여 줌. 그 밖(한글 회사명이 열쇠로 쓰인 경우 등)은 가림 */
+const SAFE_KEY = /^[A-Za-z_$][A-Za-z0-9_$-]{0,40}$/;
+function keyName(k: string): string {
+  return SAFE_KEY.test(k) || (SPEC_NAMES as readonly string[]).includes(k) ? k : '(이름 가림)';
+}
+
+function typeTag(v: unknown): string {
+  if (Array.isArray(v)) return `배열${v.length}`;
+  if (v === null) return 'null';
+  if (isObj(v)) return '객체';
+  if (typeof v === 'string') return '글자';
+  if (typeof v === 'number') return '숫자';
+  if (typeof v === 'boolean') return '참거짓';
+  return typeof v;
+}
+
+/** 여러 객체의 칸 이름 합집합 "이름:종류"(처음 본 값의 종류, 비어 있지 않은 값 우선) */
+function unionKeys(objs: Record<string, unknown>[], limit = 40): string {
+  const seen = new Map<string, string>();
+  for (const o of objs) {
+    for (const [k, v] of Object.entries(o)) {
+      const prev = seen.get(k);
+      if (prev === undefined || ((prev === 'null' || prev === '글자') && v !== null && v !== '')) seen.set(k, typeTag(v));
+    }
+  }
+  if (seen.size > limit) return `칸 ${seen.size}개(이름 생략)`;
+  return [...seen.entries()].map(([k, t]) => `${keyName(k)}:${t}`).join(', ');
+}
+
+/**
+ * 받은 응답의 모양을 한 줄로(설계 §3-6 실측용 — 칸 이름·종류·건수만). 예:
+ *   "객체 {ok:참거짓, rows:배열37} · 목록 37건 · 한 건 {id:글자, no:글자, ver:숫자, …} · items[] {cat:글자, …} · items[].spec {CPU:글자, …}"
+ */
+export function describeShape(body: unknown): string {
+  const parts: string[] = [];
+  if (Array.isArray(body)) parts.push(`배열${body.length}`);
+  else if (isObj(body)) parts.push(`객체 {${unionKeys([body], 25)}}`);
+  else parts.push(typeTag(body));
+  if (isObj(body)) {
+    for (const k of ['data', 'result']) {
+      const inner = body[k];
+      if (isObj(inner)) parts.push(`${k} {${unionKeys([inner], 25)}}`);
+    }
+  }
+
+  const recs = extractRecords(body);
+  if (!recs) {
+    parts.push('목록 못 찾음');
+    return parts.join(' · ').slice(0, 1500);
+  }
+  const objs = recs.filter(isObj).slice(0, 60);
+  parts.push(`목록 ${recs.length}건${objs.length < Math.min(recs.length, 60) ? `(객체 아닌 것 섞임)` : ''}`);
+  if (objs.length === 0) return parts.join(' · ').slice(0, 1500);
+  parts.push(`한 건 {${unionKeys(objs)}}`);
+
+  // id 모양(값 대신 종류·길이), ver 범위
+  const ids = objs.map((o) => o.id);
+  const idLens = [...new Set(ids.map((v) => (typeof v === 'string' ? v.length : -1)).filter((n) => n >= 0))].sort((a, b) => a - b);
+  const uuidLike = ids.every((v) => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v));
+  parts.push(`id ${typeTag(ids[0])}${idLens.length ? ` 길이 ${idLens.slice(0, 4).join('/')}` : ''}${uuidLike ? '(uuid 꼴)' : ''}`);
+  const vers = objs.map((o) => Number(o.ver)).filter((n) => Number.isFinite(n));
+  if (vers.length) parts.push(`ver ${Math.min(...vers)}~${Math.max(...vers)}`);
+
+  // 한 단계 안: 객체 칸(contacts 등)과 객체 배열 칸(items 등), 그 안의 객체 칸(spec 등)
+  const keys = new Set(objs.flatMap((o) => Object.keys(o)));
+  for (const k of keys) {
+    const vals = objs.map((o) => o[k]);
+    const innerObjs = vals.filter(isObj);
+    if (innerObjs.length) parts.push(`${keyName(k)} {${unionKeys(innerObjs, 25)}}`);
+    const elems = vals.filter(Array.isArray).flat().filter(isObj).slice(0, 200);
+    if (elems.length) {
+      parts.push(`${keyName(k)}[] {${unionKeys(elems, 25)}}`);
+      const sub = new Set(elems.flatMap((e) => Object.keys(e)));
+      for (const k2 of sub) {
+        const subObjs = elems.map((e) => e[k2]).filter(isObj);
+        if (subObjs.length) parts.push(`${keyName(k)}[].${keyName(k2)} {${unionKeys(subObjs, 25)}}`);
+      }
+    }
+  }
+  return parts.join(' · ').slice(0, 1500);
 }
 
 function ymd(y: number, m: number, d: number): string | null {

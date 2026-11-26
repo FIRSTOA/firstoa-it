@@ -257,6 +257,8 @@ export interface SalesImportRouteResult {
   error: string;
   /** 시도 뒤 ⑤ 상태(표가 없으면 null) */
   state: SalesImportState | null;
+  /** 진단(diag: true 로 부를 때만) — 받은 응답의 칸 이름·종류·건수 요약(값 없음, normalize.ts describeShape) */
+  shape?: string;
 }
 
 /**

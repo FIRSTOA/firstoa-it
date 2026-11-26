@@ -3,6 +3,21 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "1304d182e2",
+    "date": "2026-11-26",
+    "time": "17:06",
+    "subject": "확인서/출고및반출준비 · 영업 웹앱 확인서 목록(1단계) — 영업이 확인서를 영업 웹앱에서 만들게 되어 IT확인서리스트 시트 방식이 끊김 → 이 메뉴 기본 보기를 영업 확인서 목록으로(주소 /confirm-form 그대로, 예전 화면은 🗂 예전 방식 ?view=legacy 그대로) · 영업 읽기 전용 API(x-export-key = SALES_EXPORT_KEY)를 화면 열 때·3분마다·🔄·⋯날짜·홈(10분)에 POST /api/sales-confirms/import 로 가져옴(최근 30일, 하루 첫 한 번 90일, hash 로 바뀐 것만, 겹침 막기, 바뀐 건은 판 원문 먼저) · 영업 원본(①②)과 IT 값(③④)을 표로 나눠 영업이 고쳐도 IT 값 안 덮음(가져오기 코드는 ③④ import 안 함), 영업 쪽 되돌려 쓰기 없음 · 목록: 처리여부 6단계·처리자 줄에서 바로(동시 수정 확인), 새로·영업에서 수정됨→확인함, 미리보기(영업 원본 열기), 📄 시트와 비교(읽기만, 연락처 칸 안 읽음), 핸드폰 카드 · 홈 영업 확인서 카드·가져오기 타일 · 연락처는 사용자 결정으로 지금은 안 잠금(로그인 때 같이) · SQL supabase/sales_confirms_schema.sql(사용자 실행함) · 설명서 confirm-form(예전 꼭지 id 유지)·releases·CLAUDE.md 새 절 · 응답 모양은 배포 뒤 1회 실측으로 확정",
+    "crew": [
+      "feature-planner",
+      "db-schema",
+      "developer",
+      "ui-designer",
+      "sql-review",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "47f4b7e36a",
     "date": "2026-11-23",
     "time": "10:47",

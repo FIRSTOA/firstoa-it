@@ -22,5 +22,7 @@ export async function POST(req: Request) {
   const force = b.force === true;
   const since = typeof b.since === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.since) ? b.since : undefined;
   const trigger = TRIGGERS.includes(b.trigger as SalesImportTrigger) ? (b.trigger as SalesImportTrigger) : 'page';
-  return NextResponse.json(await runSalesConfirmImport({ force, since, trigger }));
+  // diag: 받은 응답의 칸 이름·종류·건수만 돌려줌(값 없음) — 응답 모양 실측용(설계 §3-6)
+  const diag = b.diag === true;
+  return NextResponse.json(await runSalesConfirmImport({ force, since, trigger, diag }));
 }
