@@ -670,6 +670,119 @@ tbody tr:hover{background:var(--indigo-50);}
 .ct-missing{display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:6px; font-size:12px; font-weight:600;}
 
 /* =====================================================================================
+   영업 확인서 목록(/confirm-form 기본 보기) — components/salesConfirms/*  (핸드폰 덮어쓰기는 아래 "핸드폰 화면" 블록 안)
+   띠·메뉴는 계약관리의 .ct-band / .ct-menu 를, 칩·패널·팝업·알림은 기존 .chip .panel .modal .toast 를 그대로 씀.
+   ===================================================================================== */
+.sc-viewbar{padding-bottom:0;}
+.sc-page{padding-top:12px;}
+/* 가져오기 띠 */
+.sc-importbar > .ct-menu-wrap{flex:0 0 auto;}
+.sc-importbar .btn{margin-left:0;}
+.sc-btn{padding:6px 12px; font-size:12.5px;}
+.sc-importtext{display:block;}
+.sc-spin{display:inline-block; vertical-align:-2px; margin-right:8px;}
+/* 필터·도구 줄 */
+.sc-filters{padding-bottom:10px;}
+.sc-chip-base{background:var(--indigo-600); border-color:var(--indigo-600); color:#fff;} /* 기본 보기 선택 표시(필터 수에는 안 세려고 .active 대신) */
+.sc-chip-base:hover{background:var(--indigo-700);}
+.sc-toolbar{align-items:center; flex-wrap:wrap; margin:6px 0 10px;}
+.sc-toolbar-right{margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.sc-toolbar .chip:disabled{opacity:.55; cursor:not-allowed;}
+.sc-range{font-weight:500; color:var(--ink-400);}
+.sc-who{font-weight:500;}
+.sc-link{border:none; background:none; padding:0; font:inherit; font-size:12.5px; font-weight:700; color:var(--indigo-600); cursor:pointer; text-decoration:underline;}
+/* 목록 표(넓어서 PC 에서도 옆으로 밀림 — 칸 폭은 SalesConfirmTable 의 COL_WIDTHS, 합계 1788px / 시트 칸 켜면 +120) */
+.sc-listpanel{padding:6px 14px 8px;}
+.sc-scroll{overflow-x:auto;}
+.sc-table{table-layout:fixed; min-width:1788px;}
+.sc-table.sc-with-sheet{min-width:1908px;}
+.sc-table thead th{white-space:nowrap;}
+.sc-table td{vertical-align:top; line-height:1.45; word-break:keep-all; overflow-wrap:anywhere;}
+.sc-row{cursor:pointer;}
+.sc-row.sc-new td{font-weight:700;}
+.sc-row.sc-new td:first-child{box-shadow:inset 3px 0 0 var(--indigo-600);}
+.sc-row.sc-cancel td{color:var(--ink-400);}
+.sc-row.sc-cancel .sc-name{text-decoration:line-through; color:var(--ink-400);}
+.sc-row.sc-busy{opacity:.6;}
+.sc-mono{font-family:'Cascadia Mono','Consolas',monospace; font-size:12px; color:var(--ink-700);}
+.sc-small{font-size:12px; color:var(--ink-700);}
+.sc-muted{color:var(--ink-400); font-size:12px;}
+.sc-due{font-weight:600;}
+.sc-due-today{color:var(--red-600); font-weight:800;}
+.sc-due-tomorrow{color:var(--amber-600); font-weight:800;}
+.sc-pill{display:inline-block; border-radius:6px; padding:2px 7px; margin-left:5px; font-size:11px; font-weight:700; white-space:nowrap; vertical-align:1px;}
+.sc-pill-new{background:var(--indigo-600); color:#fff;}
+.sc-pill-indigo{background:var(--indigo-50); color:var(--indigo-600);}
+.sc-pill-amber{background:var(--amber-100); color:var(--amber-600);}
+.sc-pill-red{background:var(--red-100); color:var(--red-600);}
+.sc-pill-gray{background:var(--ink-100); color:var(--ink-500);}
+.sc-flags{display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;}
+.sc-flags .sc-pill{margin-left:0;}
+.sc-region{font-size:12px; color:var(--ink-500); font-weight:500;}
+.sc-name{font-size:13px;}
+.sc-tel{color:var(--indigo-600); text-decoration:none; font-weight:600;}
+.sc-tel:hover{text-decoration:underline;}
+.sc-clamp2{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; font-size:12.5px; font-weight:400;}
+.sc-prog{display:inline-block; border-radius:6px; padding:1px 7px; font-size:11.5px; font-weight:800; background:var(--ink-100); color:var(--ink-500);}
+.sc-prog.part{background:var(--amber-50); color:var(--amber-600);}
+.sc-prog.done{background:var(--green-50); color:var(--green-600);}
+.sc-ids{font-size:12px; color:var(--ink-700); font-weight:500;}
+/* 처리여부 — 접수 주황 · 준비중 파랑 · 준비완료 초록 · 출고 남색 · 보류 보라 · 취소 회색 */
+.sc-status{border:1px solid transparent; border-radius:8px; padding:5px 8px; font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; width:100%; max-width:96px;}
+.sc-status:disabled{opacity:.6; cursor:wait;}
+.sc-status:focus-visible, .sc-proc-btn:focus-visible, .sc-link:focus-visible{outline:2px solid var(--indigo-600); outline-offset:2px;}
+.sc-st-접수{background:var(--amber-100); color:var(--amber-600);}
+.sc-st-준비중{background:var(--blue-100); color:var(--blue-600);}
+.sc-st-준비완료{background:var(--green-100); color:var(--green-600);}
+.sc-st-출고{background:var(--indigo-100); color:var(--indigo-600);}
+.sc-st-보류{background:var(--purple-100); color:var(--purple-600);}
+.sc-st-취소{background:var(--ink-200); color:var(--ink-500);}
+.sc-status-tag{border-radius:8px; padding:5px 12px; font-size:12.5px; font-weight:800; white-space:nowrap; flex-shrink:0;}
+/* 처리자 고르기 */
+.sc-proc{position:relative;}
+.sc-proc-btn{border:1px dashed var(--ink-300); background:#fff; border-radius:8px; padding:4px 8px; font:inherit; font-size:12.5px; font-weight:600; color:var(--ink-700); cursor:pointer; max-width:100%; text-align:left;}
+.sc-proc-btn.empty{color:var(--ink-400);}
+.sc-proc-btn:hover:not(:disabled){background:var(--ink-100);}
+.sc-proc-btn:disabled{cursor:wait; opacity:.6;}
+.sc-proc-pop{
+  position:fixed; z-index:21; width:230px; max-height:300px; overflow:auto; background:#fff; border:1px solid var(--ink-200);
+  border-radius:12px; box-shadow:0 16px 36px -14px rgba(15,23,42,.35); padding:8px 12px; display:flex; flex-direction:column; gap:2px;
+}
+.sc-proc-opt{padding:5px 0;}
+.sc-proc-close{padding:6px 10px; font-size:12px; margin-top:6px; justify-content:center;}
+/* 시트와 비교 */
+.sc-sheet-ok{color:var(--green-600); font-weight:700;}
+.sc-sheet-warn{color:var(--amber-600); font-weight:700; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;}
+.sc-sheet-only{padding:12px 16px;}
+.sc-sheet-only summary{cursor:pointer; font-weight:800; font-size:13px; margin-bottom:8px;}
+/* 빈 상태·오류 */
+.sc-error-why{margin:8px auto 14px; max-width:520px; color:var(--red-600); font-size:12.5px; word-break:break-word;}
+.sc-empty-sub{margin-top:6px; font-size:12.5px; color:var(--ink-400);}
+.sc-retry{margin-top:8px;}
+/* 이름 묻기·미리보기 창 */
+.sc-name-overlay{z-index:55;}
+.sc-name-modal{width:420px;}
+.modal.sc-preview{width:860px; max-width:94vw;}
+.sc-pv-head{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px;}
+.sc-pv-head h2{margin:0 0 2px; font-size:19px;}
+.sc-pv-band{margin-bottom:10px;}
+.sc-pv-grid{grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px 18px; margin:10px 0 4px;}
+.sc-mini{font-size:12.5px;}
+.sc-mini thead th{position:static;}
+.sc-specs{display:flex; gap:4px 8px; flex-wrap:wrap;}
+.sc-spec{background:var(--ink-100); border-radius:6px; padding:2px 7px; font-size:12px;}
+.sc-spec b{color:var(--ink-500); font-weight:700; margin-right:2px;}
+.sc-pre{white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.55;}
+.sc-replace{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+.sc-replace > div{border:1px solid var(--ink-100); border-radius:10px; padding:10px 12px; background:var(--slate-50);}
+.sc-unk-list{margin:0; padding-left:18px; font-size:13px;}
+.sc-unk-dl{margin:0; display:flex; flex-direction:column; gap:4px; font-size:13px;}
+.sc-unk-dl dt{font-size:11.5px; font-weight:700; color:var(--ink-500);}
+.sc-unk-dl dd{margin:0;}
+.sc-pv-meta{margin-top:16px; font-size:12px; color:var(--ink-500);}
+.sc-pv-hint{margin-top:6px; font-size:12px; color:var(--ink-400);}
+
+/* =====================================================================================
    핸드폰 화면(≤640px) — PC 화면은 그대로 두고 핸드폰에서만 덮어씀.
    · 목록 표 → 카드: components/MobileTableCards.tsx 가 <th data-m> 를 칸마다 data-ml(이름)·data-mr(역할)로 옮김
    · 필터 칩 → "필터" 버튼으로 접기: components/MobileFilterRows.tsx
@@ -840,6 +953,39 @@ tbody tr:hover{background:var(--indigo-50);}
   .ct-gate-wrap{padding:16px 0;}
   .ct-gate{padding:22px 16px 18px;}
   .ct-gate-btn{min-height:48px;}
+
+  /* --- 영업 확인서 목록(/confirm-form) --- */
+  .sc-viewbar{padding-bottom:0;}
+  .sc-viewbar .chip{white-space:normal; text-align:left; line-height:1.35;}
+  .sc-page{padding-top:8px;}
+  .sc-pc-only{display:none !important;} /* 시트 비교는 PC 만 */
+  .sc-importtext{flex-basis:100%;}
+  .sc-importbar > .sc-refresh-wrap{flex:1 1 auto;}
+  .sc-refresh-wrap .btn{width:100%; justify-content:center;}
+  .sc-importbar .btn{min-height:40px;}
+  .sc-filters{padding:10px 12px 8px;}
+  .sc-toolbar-right{margin-left:0; width:100%;}
+  .sc-listpanel{background:transparent; border:0; padding:0; overflow:visible;}
+  .sc-scroll{overflow-x:visible;}
+  .sc-row.sc-new{border-color:var(--indigo-600); box-shadow:inset 3px 0 0 var(--indigo-600);}
+  .sc-row.sc-new td:first-child{box-shadow:none;}
+  .sc-row.sc-new td{font-weight:inherit;}
+  .sc-row.sc-new td[data-mr~="title"]{font-weight:800;}
+  .sc-row.sc-cancel{background:var(--slate-50);}
+  .sc-table.m-cards td[data-mr~="badge"] .sc-status{width:auto; max-width:none; min-height:36px; padding:6px 10px;}
+  .sc-table.m-cards td[data-mr~="full"]{font-size:13.5px;}
+  .sc-proc-btn{min-height:36px; font-size:14px; padding:6px 10px;}
+  .sc-proc-pop{width:min(230px, calc(100vw - 16px));}
+  .sc-proc-opt{padding:9px 0; font-size:14px;}
+  .sc-proc-opt input{width:20px; height:20px;}
+  .sc-proc-close{min-height:40px;}
+  .sc-tel{font-size:14px;}
+  .sc-pv-head h2{font-size:17px;}
+  .sc-pv-grid{grid-template-columns:1fr 1fr;}
+  .sc-replace{grid-template-columns:1fr;}
+  .sc-pv-band .btn{min-height:40px;}
+  .sc-name-modal .btn, .sc-preview .modal-footer .btn{min-height:44px;}
+  .sc-preview .modal-footer{flex-wrap:wrap;}
 }
 
 /* =====================================================================================

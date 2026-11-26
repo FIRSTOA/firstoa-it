@@ -60,3 +60,12 @@ export const CONTRACT_SECRETS_TABLE = 'it_contract_secrets';
 export const CONTRACT_SECRET_LOG_TABLE = 'it_contract_secret_log';
 /** 소프트웨어 탭 비밀번호 해시·쿠키 서명 값(D13) — lib/contracts/secrets.ts 만 읽고 씀 */
 export const CONTRACT_SETTINGS_TABLE = 'it_contract_settings';
+/**
+ * 영업 확인서 가져오기(supabase/sales_confirms_schema.sql, 설계 docs/tasks/2026-11-26-sales-confirm-import.md)
+ * ①② = 영업 원본 — lib/salesConfirms/importer.ts 만 씀. ③④ = IT 값 — 화면 액션만 씀(가져오기 코드는 import 도 안 함, D3).
+ */
+export const SALES_CONFIRMS_TABLE = 'it_sales_confirms';
+export const SALES_CONFIRM_VERSIONS_TABLE = 'it_sales_confirm_versions';
+export const SALES_CONFIRM_WORK_TABLE = 'it_sales_confirm_work';
+export const SALES_CONFIRM_UNITS_TABLE = 'it_sales_confirm_units';
+export const SALES_IMPORT_STATE_TABLE = 'it_sales_import_state';

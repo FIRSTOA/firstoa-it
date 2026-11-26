@@ -11,11 +11,15 @@ import { summarizeReview } from '@/lib/billingAllocation';
 import { buildContractsOverview } from '@/lib/contracts/clients';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
+import { importStateFromRow, type SalesImportState, type SalesImportStateRow } from '@/lib/salesConfirms/types';
 import { isPrepDone, isPrepInProgress, shortDateLabel } from '@/lib/shipmentPrep';
 import {
   BILLING_LINES_TABLE,
   CALENDAR_TABLE,
   RECEIVING_TABLE,
+  SALES_CONFIRMS_TABLE,
+  SALES_CONFIRM_WORK_TABLE,
+  SALES_IMPORT_STATE_TABLE,
   STOCKTAKE_TABLE,
   createAdminClient,
   isSupabaseConfigured,
@@ -366,7 +370,7 @@ export async function loadInventoryCard(): Promise<WorkCard> {
 
 /** 확인서(구글시트 — 느림) — 다가오는 IT 확인서 중 출고 기재(자산번호·S/N) 안 끝난 것 */
 export async function loadConfirmCard(today: string): Promise<WorkCard> {
-  const href = '/confirm-form';
+  const href = '/confirm-form?view=legacy';
   try {
     const res = await listConfirmDocs();
     if (!res.ok) return errorCard('confirm', '확인서 출고 기재', '📄', href, res.error);
@@ -396,6 +400,91 @@ export async function loadConfirmCard(today: string): Promise<WorkCard> {
   }
 }
 
+/** 영업 확인서 가져오기 상태(⑤) — 표가 없거나 못 읽으면 null. 홈이 "10분 넘었나" 판단에도 씀 */
+export async function loadSalesImportState(): Promise<SalesImportState | null> {
+  if (!isSupabaseConfigured()) return null;
+  try {
+    const { data, error } = await createAdminClient().from(SALES_IMPORT_STATE_TABLE).select('*').eq('id', 'main').maybeSingle();
+    if (error) return null;
+    return importStateFromRow(data as SalesImportStateRow | null);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 영업 확인서 — 새로 들어온 것 · 오늘·다음 영업일 납품인데 준비 안 끝난 것 · 영업에서 수정된 것(개인정보 없이 건수만).
+ * 범위: 최근 30일에 받았거나 납품일이 일주일 전 이후인 건 중 끝나지 않은(출고·취소 아님) 건.
+ */
+export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
+  const href = '/confirm-form';
+  const title = '영업 확인서';
+  const icon = '📋';
+  if (!isSupabaseConfigured()) return errorCard('salesConfirm', title, icon, href, 'Supabase 설정이 필요해요.');
+  try {
+    const supabase = createAdminClient();
+    const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+    const weekAgo = fmtYmd(new Date(parseYmd(today).getTime() - 7 * 24 * 3600_000));
+    const confirms = await readAllPages<{ id: string; ver: number | null; payload_hash: string | null; delivery_date: string | null }>((from, to) =>
+      supabase
+        .from(SALES_CONFIRMS_TABLE)
+        .select('id,ver,payload_hash,delivery_date')
+        .or(`first_seen_at.gte.${since},delivery_date.gte.${weekAgo}`)
+        .order('id')
+        .range(from, to),
+    );
+    type W = { confirm_id: string; status: string | null; first_opened_at: string | null; seen_ver: number | null; seen_hash: string | null };
+    const work = new Map<string, W>();
+    for (let i = 0; i < confirms.length; i += 200) {
+      const ids = confirms.slice(i, i + 200).map((c) => c.id);
+      const { data, error } = await supabase
+        .from(SALES_CONFIRM_WORK_TABLE)
+        .select('confirm_id,status,first_opened_at,seen_ver,seen_hash')
+        .in('confirm_id', ids);
+      if (error) throw error;
+      for (const w of (data ?? []) as W[]) work.set(w.confirm_id, w);
+    }
+    const target = nextBusinessDay(today);
+    let isNew = 0;
+    let urgent = 0;
+    let changed = 0;
+    for (const c of confirms) {
+      const w = work.get(c.id);
+      const status = w?.status || '접수';
+      if (status === '출고' || status === '취소') continue;
+      if (!w || !w.first_opened_at) isNew++;
+      if (c.delivery_date && c.delivery_date >= today && c.delivery_date <= target && (status === '접수' || status === '준비중')) urgent++;
+      const ver = c.ver ?? 0;
+      if (w && w.seen_ver !== null && (ver > w.seen_ver || (ver === w.seen_ver && !!w.seen_hash && w.seen_hash !== c.payload_hash))) changed++;
+    }
+    return {
+      key: 'salesConfirm',
+      title,
+      icon,
+      href,
+      metrics: [
+        { label: '새로 들어옴', value: isNew, tone: isNew ? 'warn' : 'good' },
+        { label: `${shortDateLabel(target)}까지 준비 안 끝남`, value: urgent, tone: urgent ? 'bad' : 'good' },
+        { label: '영업에서 수정됨', value: changed, tone: changed ? 'warn' : 'good' },
+      ],
+      alert: urgent
+        ? `${shortDateLabel(target)}까지 납품인데 준비 안 끝난 영업 확인서 ${urgent}건`
+        : changed
+          ? `영업에서 수정된 확인서 ${changed}건 — 바뀐 내용 확인`
+          : isNew
+            ? `새로 들어온 영업 확인서 ${isNew}건`
+            : null,
+      tone: urgent ? 'bad' : isNew || changed ? 'warn' : 'good',
+    };
+  } catch (err) {
+    const e = err as { code?: string; message?: string } | null;
+    if (e?.code === '42P01' || e?.code === 'PGRST205' || /does not exist|could not find the table/i.test(e?.message ?? '')) {
+      return errorCard('salesConfirm', title, icon, href, '영업 확인서 표를 아직 안 만들었어요 — supabase/sales_confirms_schema.sql 먼저 실행');
+    }
+    return errorCard('salesConfirm', title, icon, href, '영업 확인서를 읽지 못했어요');
+  }
+}
+
 // ---------- 운영·시스템 상태 ----------
 
 export type StatusTile = { key: string; label: string; value: string; detail?: string; tone: Tone };
@@ -418,7 +507,7 @@ export async function loadSystemStatus(): Promise<StatusTile[]> {
   const messengerUrl = process.env.MESSENGER_SUPABASE_URL || 'https://kkdiihazgzesbqxjytqv.supabase.co';
   const messengerKey = process.env.MESSENGER_SUPABASE_ANON_KEY || '';
 
-  const [db, sheet, naver, outbox, report] = await Promise.all([
+  const [db, sheet, naver, outbox, report, salesImport] = await Promise.all([
     timed(async () => {
       if (!supabase) throw new Error('설정 없음');
       const { error } = await supabase.from('it_prep_people').select('name').limit(1);
@@ -462,7 +551,22 @@ export async function loadSystemStatus(): Promise<StatusTile[]> {
       if (error) throw error;
       return (data?.[0] as { sent_at: string } | undefined)?.sent_at ?? null;
     }),
+    loadSalesImportState(),
   ]);
+  const si: SalesImportState | null = salesImport;
+  const siOk = si?.lastSuccessAt ? new Date(si.lastSuccessAt).getTime() : null;
+  const siStale = siOk === null || Date.now() - siOk > 30 * 60_000;
+  const siTile: StatusTile = !process.env.SALES_EXPORT_KEY
+    ? { key: 'salesImport', label: '영업 확인서 가져오기', value: '키 없음', detail: '영업 웹앱 연결 키가 아직 없어요', tone: 'muted' }
+    : !si
+      ? { key: 'salesImport', label: '영업 확인서 가져오기', value: '확인 불가', detail: '상태 표를 못 읽었어요(SQL 실행 전일 수 있어요)', tone: 'muted' }
+      : {
+          key: 'salesImport',
+          label: '영업 확인서 가져오기',
+          value: si.lastSuccessAt ? relativeTime(si.lastSuccessAt) : '기록 없음',
+          detail: si.lastErrorCode ? si.lastError || '마지막 시도에 오류가 있었어요' : '홈·확인서 화면을 열 때 자동으로 가져와요',
+          tone: si.lastErrorCode && siStale ? 'warn' : si.lastErrorCode || !si.lastSuccessAt ? 'muted' : 'good',
+        };
 
   const sha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7);
   const commitMsg = process.env.VERCEL_GIT_COMMIT_MESSAGE?.split('\n')[0];
@@ -500,6 +604,7 @@ export async function loadSystemStatus(): Promise<StatusTile[]> {
       detail: outbox.error ? `메신저 큐를 못 읽었어요 (${outbox.error})` : pending ? '카톡봇이 아직 안 가져감 — 몇 분 넘게 그대로면 봇 확인' : '밀린 메시지 없음',
       tone: outbox.error ? 'muted' : pending ? 'warn' : 'good',
     },
+    siTile,
     {
       key: 'report',
       label: '마지막 완료 보고',

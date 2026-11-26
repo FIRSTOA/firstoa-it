@@ -124,7 +124,31 @@
     완료 보고 창이 발송 뒤 3초마다 `getPrepStock`으로 "📦 IT재고 반영" 상자를 갱신(90초), 결과 없는 기기는 5분 지나면 "끊김"(`prepStockView`). 목록 버튼·홈 카드에 "재고 반영 안 됨 n대".
     `retryPrepStock`("🔁 재고 다시 반영") = 카톡 안 보냄, 같은 `applyStockUnit`, 한 번에 6대. 쓰기 전 읽은 줄의 자산번호가 다르면(10분 행 번호 기억이 밀림) 안 쓰고 error.
 
-## 확인서 출고 기재 (/confirm-form 첫 탭) — 2026-11-18
+## 영업 확인서 가져오기 (/confirm-form 기본 보기) — 2026-11-26, 1단계(목록)
+
+설계 `docs/tasks/2026-11-26-sales-confirm-import.md`(맨 위 D1~D14 우선). 영업이 확인서를 영업 웹앱(firstoa-smart-sales-os)에서 만들게 되어
+'IT확인서리스트' 시트 방식이 끊김 → 이 메뉴 기본 보기가 영업 확인서 목록. 1 목록 → 2 상세(자산번호·시리얼·사양·체크) → 3 출력, 단계마다 사용자 확인. 4단계 = 출고 준비 리스트와 합치기(따로 설계).
+- **사용자 결정**: 영업은 IT 값을 안 봄 → 영업 쪽 되돌려 쓰기 없음(D4). 연락처·주소는 **지금은 안 잠금**(D7, 지침의 "로그인한 사람만"과 다름 —
+  로그인 붙일 때 `/confirm-form`(목록·미리보기·인쇄)과 `/dispatch`(연락처)를 같이 막을 것). 새 메뉴 없음 — 주소 `/confirm-form` 그대로,
+  `?view=legacy` = 예전 화면 그대로(D10, page.tsx 가 `<Suspense key={view}>`). 출고 준비 쪽(it_prep_*·네이버·카톡)에는 1~3단계에서 안 씀(D8).
+- **가져오기**: `GET …/api/export/it-confirms?since=` + 헤더 `x-export-key` = Vercel 환경값 `SALES_EXPORT_KEY`(Production만, 영업 쪽 이름 `IT_EXPORT_KEY` —
+  sensitive 라 Vercel 에서 다시 못 봄, 만든 사람에게 받음). 영업 export 코드는 GitHub 저장소에 없음(로컬 배포) → **응답 모양은 키 받은 뒤 배포 환경에서 1회 실측**
+  (칸 이름·건수·형식만 — 연락처 값·키 출력 금지)하고 `lib/salesConfirms/normalize.ts` 확정. 지금 파서는 지침의 칸 이름 기준.
+  - 라우트 `POST /api/sales-confirms/import`(화면 열 때·3분마다·🔄·⋯날짜, 홈은 10분 넘었으면 `after()`). Vercel cron 안 씀(Hobby 하루 1번).
+  - since(D14) = 늘 한국 오늘−30일, 그날 첫 한 번 −90일(`last_deep_at`), 날짜 고르기 365일까지. hash(키 정렬 JSON sha256)로 바뀐 것만 씀.
+  - 겹침 막기: ⑤ `it_sales_import_state` 'main' 줄 조건부 update(60초, 강제 10초). 바뀐 건은 ②(판 원문) 먼저 → ①(그래야 실패해도 다음에 저절로 맞춰짐).
+  - ver 0~2147483647 밖·`\u0000` 든 건은 그 건만 건너뜀(묶음 실패 방지). 일부만 모양이 다르면 나머지 반영 + 'bad_shape' 주황 띠.
+- **표**(`supabase/sales_confirms_schema.sql`, 칸 이름은 `lib/salesConfirms/types.ts` 맨 위 주석이 기준): ①② 영업 원본 = **importer.ts 만 씀**,
+  ③ work·④ units = IT 값 = 화면 액션만 씀. **가져오기 코드(normalize·source·importer·route)는 ③④ 표 이름을 import 도 하지 말 것**(IT 값 덮어쓰기를 구조로 막음).
+  ③④ FK restrict(① 지우는 코드 없음). ③ `prep_event_id` 는 4단계용 — 그 전엔 쓰지 말 것.
+  ③ 문자열 칸은 not null default '' — null 보내면 23502. 동시 수정은 DB 가 준 `updated_at` 문자열 그대로 `.eq`(JS Date 로 바꾸면 µs 잘려 늘 충돌).
+- "새로" = ③ first_opened_at 없음(미리보기를 열면 채움), "영업에서 수정됨" = seen_ver 있음 && (ver↑ 또는 같은 ver hash 다름) → [확인함].
+  미리보기 열기·확인함은 ③ updated_at 을 바꾸므로 화면이 그 줄 `workUpdatedAt` 을 갱신해야 가짜 충돌이 안 남.
+- 시트와 비교(`sheetCompare.ts`): 켰을 때만 IT확인서리스트 batchGet 1회, **연락처 N칸은 읽지 않음**, 쓰기 0. 처리여부 대응은 `sheetMatch.ts` `statusSame` 한 곳.
+- 상세 주소(2단계) = `salesConfirmHref(id)` 로만(encodeURIComponent). `app/confirm-form/` 아래 정적 하위 폴더 만들지 말 것(id 를 가림).
+- docUrl 은 `safeDocUrl`(https + 영업 웹앱 호스트만). 로그·오류 문구·⑤·라우트 응답에 payload·연락처 금지.
+
+## 확인서 출고 기재 (/confirm-form?view=legacy 첫 탭 — 예전 방식) — 2026-11-18
 
 영업이 확인서리스트 시트(`1seFubCF5rLa8yH81TYiNEXo4zj_MNHKglrMR-8vvbsA`, 서비스계정 편집 권한 있음)에
 업체별 탭(예: `지니소프1118`)으로 만든 **납품 확인서**에 IT가 실제 내보낸 장비를 적는 기능.

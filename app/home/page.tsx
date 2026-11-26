@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { after } from 'next/server';
 import { Suspense } from 'react';
 import Shell from '@/components/Shell';
 import AgentTeamCard from '@/components/home/AgentTeamCard';
@@ -21,9 +22,12 @@ import {
   loadBillingCard,
   loadPrepOverview,
   loadReceivingCard,
+  loadSalesConfirmCard,
+  loadSalesImportState,
   loadStocktakeCard,
   todayHeading,
 } from '@/lib/homeDashboard';
+import { runSalesConfirmImport } from '@/lib/salesConfirms/importer';
 
 // 매번 최신 — 숫자는 각 메뉴 원본에서 바로 읽음(보관 안 함)
 export const dynamic = 'force-dynamic';
@@ -36,14 +40,29 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage() {
   const today = kstToday();
   const head = todayHeading(today);
-  const [prep, receiving, stocktake, billing, feedback] = await Promise.all([
+  const [prep, receiving, stocktake, billing, salesConfirm, importState, feedback] = await Promise.all([
     loadPrepOverview(today),
     loadReceivingCard(today),
     loadStocktakeCard(today),
     loadBillingCard(today),
+    loadSalesConfirmCard(today),
+    loadSalesImportState(),
     listFeedback(),
   ]);
-  const fast = [prep.card, receiving, stocktake, billing];
+
+  // 영업 확인서 가져오기: 마지막 성공이 10분 넘었으면 응답 뒤에 한 번(키·상태 표가 없으면 안 함). 실패는 이유만 서버 로그에.
+  const lastOk = importState?.lastSuccessAt ? new Date(importState.lastSuccessAt).getTime() : 0;
+  if (process.env.SALES_EXPORT_KEY && importState && Date.now() - lastOk > 10 * 60_000) {
+    after(async () => {
+      try {
+        const r = await runSalesConfirmImport({ trigger: 'home' });
+        if (!r.ok) console.warn('[sales-confirms] 홈 가져오기 실패', r.errorCode ?? 'unknown');
+      } catch (err) {
+        console.warn('[sales-confirms] 홈 가져오기 오류', err instanceof Error ? err.name : 'unknown');
+      }
+    });
+  }
+  const fast = [prep.card, salesConfirm, receiving, stocktake, billing];
   const todo = fast.filter((c) => c.alert && (c.tone === 'bad' || c.tone === 'warn'));
   const failed = fast.filter((c) => c.error).length;
 
@@ -71,6 +90,7 @@ export default async function HomePage() {
 
         <div className="home-cards">
           <WorkCardView card={prep.card} />
+          <WorkCardView card={salesConfirm} />
           <Suspense fallback={<WorkCardLoading title="확인서 출고 기재" icon="📄" />}>
             <ConfirmCardAsync today={today} />
           </Suspense>

@@ -3,6 +3,17 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "47f4b7e36a",
+    "date": "2026-11-23",
+    "time": "10:47",
+    "subject": "통합 캘린더 · 네이버 일정 버전 읽기 고침 — 네이버 CalDAV 는 GET 에 ETag 헤더를 안 줘서(2026-11-23 실측, 모든 일정) 7b22f49 의 \"ETag 없으면 거절\" 때문에 네이버 원본 고치기·지우기, 앱 일정의 네이버 지우기, 복제본 정리가 전부 막혀 있었음 · readEventByHref 가 PROPFIND(Depth 0) getetag 를 먼저 읽고 GET(버전이 본문보다 새것이 되지 않게 — 그 사이 바뀌면 412) · 값은 마지막 수정 시각을 따옴표째(\"2026-11-17 14:54:23\") If-Match 에 그대로 — 사용자 허락받고 복제본 1건에 같은 원문 PUT 으로 확인(틀린 값 412, 이 값 200) · getEventWithEtag(출고 태그)도 같은 방식이라 이제 If-Match 가 실제로 붙음 · CLAUDE.md 동기화 주의·releases 갱신",
+    "crew": [
+      "integration-rules",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "7b22f49d04",
     "date": "2026-11-20",
     "time": "20:47",
