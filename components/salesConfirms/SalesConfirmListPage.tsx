@@ -102,6 +102,8 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   // 필터
   const [statusF, setStatusF] = useState<StatusFilter>('default');
   const [typeF, setTypeF] = useState('all');
+  // 지역(영업 웹앱 수도권A~E — 배송 동선) 거르기
+  const [regionF, setRegionF] = useState('all');
   const [dateF, setDateF] = useState<DateFilter>('all');
   const [procF, setProcF] = useState('all'); // 'all' | 'none' | 이름
   const [q, setQ] = useState('');
@@ -338,6 +340,13 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }, [rows]);
 
+  // 지역 칩 — 이름순(수도권A → E), 빈 지역은 '지역 없음'
+  const regionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) set.add(r.region || '');
+    return [...set].sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b, 'ko')));
+  }, [rows]);
+
   const procOptions = useMemo(() => {
     const set = new Set<string>(meta.people);
     for (const r of rows) for (const p of r.processors) set.add(p);
@@ -348,20 +357,23 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     return rows.filter((r) => {
       if (!matchStatus(r, statusF, today)) return false;
       if (typeF !== 'all' && r.type !== typeF) return false;
+      if (regionF !== 'all' && (r.region || '') !== regionF) return false;
       if (!matchDate(r, dateF, today)) return false;
       if (procF === 'none' && r.processors.length > 0) return false;
       if (procF !== 'all' && procF !== 'none' && !r.processors.includes(procF)) return false;
       return matchSearch(r, q);
     });
-  }, [rows, statusF, typeF, dateF, procF, q, today]);
+  }, [rows, statusF, typeF, regionF, dateF, procF, q, today]);
 
   // 화면을 그릴 때마다 맞춰 둠 — 열 때 비교(effect)가 첫 줄 목록을 바로 쓰게
   visibleIdsRef.current = visible.map((r) => r.id);
 
-  const filtersChanged = statusF !== 'default' || typeF !== 'all' || dateF !== 'all' || procF !== 'all' || q.trim() !== '';
+  const filtersChanged =
+    statusF !== 'default' || typeF !== 'all' || regionF !== 'all' || dateF !== 'all' || procF !== 'all' || q.trim() !== '';
   function clearFilters() {
     setStatusF('default');
     setTypeF('all');
+    setRegionF('all');
     setDateF('all');
     setProcF('all');
     setQ('');
@@ -532,6 +544,21 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                     {typeOptions.map((t) => (
                       <button key={t} type="button" className={`chip${typeF === t ? ' active' : ''}`} onClick={() => setTypeF(t)}>
                         {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {regionOptions.length > 0 && (
+                <div className="filter-row">
+                  <span className="filter-label">지역</span>
+                  <div className="chip-group">
+                    <button type="button" className={`chip${regionF === 'all' ? ' active' : ''}`} onClick={() => setRegionF('all')}>
+                      전체
+                    </button>
+                    {regionOptions.map((g) => (
+                      <button key={g || '(none)'} type="button" className={`chip${regionF === g ? ' active' : ''}`} onClick={() => setRegionF(g)}>
+                        {g || '지역 없음'}
                       </button>
                     ))}
                   </div>

@@ -37,7 +37,8 @@ interface Props {
 const stop = (e: MouseEvent) => e.stopPropagation();
 
 /** 목록 칸 폭(PC). 합계가 표 최소 폭 — 넓은 표라 가로로 밀어 봄(globals.css .sc-scroll) */
-const COL_WIDTHS = [88, 92, 92, 104, 72, 128, 64, 160, 116, 132, 150, 150, 120, 190, 130];
+// 순번 · 납품/교체일 · 지역 · 접수일시 · 처리여부 · 접수자 · 처리자 · 구분 · 상호 · 연락처 · 품목 · 사양 · 자산번호 · 시리얼 · 소모품/특이사항 · 비고
+const COL_WIDTHS = [88, 92, 76, 92, 104, 72, 128, 64, 160, 116, 132, 150, 150, 120, 190, 130];
 
 export default function SalesConfirmTable({ rows, people, today, showSheet, sheet, busyIds, onOpen, onStatus, onProcessors }: Props) {
   const tomorrow = addDays(today, 1);
@@ -55,6 +56,7 @@ export default function SalesConfirmTable({ rows, people, today, showSheet, shee
           <tr>
             <th data-m="hide">순번</th>
             <th data-m="inline" data-label="납품일">납품/교체일</th>
+            <th data-m="inline" data-label="지역">지역</th>
             <th data-m="hide">접수일시</th>
             <th data-m="badge">처리여부</th>
             <th data-m="hide">접수자</th>
@@ -131,6 +133,7 @@ function Row({
         {due === 'today' && <span className="sc-pill sc-pill-red">오늘</span>}
         {due === 'tomorrow' && <span className="sc-pill sc-pill-amber">내일</span>}
       </td>
+      <td>{row.region ? <span className="sc-region-tag">{row.region}</span> : '-'}</td>
       <td className="sc-small">{fmtDateTime(row.receivedAt)}</td>
       <td onClick={stop}>
         <select
@@ -162,7 +165,6 @@ function Row({
         <button type="button" className="ct-name-btn sc-name" onClick={(e) => { e.stopPropagation(); onOpen(row); }}>
           {row.company || '(상호 없음)'}
         </button>
-        {row.region ? <span className="sc-region"> {row.region}</span> : null}
         {(row.isNew || row.salesChanged || row.salesState) && (
           <div className="sc-flags">
             {row.isNew && <span className="sc-pill sc-pill-new">새로</span>}

@@ -3,6 +3,16 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "75a199d21e",
+    "date": "2026-11-26",
+    "time": "17:21",
+    "subject": "영업 확인서 · 실측 반영(9건 받음) — 응답은 {count, list}, phone 은 회사 대표번호라 9건 중 7건 빈 값 → 목록 연락처 = contactLine(대표번호 → IT담당 → 계약담당 → 현장상주), 전화 링크는 첫 번호 꼴만(없으면 글자만) · contacts.contractor(계약담당)·inflow(유입담당)·leaseNo·reason 받음, 지침 밖 사양 칸은 specExtra 로 이름 그대로 보존 · 미리보기는 저장된 payload 를 지금 normalize 로 다시 읽어(이미 받은 건도 바로 반영, hash 는 원문 기준이라 가짜 \"수정됨\" 없음) 계약담당·대표번호·유입담당·임대 번호·사유·추가 사양 표시 · CLAUDE.md 실측 메모·releases",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "af6f2da87d",
     "date": "2026-11-26",
     "time": "17:13",
