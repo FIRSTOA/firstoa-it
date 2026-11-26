@@ -7,6 +7,7 @@
  * 'use server' 파일이라 async 함수만 export — 상수·타입은 lib/salesConfirms/ 에.
  */
 import { isMissingSalesTable, loadListRowsByIds, loadSalesConfirmList } from '@/lib/salesConfirms/listQuery';
+import { normalizeSalesConfirm } from '@/lib/salesConfirms/normalize';
 import { compareConfirmsWithSheet } from '@/lib/salesConfirms/sheetCompare';
 import {
   SALES_CONFIRMS_TABLE,
@@ -185,6 +186,7 @@ function confirmFromStored(r: Json): NormalizedSalesConfirm {
       manager: asStr(contacts.manager),
       resident: asStr(contacts.resident),
       payer: asStr(contacts.payer),
+      contractor: asStr(contacts.contractor),
       phone: asStr(contacts.phone),
     },
     special: asStr(r.special),
@@ -192,11 +194,16 @@ function confirmFromStored(r: Json): NormalizedSalesConfirm {
     supplies,
     replaceInfo: rep ? { before: rep.before ?? null, after: rep.after ?? null } : null,
     docUrl: asStr(r.doc_url),
+    inflow: '',
+    leaseNo: '',
+    reason: '',
   };
 }
 
 /**
- * 줄을 누르면 부름 — ① 한 건(payload 칸은 안 읽음: 저장된 칸으로 화면 모양을 만듦)·② 버전 수·③ 을 돌려줌.
+ * 줄을 누르면 부름 — ① 한 건·② 버전 수·③ 을 돌려줌.
+ * 화면 모양은 저장된 원문(payload)을 지금 normalize 로 다시 읽어 만듦(그래야 정규화를 고친 뒤에도 이미 받은 건이 바로 새 칸을 보여 줌 —
+ * 예: 계약담당·유입담당·사유·모르는 사양 칸). 원문이 이상하면 저장된 칸(confirmFromStored)으로.
  * ③ first_opened_at 이 비었으면 지금·actor 로 채우고, seen_ver 가 비었으면 지금 ver·hash 로 채움(이미 있으면 안 건드림).
  */
 export async function openSalesConfirmPreview(input: {
@@ -212,7 +219,7 @@ export async function openSalesConfirmPreview(input: {
       supabase
         .from(SALES_CONFIRMS_TABLE)
         .select(
-          'id,doc_no,ver,type,term,saved_at,saved_by,sales_rep,company,address,region,delivery_date,contacts,items,supplies,replace_info,special,doc_url,payload_hash,first_seen_at,changed_at,fetched_at',
+          'id,doc_no,ver,type,term,saved_at,saved_by,sales_rep,company,address,region,delivery_date,contacts,items,supplies,replace_info,special,doc_url,payload,payload_hash,first_seen_at,changed_at,fetched_at',
         )
         .eq('id', input.id)
         .maybeSingle(),
@@ -289,7 +296,8 @@ export async function openSalesConfirmPreview(input: {
     const status: SalesConfirmStatus = work && isSalesConfirmStatus(work.status) ? work.status : '접수';
     const salesChanged =
       seenVer !== null && (ver > seenVer || (ver === seenVer && !!seenHash && seenHash !== hash)) ? { fromVer: seenVer, toVer: ver } : null;
-    const confirm = confirmFromStored(c);
+    const fromPayload = normalizeSalesConfirm(c.payload);
+    const confirm = fromPayload.ok ? fromPayload.value : confirmFromStored(c);
     return {
       ok: true,
       data: {

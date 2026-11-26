@@ -3,6 +3,16 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "af6f2da87d",
+    "date": "2026-11-26",
+    "time": "17:13",
+    "subject": "영업 확인서 가져오기 · 응답 모양 진단 — 첫 실측에서 영업 웹앱이 키는 받아 주는데 응답 바깥 모양이 배열·items/confirms/data 감싼 모양이 아니라 bad_shape(하나도 안 씀) · 키가 Vercel(sensitive)에만 있어 로컬에서 응답을 못 봐서: POST /api/sales-confirms/import 에 diag:true 면 받은 응답의 칸 이름·종류·건수·id 길이·ver 범위만 요약(describeShape — 값 없음, 사양 칸 밖 한글 칸 이름은 가림, 1500자) · 모양이 다르면 이유 문구·⑤에 짧은 요약, 전부 건너뛰면 이유별 건수, JSON 아니면 content-type · extractRecords 를 구조로만 조금 넓힘(객체 안 배열이 딱 하나면 그것, data/result 한 단계 안) — 한 건마다 id·ver 검사는 그대로",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "1304d182e2",
     "date": "2026-11-26",
     "time": "17:06",

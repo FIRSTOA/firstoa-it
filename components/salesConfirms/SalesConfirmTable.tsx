@@ -176,13 +176,19 @@ function Row({
         )}
       </td>
       <td onClick={stop} className="sc-small">
-        {row.phone ? (
-          <a className="sc-tel" href={`tel:${row.phone.replace(/[^\d+]/g, '')}`}>
-            {row.phone}
-          </a>
-        ) : (
-          '-'
-        )}
+        {(() => {
+          if (!row.phone) return '-';
+          // 연락처 칸엔 "IT담당 홍길동 010-1234-5678" 처럼 이름이 같이 올 수 있음 → 첫 전화번호 꼴만 링크로(없으면 글자만)
+          const m = row.phone.match(/\+?\d[\d\s-]{6,}\d/);
+          const tel = m ? m[0].replace(/[^\d+]/g, '') : '';
+          return tel.length >= 8 ? (
+            <a className="sc-tel" href={`tel:${tel}`}>
+              {row.phone}
+            </a>
+          ) : (
+            row.phone
+          );
+        })()}
       </td>
       <td>{row.itemSummary || '-'}</td>
       <td>

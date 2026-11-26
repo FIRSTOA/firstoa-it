@@ -202,8 +202,25 @@ function specOf(v: unknown): SalesSpec {
   return out;
 }
 
+/** SPEC_NAMES·별칭 밖의 사양 칸 — 칸 이름 그대로(20자까지), 값 있는 것만, 최대 10개 */
+function specExtraOf(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!isObj(v)) return out;
+  let n = 0;
+  for (const [k, val] of Object.entries(v)) {
+    const key = k.trim();
+    if (!key || SPEC_ALIAS[key.toLowerCase()]) continue;
+    const s = str(val);
+    if (!s) continue;
+    out[key.slice(0, 20)] = s;
+    if (++n >= 10) break;
+  }
+  return out;
+}
+
 function itemOf(v: unknown): SalesConfirmItem | null {
   if (!isObj(v)) return null;
+  const extra = specExtraOf(v.spec);
   return {
     cat: str(v.cat) || '기타',
     model: str(v.model),
@@ -211,6 +228,7 @@ function itemOf(v: unknown): SalesConfirmItem | null {
     state: str(v.state),
     qty: qtyOf(v.qty),
     spec: specOf(v.spec),
+    ...(Object.keys(extra).length ? { specExtra: extra } : {}),
     place: str(v.place),
   };
 }
@@ -222,7 +240,13 @@ function supplyOf(v: unknown): SalesConfirmSupply | null {
 
 function contactsOf(v: unknown): SalesConfirmContacts {
   const c = isObj(v) ? v : {};
-  return { manager: str(c.manager), resident: str(c.resident), payer: str(c.payer), phone: str(c.phone) };
+  return {
+    manager: str(c.manager),
+    resident: str(c.resident),
+    payer: str(c.payer),
+    contractor: str(c.contractor),
+    phone: str(c.phone),
+  };
 }
 
 /** 글자(키 포함) 안에 NUL 문자가 있는지 — Postgres jsonb·text 가 거절함 */
@@ -272,6 +296,9 @@ export function normalizeSalesConfirm(raw: unknown): NormalizeResult {
       supplies,
       replaceInfo: hasReplace ? { before: raw.before ?? null, after: raw.after ?? null } : null,
       docUrl: str(raw.docUrl),
+      inflow: str(raw.inflow),
+      leaseNo: str(raw.leaseNo),
+      reason: str(raw.reason),
     },
   };
 }

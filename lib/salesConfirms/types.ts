@@ -55,6 +55,8 @@ export interface SalesConfirmItem {
   /** 0 이상 정수(정규화에서 숫자로, 이상하면 0) */
   qty: number;
   spec: SalesSpec;
+  /** SALES_SPEC_KEYS 밖의 사양 칸(영업 웹앱이 더 보내는 것 — 칸 이름 그대로, 값 있는 것만). 화면에 그대로 보여 줌 */
+  specExtra?: Record<string, string>;
   /** 설치장소·요청사항 */
   place: string;
 }
@@ -67,12 +69,20 @@ export interface SalesConfirmSupply {
   note: string;
 }
 
+/**
+ * 실측(2026-11-26): 영업 웹앱의 phone 은 회사 대표번호 칸이고, 담당자 연락처는 manager(IT담당)·contractor(계약담당)·
+ * resident(현장상주)·payer(결제담당)에 이름과 같이 적힘 → 목록 "연락처"는 phone 없으면 IT담당 → 계약담당 → 현장상주 순.
+ */
 export interface SalesConfirmContacts {
   /** IT담당 */
   manager: string;
   /** 현장 상주 */
   resident: string;
+  /** 결제담당 */
   payer: string;
+  /** 계약담당 */
+  contractor: string;
+  /** 회사 대표번호 */
   phone: string;
 }
 
@@ -106,6 +116,20 @@ export interface NormalizedSalesConfirm {
   replaceInfo: { before: unknown; after: unknown } | null;
   /** 영업 웹앱 확인서 보기 링크(검사 전 원문) — 화면은 safeDocUrl() 을 거쳐서만 링크로 */
   docUrl: string;
+  /** 실측에서 더 있던 칸(2026-11-26): 유입담당 · 임대 번호 · 사유(교체 등). ① 표에 칸은 없고 payload 에서 읽음 */
+  inflow: string;
+  leaseNo: string;
+  reason: string;
+}
+
+/** 목록 "연락처" 칸 — 대표번호가 없으면 IT담당 → 계약담당 → 현장상주(이름과 같이 적힌 값 그대로) */
+export function contactLine(c: Partial<SalesConfirmContacts> | null | undefined): string {
+  if (!c) return '';
+  if (c.phone) return c.phone;
+  if (c.manager) return `IT담당 ${c.manager}`;
+  if (c.contractor) return `계약 ${c.contractor}`;
+  if (c.resident) return `현장 ${c.resident}`;
+  return '';
 }
 
 /** 영업 웹앱 주소 — docUrl 은 https + 이 호스트일 때만 링크로(D7 유지 규칙) */

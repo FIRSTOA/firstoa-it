@@ -15,9 +15,11 @@ import {
 } from '@/lib/supabase/server';
 import {
   SALES_CONFIRM_DONE_STATUSES,
+  contactLine,
   importStateFromRow,
   isSalesConfirmStatus,
   safeDocUrl,
+  type SalesConfirmContacts,
   type SalesConfirmListResult,
   type SalesConfirmListRow,
   type SalesImportStateRow,
@@ -224,7 +226,8 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: UnitDbRow
     term: c.term ?? '',
     company: c.company ?? '',
     region: c.region ?? '',
-    phone: asStr(asObj(c.contacts).phone),
+    // 대표번호가 없으면 IT담당 → 계약담당 → 현장상주(실측 — types.ts contactLine)
+    phone: contactLine(asObj(c.contacts) as Partial<SalesConfirmContacts>),
     itemSummary,
     specSummary: specParts.join(' · '),
     specEdited,

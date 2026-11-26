@@ -132,8 +132,14 @@
   로그인 붙일 때 `/confirm-form`(목록·미리보기·인쇄)과 `/dispatch`(연락처)를 같이 막을 것). 새 메뉴 없음 — 주소 `/confirm-form` 그대로,
   `?view=legacy` = 예전 화면 그대로(D10, page.tsx 가 `<Suspense key={view}>`). 출고 준비 쪽(it_prep_*·네이버·카톡)에는 1~3단계에서 안 씀(D8).
 - **가져오기**: `GET …/api/export/it-confirms?since=` + 헤더 `x-export-key` = Vercel 환경값 `SALES_EXPORT_KEY`(Production만, 영업 쪽 이름 `IT_EXPORT_KEY` —
-  sensitive 라 Vercel 에서 다시 못 봄, 만든 사람에게 받음). 영업 export 코드는 GitHub 저장소에 없음(로컬 배포) → **응답 모양은 키 받은 뒤 배포 환경에서 1회 실측**
-  (칸 이름·건수·형식만 — 연락처 값·키 출력 금지)하고 `lib/salesConfirms/normalize.ts` 확정. 지금 파서는 지침의 칸 이름 기준.
+  sensitive 라 Vercel 에서 다시 못 봄, 만든 사람에게 받음). 영업 export 코드는 GitHub 저장소에 없음(로컬 배포) — 키가 로컬에 없으니
+  응답은 **배포된 라우트에 `{"force":true,"trigger":"manual","diag":true}` POST** 로만 봄(결과 `shape` = 칸 이름·종류·건수만, 값 없음).
+  - 실측(2026-11-26, 9건): 바깥 `{count, list:[…]}`(extractRecords 가 "배열이 딱 하나"로 읽음), id 16자 글자, deliveryDate 'YYYY-MM-DD',
+    지침 밖 칸 inflow(유입담당)·leaseNo·reason·contacts.contractor(계약담당), before/after = {item,model,maker,sn,asset,spec,sw}.
+    **phone 은 회사 대표번호** — 담당자 연락처는 manager·contractor·resident 에 이름과 같이 → 목록 연락처는 `contactLine`(phone → IT담당 → 계약 → 현장).
+    spec 에 지침 밖 한글 칸 2개 있음 → `specExtra`(이름 그대로) 로 보존해 미리보기에 보여 줌. 영업 웹앱의 '인치'는 노트북만.
+  - 미리보기(이후 상세도)는 **저장된 payload 를 지금 normalize 로 다시 읽음** — 정규화를 고쳐도 이미 받은 건에 바로 반영(hash 는 원문 기준이라 안 바뀜 → 가짜 "수정됨" 없음).
+    ① 의 정규화 칸(contacts·items 등)은 받을 때 한 번 만든 사본이라 목록 요약에만 씀(원문이 안 바뀌면 다시 안 씀).
   - 라우트 `POST /api/sales-confirms/import`(화면 열 때·3분마다·🔄·⋯날짜, 홈은 10분 넘었으면 `after()`). Vercel cron 안 씀(Hobby 하루 1번).
   - since(D14) = 늘 한국 오늘−30일, 그날 첫 한 번 −90일(`last_deep_at`), 날짜 고르기 365일까지. hash(키 정렬 JSON sha256)로 바뀐 것만 씀.
   - 겹침 막기: ⑤ `it_sales_import_state` 'main' 줄 조건부 update(60초, 강제 10초). 바뀐 건은 ②(판 원문) 먼저 → ①(그래야 실패해도 다음에 저절로 맞춰짐).

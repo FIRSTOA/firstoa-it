@@ -178,8 +178,12 @@ function PreviewBody({
         <Field label="주소" value={c.address} wide />
         <Field label="IT 담당" value={c.contacts.manager} />
         <Field label="현장 상주" value={c.contacts.resident} />
+        <Field label="계약 담당" value={c.contacts.contractor} />
         <Field label="결제 담당" value={c.contacts.payer} />
-        <Field label="연락처" value={c.contacts.phone} />
+        <Field label="대표번호" value={c.contacts.phone} />
+        {c.inflow && <Field label="유입담당" value={c.inflow} />}
+        {c.leaseNo && <Field label="임대 번호" value={c.leaseNo} />}
+        {c.reason && <Field label="사유" value={c.reason} wide />}
         <Field label="처리자" value={data.processors.join(', ')} />
         <Field label="비고" value={data.note} />
       </div>
@@ -203,7 +207,11 @@ function PreviewBody({
             </thead>
             <tbody>
               {c.items.map((it, i) => {
-                const specs = SALES_SPEC_KEYS.filter((k) => (it.spec[k] ?? '').trim());
+                // 아는 사양 칸 + 영업 웹앱이 더 보내는 칸(이름 그대로)
+                const specs: [string, string][] = [
+                  ...SALES_SPEC_KEYS.filter((k) => (it.spec[k] ?? '').trim()).map((k): [string, string] => [k, it.spec[k] ?? '']),
+                  ...Object.entries(it.specExtra ?? {}),
+                ];
                 return (
                   <tr key={i}>
                     <td>{it.cat || '기타'}</td>
@@ -216,9 +224,9 @@ function PreviewBody({
                         '-'
                       ) : (
                         <span className="sc-specs">
-                          {specs.map((k) => (
+                          {specs.map(([k, v]) => (
                             <span key={k} className="sc-spec">
-                              <b>{k}</b> {it.spec[k]}
+                              <b>{k}</b> {v}
                             </span>
                           ))}
                         </span>
