@@ -4,6 +4,8 @@ import 'server-only';
  * 영업 확인서 목록 읽기(①③④⑤) — payload 칸은 읽지 않음(목록엔 contacts·items·supplies 로 충분).
  * 범위: ① 최근 120일(처음 받은 날 또는 납품일 기준) + ③ 상태가 출고·취소가 아닌 더 옛날 건.
  * Supabase 는 한 번에 1000줄까지 → 페이지로 끝까지, ③④ 는 id 200개씩 .in (④ 는 그 안에서도 페이지).
+ * 칸 계산(칸 수·진행 n/m·다시 확인 필요)은 slots.ts 한 곳(2+3단계 — 진행 m = 장비·모니터·유지보수 칸만).
+ * SQL 블록 A 전이면 ③ printed_ver·④ diff_ack 없이 읽음(출력 판·다시 확인 필요는 "모름"으로).
  * 쓰기 없음.
  */
 import {
@@ -13,6 +15,8 @@ import {
   SALES_IMPORT_STATE_TABLE,
   createAdminClient,
 } from '@/lib/supabase/server';
+import { regionWithGuess } from './prepMatch';
+import { buildSlotLines, recheckSlotCount, slotItems, slotProgress, toSalesItems, unitRowFromDb } from './slots';
 import {
   SALES_CONFIRM_DONE_STATUSES,
   contactLine,
@@ -23,6 +27,7 @@ import {
   type SalesConfirmListResult,
   type SalesConfirmListRow,
   type SalesImportStateRow,
+  type SalesUnitRow,
 } from './types';
 
 const PREP_PEOPLE_TABLE = 'it_prep_people'; // app/shipment-prep/actions.ts 와 같은 표(그 파일은 상수를 안 내보냄)
@@ -40,6 +45,20 @@ export function isMissingSalesTable(err: unknown): boolean {
   if (e.code === '42P01' || e.code === 'PGRST205') return true;
   return /does not exist|could not find the table|schema cache/i.test(e.message ?? '');
 }
+
+/**
+ * SQL 블록 A 칸(④ extra·diff_ack, ③ printed_ver·printed_by)이 아직 없는지 — 좁게만:
+ * code 42703(칸 없음)·PGRST204(스키마에 칸 없음) **이면서** 문구에 그 칸 이름이 있을 때만. 권한 오류 등은 그대로 오류.
+ * (count head 요청은 오류 본문이 비어 이 판정에 쓰지 말 것)
+ */
+export function isMissingSalesColumn(err: unknown): boolean {
+  const e = err as { code?: string; message?: string } | null;
+  if (!e) return false;
+  if (e.code !== '42703' && e.code !== 'PGRST204') return false;
+  return /\b(extra|diff_ack|printed_ver|printed_by)\b/.test(e.message ?? '');
+}
+
+const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : NaN);
 
 export function kstTodayYmd(): string {
   return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
@@ -79,19 +98,22 @@ interface ConfirmDbRow {
   saved_by: string | null;
   sales_rep: string | null;
   company: string | null;
+  address: string | null;
   region: string | null;
   delivery_date: string | null;
   contacts: unknown;
   items: unknown;
   supplies: unknown;
+  replace_info: unknown;
   special: string | null;
   doc_url: string | null;
   payload_hash: string | null;
   sales_state: string | null;
   first_seen_at: string;
+  changed_at: string | null;
 }
 const CONFIRM_COLS =
-  'id,doc_no,ver,type,term,first_saved_at,saved_by,sales_rep,company,region,delivery_date,contacts,items,supplies,special,doc_url,payload_hash,sales_state,first_seen_at';
+  'id,doc_no,ver,type,term,first_saved_at,saved_by,sales_rep,company,address,region,delivery_date,contacts,items,supplies,replace_info,special,doc_url,payload_hash,sales_state,first_seen_at,changed_at';
 
 interface WorkDbRow {
   confirm_id: string;
@@ -101,19 +123,20 @@ interface WorkDbRow {
   seen_ver: number | null;
   seen_hash: string | null;
   first_opened_at: string | null;
+  printed_at: string | null;
+  /** SQL 블록 A 전이면 없음 */
+  printed_ver?: number | null;
   updated_at: string | null;
 }
-const WORK_COLS = 'confirm_id,status,processors,note,seen_ver,seen_hash,first_opened_at,updated_at';
+const WORK_COLS_BASE = 'confirm_id,status,processors,note,seen_ver,seen_hash,first_opened_at,printed_at,updated_at';
+const WORK_COLS_FULL: string = `${WORK_COLS_BASE},printed_ver`;
 
-interface UnitDbRow {
+interface UnitDbRow extends Json {
   confirm_id: string;
-  slot_key: string;
-  unit_no: number;
-  asset_id: string | null;
-  serial: string | null;
-  spec_override: unknown;
 }
-const UNIT_COLS = 'confirm_id,slot_key,unit_no,asset_id,serial,spec_override';
+const UNIT_COLS_BASE = 'id,confirm_id,slot_key,unit_no,asset_id,serial,actual_maker,actual_model,spec_override,updated_at';
+/** 블록 A 뒤 — 다시 확인 필요(diff_ack) 계산용 */
+const UNIT_COLS_FULL: string = `${UNIT_COLS_BASE},diff_ack`;
 
 const asStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : '');
 const asObj = (v: unknown): Json => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : {});
@@ -149,31 +172,25 @@ function specLine(cat: string, spec: Json): string {
   return parts.join('/');
 }
 
-/** 품목 줄마다 slot_key = 종류#같은 종류 안 순서 (types 주석·설계 §3-4) */
-function slotKeys(items: Json[]): string[] {
-  const seen = new Map<string, number>();
-  return items.map((it) => {
-    const cat = asStr(it.cat) || '기타';
-    const n = (seen.get(cat) ?? 0) + 1;
-    seen.set(cat, n);
-    return `${cat}#${n}`;
-  });
+interface ReadFlags {
+  /** ④ diff_ack 칸이 있음(SQL 블록 A 뒤) — 없으면 "다시 확인 필요"를 모름(0) */
+  unitsReady: boolean;
+  /** ③ printed_ver 칸이 있음(SQL 블록 A 뒤) — 없으면 출력 판을 모름(printed_at 과 ① changed_at 으로만) */
+  printedReady: boolean;
 }
 
-function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: UnitDbRow[]): SalesConfirmListRow {
-  const items = asArr(c.items).map(asObj);
-  const keys = slotKeys(items);
-  const order = new Map(keys.map((k, i) => [k, i] as const));
-  const sortedUnits = [...units].sort(
-    (a, b) => (order.get(a.slot_key) ?? 999) - (order.get(b.slot_key) ?? 999) || a.slot_key.localeCompare(b.slot_key) || a.unit_no - b.unit_no,
-  );
+function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: SalesUnitRow[], flags: ReadFlags): SalesConfirmListRow {
+  // 칸 계산은 slots.ts 한 곳(교체 건에 items 가 비면 after 를 1칸으로)
+  const items = slotItems({
+    items: toSalesItems(c.items),
+    replaceInfo: c.replace_info && typeof c.replace_info === 'object' ? (asObj(c.replace_info) as { before: unknown; after: unknown }) : null,
+  });
+  const { lines, orphans } = buildSlotLines(items, units);
 
-  // 품목 요약: 같은 종류끼리 합침
+  // 품목 요약: 같은 품목구분끼리 합침(영업 수량 그대로)
   const byCat = new Map<string, number>();
-  let unitsTotal = 0;
   for (const it of items) {
     const q = clampQty(it.qty);
-    unitsTotal += q;
     if (q > 0) byCat.set(asStr(it.cat) || '기타', (byCat.get(asStr(it.cat) || '기타') ?? 0) + q);
   }
   const itemSummary = [...byCat].map(([cat, q]) => `${cat} ${q}`).join(' · ');
@@ -181,10 +198,10 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: UnitDbRow
   // 사양 요약: ④ spec_override(IT가 고친 칸)가 있으면 그 값 우선
   let specEdited = false;
   const specParts: string[] = [];
-  items.forEach((it, i) => {
-    const spec: Json = { ...asObj(it.spec) };
-    for (const u of sortedUnits.filter((x) => x.slot_key === keys[i])) {
-      for (const [k, v] of Object.entries(asObj(u.spec_override))) {
+  for (const line of lines) {
+    const spec: Json = { ...line.item.spec };
+    for (const s of line.slots) {
+      for (const [k, v] of Object.entries(s.unit?.specOverride ?? {})) {
         const val = asStr(v);
         if (val) {
           spec[k] = val;
@@ -192,11 +209,15 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: UnitDbRow
         }
       }
     }
-    const line = specLine(asStr(it.cat), spec);
-    if (line && !specParts.includes(line)) specParts.push(line);
-  });
+    const text = specLine(line.item.cat, spec);
+    if (text && !specParts.includes(text)) specParts.push(text);
+  }
 
-  const filled = sortedUnits.filter((u) => asStr(u.asset_id));
+  // 자산번호·시리얼: 칸 순서 → 영업에서 빠진 칸(검색에 걸리게)
+  const ordered = [...lines.flatMap((l) => l.slots.map((s) => s.unit).filter((u): u is SalesUnitRow => !!u)), ...orphans];
+  // 진행 n/m — m = 장비·모니터·유지보수 칸만(소프트웨어·기타는 안 셈)
+  const progress = slotProgress(lines);
+
   const supplies = asArr(c.supplies)
     .map(asObj)
     .map((s) => {
@@ -212,6 +233,19 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: UnitDbRow
       ? { fromVer: work.seen_ver, toVer: ver }
       : null;
 
+  // 지역: 영업 값, 비었으면 주소로 추정(영업 웹앱과 같은 regionOf)
+  const reg = regionWithGuess(c.region, c.address);
+
+  // 출력 뒤 바뀜: 영업 판이 올랐거나(블록 A 전엔 ① changed_at > printed_at) IT 칸이 출력 뒤에 저장됨
+  const printedAt = work?.printed_at ?? null;
+  const printedVer = flags.printedReady ? (work?.printed_ver ?? null) : null;
+  let printStale = false;
+  if (printedAt) {
+    const pAt = ms(printedAt);
+    printStale =
+      (printedVer !== null ? ver > printedVer : ms(c.changed_at) > pAt) || units.some((u) => ms(u.updatedAt) > pAt);
+  }
+
   return {
     id: c.id,
     docNo: c.doc_no ?? '',
@@ -225,16 +259,16 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: UnitDbRow
     type: c.type ?? '',
     term: c.term ?? '',
     company: c.company ?? '',
-    region: c.region ?? '',
+    region: reg.region,
     // 대표번호가 없으면 IT담당 → 계약담당 → 현장상주(실측 — types.ts contactLine)
     phone: contactLine(asObj(c.contacts) as Partial<SalesConfirmContacts>),
     itemSummary,
     specSummary: specParts.join(' · '),
     specEdited,
-    assetIds: filled.map((u) => asStr(u.asset_id)),
-    serials: sortedUnits.map((u) => asStr(u.serial)).filter(Boolean),
-    unitsFilled: filled.length,
-    unitsTotal,
+    assetIds: ordered.map((u) => u.assetId).filter(Boolean),
+    serials: ordered.map((u) => u.serial).filter(Boolean),
+    unitsFilled: progress.filled,
+    unitsTotal: progress.total,
     suppliesSummary: supplies.join(' · '),
     special: c.special ?? '',
     note: work?.note ?? '',
@@ -244,6 +278,11 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: UnitDbRow
     docUrl: safeDocUrl(c.doc_url),
     workUpdatedAt: work?.updated_at ?? null,
     firstSeenAt: c.first_seen_at,
+    regionGuessed: reg.guessed,
+    // 블록 A 전엔 확인 기록이 없어 모름 → 0
+    recheckCount: flags.unitsReady ? recheckSlotCount(lines) : 0,
+    printedVer,
+    printStale,
   };
 }
 
@@ -262,42 +301,63 @@ export function sortListRows(rows: SalesConfirmListRow[], today: string): SalesC
 
 // ───────────── 읽기 ─────────────
 
-async function readWork(supabase: Supa, ids: string[]): Promise<Map<string, WorkDbRow>> {
-  const out = new Map<string, WorkDbRow>();
-  for (const part of chunks(ids, CHUNK)) {
-    const { data, error } = await supabase.from(SALES_CONFIRM_WORK_TABLE).select(WORK_COLS).in('confirm_id', part);
-    if (error) throw error;
-    for (const w of (data ?? []) as WorkDbRow[]) out.set(w.confirm_id, w);
+async function readWork(supabase: Supa, ids: string[]): Promise<{ map: Map<string, WorkDbRow>; printedReady: boolean }> {
+  const run = async (full: boolean) => {
+    const out = new Map<string, WorkDbRow>();
+    for (const part of chunks(ids, CHUNK)) {
+      const { data, error } = await supabase
+        .from(SALES_CONFIRM_WORK_TABLE)
+        .select(full ? WORK_COLS_FULL : WORK_COLS_BASE)
+        .in('confirm_id', part);
+      if (error) throw error;
+      for (const w of (data ?? []) as unknown as WorkDbRow[]) out.set(w.confirm_id, w);
+    }
+    return out;
+  };
+  try {
+    return { map: await run(true), printedReady: true };
+  } catch (err) {
+    if (!isMissingSalesColumn(err)) throw err;
+    return { map: await run(false), printedReady: false };
   }
-  return out;
 }
 
-async function readUnits(supabase: Supa, ids: string[]): Promise<Map<string, UnitDbRow[]>> {
-  const out = new Map<string, UnitDbRow[]>();
-  for (const part of chunks(ids, CHUNK)) {
-    const rows = await readAllPages<UnitDbRow>((from, to) =>
-      supabase
-        .from(SALES_CONFIRM_UNITS_TABLE)
-        .select(UNIT_COLS)
-        .in('confirm_id', part)
-        .order('confirm_id')
-        .order('slot_key')
-        .order('unit_no')
-        .range(from, to),
-    );
-    for (const u of rows) {
-      const list = out.get(u.confirm_id);
-      if (list) list.push(u);
-      else out.set(u.confirm_id, [u]);
+async function readUnits(supabase: Supa, ids: string[]): Promise<{ map: Map<string, SalesUnitRow[]>; unitsReady: boolean }> {
+  const run = async (full: boolean) => {
+    const out = new Map<string, SalesUnitRow[]>();
+    for (const part of chunks(ids, CHUNK)) {
+      const rows = await readAllPages<UnitDbRow>((from, to) =>
+        supabase
+          .from(SALES_CONFIRM_UNITS_TABLE)
+          .select(full ? UNIT_COLS_FULL : UNIT_COLS_BASE)
+          .in('confirm_id', part)
+          .order('confirm_id')
+          .order('slot_key')
+          .order('unit_no')
+          .range(from, to) as unknown as PromiseLike<{ data: UnitDbRow[] | null; error: unknown }>,
+      );
+      for (const r of rows) {
+        const u = unitRowFromDb(r);
+        const list = out.get(r.confirm_id);
+        if (list) list.push(u);
+        else out.set(r.confirm_id, [u]);
+      }
     }
+    return out;
+  };
+  try {
+    return { map: await run(true), unitsReady: true };
+  } catch (err) {
+    if (!isMissingSalesColumn(err)) throw err;
+    return { map: await run(false), unitsReady: false };
   }
-  return out;
 }
 
 async function rowsFor(supabase: Supa, confirms: ConfirmDbRow[]): Promise<SalesConfirmListRow[]> {
   const ids = confirms.map((c) => c.id);
   const [work, units] = await Promise.all([readWork(supabase, ids), readUnits(supabase, ids)]);
-  return confirms.map((c) => buildRow(c, work.get(c.id), units.get(c.id) ?? []));
+  const flags: ReadFlags = { unitsReady: units.unitsReady, printedReady: work.printedReady };
+  return confirms.map((c) => buildRow(c, work.map.get(c.id), units.map.get(c.id) ?? [], flags));
 }
 
 /** 시트 비교용: 고른 id 의 목록 줄(payload 없음) */

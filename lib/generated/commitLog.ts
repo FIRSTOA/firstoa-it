@@ -3,6 +3,16 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "694c5b44fe",
+    "date": "2026-11-26",
+    "time": "17:53",
+    "subject": "영업 확인서 목록 · 지역 칸 — 사용자 요청(영업 웹앱처럼 지역이 보여야 함): 납품/교체일 옆에 \"지역\"(수도권A~E, 초록 표시) 칸을 따로 두고 상호 옆 작은 글자는 뺌, 지역 칩으로 거르기(빈 지역 = 지역 없음, 필터 지우기 포함), 핸드폰 카드는 납품일·구분·품목과 같은 줄 · 설명서 confirm-form 칸 표·거르기 문구, releases",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "75a199d21e",
     "date": "2026-11-26",
     "time": "17:21",

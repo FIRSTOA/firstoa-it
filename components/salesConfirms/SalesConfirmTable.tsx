@@ -1,10 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import {
   SALES_CONFIRM_DONE_STATUSES,
   SALES_CONFIRM_STATUSES,
   isSalesConfirmStatus,
+  salesConfirmHref,
   type SalesConfirmListRow,
   type SalesConfirmStatus,
   type SheetCompareEntry,
@@ -133,7 +135,16 @@ function Row({
         {due === 'today' && <span className="sc-pill sc-pill-red">오늘</span>}
         {due === 'tomorrow' && <span className="sc-pill sc-pill-amber">내일</span>}
       </td>
-      <td>{row.region ? <span className="sc-region-tag">{row.region}</span> : '-'}</td>
+      <td>
+        {row.region ? (
+          <span className="sc-region-tag">
+            {row.region}
+            {row.regionGuessed && <span className="sc-region-guess-mark">(추정)</span>}
+          </span>
+        ) : (
+          '-'
+        )}
+      </td>
       <td className="sc-small">{fmtDateTime(row.receivedAt)}</td>
       <td onClick={stop}>
         <select
@@ -162,12 +173,21 @@ function Row({
         {row.term === '현장/단기' && <span className="sc-pill sc-pill-gray">단기</span>}
       </td>
       <td>
-        <button type="button" className="ct-name-btn sc-name" onClick={(e) => { e.stopPropagation(); onOpen(row); }}>
+        <Link href={salesConfirmHref(row.id)} className="ct-name-btn sc-name sc-name-link" onClick={stop}>
           {row.company || '(상호 없음)'}
-        </button>
-        {(row.isNew || row.salesChanged || row.salesState) && (
+        </Link>
+        {(row.isNew || row.salesChanged || row.salesState || row.printedVer != null || (row.recheckCount ?? 0) > 0) && (
           <div className="sc-flags">
             {row.isNew && <span className="sc-pill sc-pill-new">새로</span>}
+            {(row.recheckCount ?? 0) > 0 && <span className="sc-pill sc-pill-amber">다시 확인 필요 {row.recheckCount}</span>}
+            {row.printedVer != null &&
+              (row.printStale ? (
+                <span className="sc-pill sc-pill-amber" title="출력한 뒤 영업이 고쳤거나 IT 값이 바뀌었어요">
+                  출력 뒤 바뀜 · 다시 뽑기
+                </span>
+              ) : (
+                <span className="sc-pill sc-pill-indigo">출력함 v{row.printedVer}</span>
+              ))}
             {row.salesChanged && (
               <span className="sc-pill sc-pill-amber">
                 영업에서 수정됨 v{row.salesChanged.fromVer}→v{row.salesChanged.toVer}

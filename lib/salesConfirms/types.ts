@@ -33,9 +33,13 @@
  *   ④ it_sales_confirm_units   id uuid PK · confirm_id → ① (restrict) · slot_key · unit_no int · item_snapshot jsonb · asset_id · serial ·
  *                              actual_maker · actual_model · spec_override jsonb default '{}' · checks jsonb default '{}' · note ·
  *                              created_at · updated_at · updated_by      unique (confirm_id, slot_key, unit_no)
+ *                              + (2+3단계 블록 A) extra jsonb default '{}'(pc·user·ledgerPushed — 키 없음) · diff_ack jsonb default '{}'('spec:RAM' 꼴 키)
+ *   ③ (2+3단계 블록 A)        + printed_ver int null · printed_by text default ''
  *   ⑤ it_sales_import_state    id text PK ('main' 한 줄, SQL 이 만들어 둠) · last_attempt_at · last_success_at · last_deep_at ·
  *                              last_window_days int · last_error_code · last_error · last_counts jsonb · updated_at
  */
+
+import type { ItemKind } from './itemKind';
 
 // ───────────────────────── 영업 원문(지침 기준 — 키 받은 뒤 1회 실측으로 확정, §3-6) ─────────────────────────
 
@@ -59,6 +63,8 @@ export interface SalesConfirmItem {
   specExtra?: Record<string, string>;
   /** 설치장소·요청사항 */
   place: string;
+  /** (출력용, 2+3단계) 월 렌탈료 — 영업 가져오기에 칸이 없으면 null(= 안 옴 → 종이에 ₩0 대신 빈칸, D17) */
+  rent?: number | null;
 }
 
 export interface SalesConfirmSupply {
@@ -67,6 +73,28 @@ export interface SalesConfirmSupply {
   /** '무상' | '청구' | '' */
   charge: string;
   note: string;
+  /** (출력용) 단가 원문 — 안 오면 null */
+  price?: string | null;
+}
+
+/**
+ * (출력용, 2+3단계) 영업 양식 1면 계약·청구 요약에 쓰는 칸 — 지금 영업 가져오기에 없음(영업 쪽에 추가 요청함).
+ * 각 칸: null = 응답에 칸이 없음(안 옴 → 빈칸, 가짜 ₩0·자동 체크 안 찍음 — D17), '' = 영업이 비워서 보냄(영업 출력과 같게).
+ * normalize.ts 가 채움(developer D). 원문 hash 와는 무관.
+ */
+export interface SalesPrintExtra {
+  /** 'it' | 'mfp' | null */
+  kind: string | null;
+  months: string | null;
+  deposit: string | null;
+  payNote: string | null;
+  extra: string | null;
+  orderDate: string | null;
+  industry: string | null;
+  statusNo: string | null;
+  fax: string | null;
+  taxMail: string | null;
+  contractMail: string | null;
 }
 
 /**
@@ -120,6 +148,8 @@ export interface NormalizedSalesConfirm {
   inflow: string;
   leaseNo: string;
   reason: string;
+  /** (출력용) 계약·청구 요약 칸 — 없으면(예전 정규화로 만든 값) 전부 안 옴으로 봄 */
+  print?: SalesPrintExtra;
 }
 
 /** 목록 "연락처" 칸 — 대표번호가 없으면 IT담당 → 계약담당 → 현장상주(이름과 같이 적힌 값 그대로) */
@@ -343,6 +373,15 @@ export interface SalesConfirmListRow {
   workUpdatedAt: string | null;
   /** ① first_seen_at ISO */
   firstSeenAt: string;
+  // ── 2+3단계(developer C 가 listQuery 에서 채움) ──
+  /** 영업 지역이 비어 주소로 추정한 값이면 true(region 에 추정값이 들어 있음) */
+  regionGuessed?: boolean;
+  /** 영업 요청이 바뀌어 차이 확인이 풀린 칸 수(D27 "다시 확인 필요") */
+  recheckCount?: number;
+  /** 마지막으로 출력한 영업 판(③ printed_ver) — 없으면 null */
+  printedVer?: number | null;
+  /** 출력 뒤 영업이 고쳤거나(ver > printedVer) IT 값이 바뀜 → "다시 뽑기" */
+  printStale?: boolean;
 }
 
 export interface SalesConfirmListData {
@@ -438,3 +477,276 @@ export type SalesWorkSaveResult =
   /** expectedUpdatedAt 이 DB 와 달라 저장 안 함 → 화면은 목록을 다시 읽음 */
   | { ok: false; conflict: true; error: string }
   | { ok: false; conflict?: false; error: string };
+
+// =====================================================================================
+// 2+3단계 — 상세(기기 칸 입력·차이 확인·라이선스 키) + 출력(영업 양식 그대로). 설계 §3-4·§3-9~§3-11·§4-2·§4-3, D15~D30
+// 파일·담당:
+//   lib/salesConfirms/itemKind.ts (팀장, 순수)             — 품목 종류·종류별 칸 규칙
+//   lib/salesConfirms/salesForm/confirm.ts (팀장, 영업 사본) — ConfDoc·hasSpec·specKeys·regionOf …
+//   developer C: slots.ts·specCompare.ts·diff.ts·prepMatch.ts(순수), work.ts(server-only), app/confirm-form/[id]/page.tsx,
+//                app/confirm-form/salesDetailActions.ts('use server'), listQuery.ts 고침
+//   developer E: lib/contracts/salesConfirmLink.ts(server-only), app/confirm-form/salesLicenseActions.ts('use server')
+//   developer D: salesForm/confirmDoc.ts(영업 사본 + P1~P6), printFill.ts(순수), public/confirm/rabbit.png, normalize.ts(출력용 칸)
+//   ui-designer: components/salesConfirms/* 상세·출력 화면
+// =====================================================================================
+
+/** 차이 확인 칸 이름 — 'maker' · 'model' · 'spec:<사양 칸>' (예: 'spec:RAM') */
+export type DiffField = 'maker' | 'model' | `spec:${SalesSpecKey}`;
+
+/** 영업 요청과 출고 값이 다른 칸 하나 */
+export interface DiffItem {
+  field: DiffField;
+  /** 영업 요청 값(비어 있지 않음 — 빈 요청은 비교 안 함) */
+  sales: string;
+  /** 출고 값(IT 입력) */
+  actual: string;
+}
+
+/** ④ diff_ack — 칸마다 "이 (영업 값, 출고 값) 쌍을 누가 언제 확인함". 지금 쌍이 기록과 다르면 확인 안 된 것(다시 물음) */
+export type DiffAckMap = Partial<Record<DiffField, { sales: string; actual: string; at: string; by: string }>>;
+
+/** ④ extra — 키는 절대 안 넣음 */
+export interface SalesUnitExtra {
+  /** 소프트웨어: 설치 PC 자산번호 */
+  pc?: string;
+  /** 소프트웨어: 사용자 */
+  user?: string;
+  /** 소프트웨어: 지난번 대장에 올린 값(대장에서 사람이 고친 칸은 안 덮기 위한 비교용 — §3-11) */
+  ledgerPushed?: { product?: string; pc?: string; user?: string; at?: string };
+}
+
+/** ④ 한 줄 화면 모양 */
+export interface SalesUnitRow {
+  id: string;
+  slotKey: string;
+  unitNo: number;
+  /** 이 칸을 채울 때의 영업 품목 — 영업이 품목을 바꾸면 비교해 경고 */
+  itemSnapshot: SalesConfirmItem | null;
+  assetId: string;
+  serial: string;
+  actualMaker: string;
+  actualModel: string;
+  specOverride: SalesSpec;
+  checks: Record<string, { at: string; by: string }>;
+  note: string;
+  extra: SalesUnitExtra;
+  diffAck: DiffAckMap;
+  /** 동시 수정 확인용 — DB 문자열 그대로(µs) */
+  updatedAt: string;
+  updatedBy: string;
+}
+
+/** 칸 계산 결과 하나(slots.ts) — unit 이 null 이면 아직 아무것도 안 적은 칸 */
+export interface SalesSlot {
+  slotKey: string;
+  unitNo: number;
+  unit: SalesUnitRow | null;
+  /** 영업 요청과 다른데 확인 안 된 칸(영업 요청이 바뀌어 풀린 것 포함) — 없으면 [] */
+  unackedDiffs: DiffItem[];
+}
+
+/** 품목 줄 하나 + 그 줄의 기기 칸 */
+export interface SalesSlotLine {
+  /** 영업 items 배열 안 순서(0부터) */
+  itemIndex: number;
+  item: SalesConfirmItem;
+  kind: ItemKind;
+  /** '데스크탑#1' 꼴(종류 + 같은 종류 안 순서) */
+  slotKey: string;
+  slots: SalesSlot[];
+  /** 이 품목의 영업 요청이 칸을 채울 때와 달라짐(item_snapshot 비교) — 경고·[확인함] */
+  snapshotChanged: boolean;
+}
+
+/** 상세 화면 데이터(openSalesConfirm) */
+export interface SalesConfirmDetailData {
+  /** 저장된 payload 를 지금 normalize 로 다시 읽은 것 */
+  confirm: NormalizedSalesConfirm;
+  /** 영업 지역이 비어 주소로 추정했으면 그 값(화면 "(추정)") — 아니면 null */
+  regionGuess: string | null;
+  lines: SalesSlotLine[];
+  /** 영업에서 빠진 칸(갈 곳 없는 ④ 중 뭐라도 적은 것) */
+  orphans: SalesUnitRow[];
+  work: {
+    status: SalesConfirmStatus;
+    processors: string[];
+    startedAt: string | null;
+    finishedAt: string | null;
+    shippedAt: string | null;
+    note: string;
+    checks: Record<string, { at: string; by: string }>;
+    firstOpenedAt: string | null;
+    printedAt: string | null;
+    printedVer: number | null;
+    printedBy: string;
+    /** ③ updated_at — 없으면 null(아직 행 없음) */
+    updatedAt: string | null;
+  };
+  salesChanged: { fromVer: number; toVer: number } | null;
+  /** 영업에서 수정됨일 때 무엇이 바뀌었나(쉬운 말 목록, diff.ts — 마지막 확인한 판 ↔ 지금). 없으면 [] */
+  changes: string[];
+  payloadHash: string;
+  versionCount: number;
+  docUrl: string | null;
+  firstSeenAt: string;
+  changedAt: string | null;
+  fetchedAt: string;
+  /** 처리자 명단(it_prep_people) */
+  people: string[];
+  /** 출고 체크리스트 항목(it_prep_photo_items — 읽기만) */
+  checklist: { label: string; grp: string }[];
+  /** 같은 건으로 보이는 출고 준비 일정(읽기만, prepMatch) */
+  prepHints: { eventId: string; date: string; title: string; prepState: string; reportSent: boolean }[];
+  /** SQL 블록 A(④ extra·diff_ack, ③ printed_ver·printed_by) 실행 여부 — false 면 기기 칸 저장을 막고 "SQL 실행 필요" */
+  schemaReady: boolean;
+  /** 진행(장비·모니터·유지보수만 셈 — itemKind countsProgress) */
+  progress?: { filled: number; total: number };
+  /** 이 확인서 자산번호 중 다른 확인서 ④ 에도 있는 것: 자산번호 → 다른 확인서들(취소 건 제외, 최대 5) */
+  assetElsewhere?: Record<string, { confirmId: string; docNo: string; company: string }[]>;
+  /** 일부를 못 읽었을 때의 쉬운 말(처리자 명단·체크리스트·출고 준비 후보·같은 자산번호·판 비교) — 화면은 주황 한 줄씩(실패를 삼키지 않음) */
+  notices?: string[];
+}
+
+/** 기기 칸 저장 결과(saveSalesUnit·applyLineValues·ackUnitDiffs·moveOrphanUnit·deleteOrphanUnit) */
+export type SalesUnitSaveResult =
+  | { ok: true; units: SalesUnitRow[] }
+  /** 영업 요청과 다른데 확인(acks) 없음 → 저장 안 함, 화면이 확인 창을 띄움(서버도 같은 검사 — D27) */
+  | { ok: false; needAck: DiffItem[]; error: string }
+  /** updated_at 이 달라 저장 안 함 → 상세를 다시 읽음 */
+  | { ok: false; conflict: true; error: string }
+  /** SQL 블록 A 전 */
+  | { ok: false; needSql: true; error: string }
+  | { ok: false; error: string };
+
+/*
+ * 서버 액션 — app/confirm-form/salesDetailActions.ts (developer C):
+ *   openSalesConfirm(input: { id: string; actor: string }): Promise<{ ok: true; data: SalesConfirmDetailData } | { ok: false; notFound?: true; error: string }>
+ *       (처음 열람·seen_ver 채우기는 1단계 openSalesConfirmPreview 와 같은 규칙)
+ *   saveSalesUnit(input: { confirmId: string; slotKey: string; unitNo: number; unitId: string | null; expectedUpdatedAt: string | null;
+ *                          patch: { assetId?; serial?; actualMaker?; actualModel?; specOverride?: SalesSpec; note?; extra?: SalesUnitExtra;
+ *                                   checks?: { label: string; on: boolean }[] };
+ *                          acks: DiffItem[]; actor: string }): Promise<SalesUnitSaveResult>
+ *   applyLineValues(input: { confirmId; itemIndex; values: { specOverride?: SalesSpec; actualModel?: string; actualMaker?: string }; acks: DiffItem[]; actor })
+ *       : Promise<SalesUnitSaveResult>
+ *   ackUnitDiffs(input: { confirmId; unitId; acks: DiffItem[]; actor }): Promise<SalesUnitSaveResult>        ← "다시 확인 필요" [확인]
+ *   moveOrphanUnit(input: { confirmId; unitId; toSlotKey; toUnitNo; actor }) / deleteOrphanUnit(input: { confirmId; unitId; actor })
+ *       : Promise<SalesUnitSaveResult>
+ *   saveSalesWork(input: { confirmId; expectedUpdatedAt: string | null;
+ *                          patch: { status?; processors?; startedAt?; finishedAt?; shippedAt?; note?; checks?: { label: string; on: boolean }[] }; actor })
+ *       : Promise<SalesWorkSaveResult>
+ *   lookupSalesUnitAsset(input: { assetId: string; hint?: string; confirmId?: string })
+ *       : Promise<{ ok: true; maker: string; model: string; serials: string[]; specHint: string;
+ *                   dupes: { confirmId: string; docNo: string; company: string }[] }   // 다른 확인서 ④ 에 같은 자산번호(이 확인서 빼고)
+ *                 | { ok: false; error: string }>
+ *   ackSnapshot(input: { confirmId; itemIndex; actor }): Promise<SalesUnitSaveResult>   // "영업 품목이 바뀌었어요" [확인함] — 그 줄 칸들의 item_snapshot 을 지금 영업 품목으로
+ *   markSalesConfirmPrinted(input: { confirmId: string; ver: number; actor: string }): Promise<SalesWorkSaveResult>
+ *
+ * work.ts (developer C, server-only) — developer E 가 import:
+ *   ensureUnitRow(confirmId: string, slotKey: string, unitNo: number, actor: string): Promise<SalesUnitRow>   // ④ 행이 없으면 만듦(item_snapshot 포함)
+ *   readUnit(confirmId: string, unitId: string): Promise<{ unit: SalesUnitRow; kind: ItemKind; item: SalesConfirmItem | null } | null>
+ *   updateUnitExtra(unitId: string, extra: SalesUnitExtra, actor: string)   // 넘긴 칸만 extra 에 합치고 새 줄을 돌려줌 — ledgerPushed 기록(키 없음).
+ *       ※ ④ updated_at 이 바뀌므로 키 저장·대장 올리기 뒤 화면은 상세를 다시 읽어야 가짜 충돌이 안 남
+ */
+
+// ───────────────────────── 라이선스 키(developer E — §3-11, D28~D30) ─────────────────────────
+
+/** 칸 하나의 대장·키 상태(키 값은 잠금이 풀렸을 때만) */
+export interface UnitLicenseState {
+  unitId: string;
+  /** none = 대장에 아직 없음 · linked = 좌석 있음 · pending = 일반 칸이 바뀌어 대장 반영 대기 · changed = 대장에서 사람이 고침 · deleted = 대장에서 좌석이 지워짐 */
+  ledger: 'none' | 'linked' | 'pending' | 'changed' | 'deleted';
+  /** 대장에서 바뀐 칸 설명(예: "설치 PC: 대장 A0123") */
+  ledgerNote: string;
+  hasKey: boolean;
+  /** 잠금이 풀렸을 때만 값, 아니면 null */
+  key: string | null;
+}
+
+export interface ConfirmLicenseState {
+  unlocked: boolean;
+  /** 잠금이 풀려 있으면 남은 분 */
+  unlockMinutesLeft: number | null;
+  /** 이 확인서로 만든 대장 거래처 이름(없으면 null — 처음 키 저장 때 고름) */
+  clientName: string | null;
+  units: UnitLicenseState[];
+  /** 계약관리 SQL(블록 B — source 'sales_confirm') 전이면 true → 키 저장만 안내 */
+  needContractsSql: boolean;
+}
+
+/** 대장 거래처 고르기 */
+export type LedgerClientChoice =
+  | { type: 'existing'; clientId: string }
+  /** works 실시간 묶음(아직 저장 안 된 거래처) — 계약관리 ensureClient 규칙 */
+  | { type: 'works'; groupKey: string }
+  /** 상호('-현장명' 뗀 것)로 새 거래처 */
+  | { type: 'new'; name: string }
+  /** '미분류(영업 확인서에서)' */
+  | { type: 'unsorted' };
+
+export interface LedgerClientCandidate {
+  choice: LedgerClientChoice;
+  label: string;
+  recommended: boolean;
+}
+
+export type LicenseActionResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; needUnlock: true; error: string }
+  /** 이 확인서로 만든 거래처가 아직 없음 → 거래처 고르기 창 */
+  | { ok: false; needClient: true; candidates: LedgerClientCandidate[]; error: string }
+  | { ok: false; needContractsSql: true; error: string }
+  | { ok: false; error: string };
+
+/*
+ * 서버 액션 — app/confirm-form/salesLicenseActions.ts (developer E). 키·대장 쓰기는 전부 requireUnlock(있음 표시만 예외):
+ *   getConfirmLicenseState(input: { confirmId: string }): Promise<LicenseActionResult<ConfirmLicenseState>>   // 잠겨 있어도 ok(키 값만 null)
+ *   listLedgerClientCandidates(input: { confirmId: string }): Promise<LicenseActionResult<LedgerClientCandidate[]>>
+ *   saveUnitLicenseKey(input: { confirmId; slotKey; unitNo; unitId: string | null; key: string; client?: LedgerClientChoice; actor })
+ *       : Promise<LicenseActionResult<ConfirmLicenseState>>
+ *   saveLineLicenseKey(input: { confirmId; itemIndex; key: string; client?: LedgerClientChoice; actor })
+ *       : Promise<LicenseActionResult<ConfirmLicenseState>>                                           // [같은 키를 모든 칸에]
+ *   pushUnitsToLedger(input: { confirmId; unitIds?: string[]; client?: LedgerClientChoice; actor }): Promise<LicenseActionResult<ConfirmLicenseState>>
+ *   getSalesPrintKeys(input: { confirmId: string }): Promise<LicenseActionResult<Record<string, string>>>   // ④ id → 키, view_bulk 기록
+ * 잠금 해제는 계약관리 그대로 — app/contracts/secretActions.ts 의 해제 액션·components/contracts/PasswordGate.tsx(import 만, 안 고침).
+ */
+
+// ───────────────────────── 출력(developer D — §3-9, D15~D18·D21~D23·D25·D30) ─────────────────────────
+
+export interface SalesPrintOptions {
+  /** 2면(출고·설치 확인) 포함 — 기본 true(영업과 같게) */
+  withBack: boolean;
+  /** 출고 명세(대수별) 장 — 'auto' = 칸에 안 들어갈 때만, 'always' = 늘 */
+  attach: 'auto' | 'always';
+  /** 라이선스 키 — 'shown' = licenseKeys 의 값을 찍음, 'blank' = 그 자리 밑줄 빈칸 */
+  keys: 'shown' | 'blank';
+}
+
+export interface SalesPrintNote {
+  tone: 'info' | 'warn';
+  text: string;
+}
+
+/** printFill.ts buildSalesPrintHtml(input) 입력 — 화면(상세 데이터)에서 바로 만듦, 서버 안 부름(키만 따로) */
+export interface SalesPrintInput {
+  detail: SalesConfirmDetailData;
+  /** ④ id → 라이선스 키(잠금이 풀렸을 때 getSalesPrintKeys 로 받은 것 — 출력 창 메모리에만) */
+  licenseKeys: Record<string, string>;
+  options: SalesPrintOptions;
+  /** 넘침 신호(P6ⓑ)를 받은 품목 줄(itemIndex) — 그 줄은 "출고 명세 참조"로 돌림 */
+  overflowItems?: number[];
+  nowIso: string;
+  /** 이미지 절대 주소용(location.origin) */
+  origin: string;
+  /** 출력하는 사람(꼬리 "IT 기재") */
+  actor: string;
+}
+
+export interface SalesPrintResult {
+  /** iframe srcDoc 에 그대로 — 완성된 HTML 문서 한 장(영업 양식). blocked 면 '' */
+  html: string;
+  notes: SalesPrintNote[];
+  /** 출력을 막는 이유(예: 교체·유지보수 확인서 — 영업 최신 양식 받기 전, D24) — 없으면 null */
+  blocked: string | null;
+  /** 출고 명세 장을 붙였는지 */
+  attached: boolean;
+}

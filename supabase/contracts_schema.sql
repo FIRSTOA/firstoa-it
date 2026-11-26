@@ -1,5 +1,6 @@
 -- ==================================================================
 -- 계약 관리 1단계 — 소프트웨어 계약 표 6개 (2026-11-20, 같은 날 D13 으로 고침)
+-- 2+3단계 블록 B 추가(2026-11-26) — 맨 끝 블록(상품·좌석 출처 source 에 'sales_confirm'). 이미 실행한 DB 는 그 블록만 실행.
 --
 -- 목적: /contracts 화면(소프트웨어 계약)이 쓰는 우리 기록.
 --       거래처 목록 자체는 화면을 열 때마다 firstoa-works 에서 읽고(여기 저장 안 함),
@@ -127,10 +128,12 @@ create table if not exists public.it_sw_contracts (
                     check (status in ('사용중', '해지', '만료', '보류')),
   memo              text not null default '',
 
+  -- 출처: app(화면에서 만듦) · sheet_renew/sheet_perm(SW자산 시트 옮기기) · sales_confirm(영업 확인서 라이선스 키 — 2+3단계, 맨 끝 블록 B)
   source            text not null default 'app'
                     constraint it_sw_contracts_source_check
-                    check (source in ('app', 'sheet_renew', 'sheet_perm')),
+                    check (source in ('app', 'sheet_renew', 'sheet_perm', 'sales_confirm')),
   -- 시트 옮기기 중복 방지 열쇠. 앱에서 만든 상품은 null(빈 글자 '' 금지 — 둘째 상품부터 겹치므로).
+  -- 영업 확인서에서 올라온 상품(source 'sales_confirm')은 'sales_confirm:<확인서 id>:<제품명 정규화>'.
   -- 일반 unique(부분 인덱스 아님) → upsert onConflict 'source_key' 대상. null 끼리는 안 겹침.
   source_key        text
                     constraint it_sw_contracts_source_key_key unique
@@ -177,10 +180,13 @@ create table if not exists public.it_sw_seats (
                   check (status in ('사용중', '미배정', '회수', '해지', '만료')),
   memo            text not null default '',
 
+  -- 출처: app · sheet_renew/sheet_perm · sales_confirm(영업 확인서 소프트웨어 칸 하나 = 좌석 하나 — 2+3단계, 맨 끝 블록 B)
   source          text not null default 'app'
                   constraint it_sw_seats_source_check
-                  check (source in ('app', 'sheet_renew', 'sheet_perm')),
+                  check (source in ('app', 'sheet_renew', 'sheet_perm', 'sales_confirm')),
   -- 시트 옮기기 중복 방지 열쇠 'perm:<시트 행번호>' / 'renew:<시트 행번호>'. 앱에서 만든 좌석은 null('' 금지).
+  -- 영업 확인서에서 올라온 좌석(source 'sales_confirm')은 'sales_confirm_unit:<it_sales_confirm_units.id>'
+  -- (확인서 칸 id 는 칸을 옮겨도 안 바뀜 — 같은 좌석 유지). 라이선스 키는 이 표가 아니라 아래 ④ it_contract_secrets(seat_id, 'license_key').
   source_key      text
                   constraint it_sw_seats_source_key_key unique
                   constraint it_sw_seats_source_key_not_blank
@@ -377,5 +383,90 @@ comment on table public.it_sw_seats            is '계약 관리 — 라이선�
 comment on table public.it_contract_secrets    is '계약 관리 — 비밀 칸 값(서버 전용, 화면은 소프트웨어 탭 비밀번호로). lib/contracts/secrets.ts 만 읽고 씀';
 comment on table public.it_contract_secret_log is '계약 관리 — 잠금 해제·비밀 칸 수정·인증 기록(값 없음)';
 comment on table public.it_contract_settings   is '계약 관리 — 소프트웨어 탭 비밀번호 해시·쿠키 서명 값(평문 비밀번호 없음)';
+
+notify pgrst, 'reload schema';
+
+
+-- ==================================================================
+-- 2+3단계 블록 B (2026-11-26) — 상품·좌석 출처(source)에 'sales_confirm' 추가
+--
+-- ※ 위를 이미 실행한 DB 는 **이 블록만** 복사해서 SQL Editor 에서 실행하세요.
+--   파일 전체를 다시 실행해도 결과는 같습니다. 위쪽 create table 의 CHECK 목록도 같이 고쳤지만
+--   이미 있는 표에는 if not exists 라 안 돎 → 기존 DB 의 검사는 이 블록이 바꿈.
+--   앱 2+3단계 배포 전에 실행.
+--
+-- 왜(설계 D28·§3-11): 영업 확인서 상세에서 넣은 라이선스 키가 거래처 소프트웨어 대장(계약관리)에도 쌓이게.
+--   확인서 소프트웨어 품목(제품) = 상품 한 줄, 소프트웨어 칸 하나 = 좌석 한 줄.
+--   중복 막는 열쇠 = source 'sales_confirm' + source_key(위의 unique 그대로 — 새 색인 없음):
+--     상품 'sales_confirm:<확인서 id>:<제품명 정규화>'
+--     좌석 'sales_confirm_unit:<it_sales_confirm_units.id>'
+--
+-- 무엇: it_sw_contracts_source_check · it_sw_seats_source_check 를 같은 이름으로 다시 만듦(값 목록만 넓힘).
+--   DO 블록 하나 = 한 트랜잭션 → 지우고 다시 만드는 사이에 검사 없는 틈이 없고, 중간에 실패하면 전부 원래대로.
+--   값을 넓히기만 하므로 기존 줄은 전부 통과. 여러 번 실행해도 같은 결과.
+--
+-- 안 바꾸는 것: 비밀 칸·기록 표(it_contract_secrets·it_contract_secret_log), 다른 칸·검사, RLS·revoke(위 그대로).
+--   데이터를 바꾸는 문장 없음. 라이선스 키는 지금처럼 it_contract_secrets(좌석 seat_id, field 'license_key')에만 —
+--   상품·좌석 칸(source_raw·memo 포함)과 영업 확인서 표에는 넣지 않음.
+--
+-- 실행 전 앱: 대장 상품·좌석 만들기가 23514(위 두 검사 이름)로 거절 → 키 저장만 "계약관리 SQL 추가 블록을 실행해 주세요"
+--   (확인서 일반 칸은 저장됨 — 설계 §3-2 "SQL 전 동작").
+--
+-- 되돌리기(롤백) — 앱을 먼저 2+3단계 전으로 되돌린 뒤에:
+--   1) 영업 확인서에서 올라온 줄이 있는지 먼저 봄:
+--        select 'it_sw_contracts' as tbl, count(*) from public.it_sw_contracts where source = 'sales_confirm'
+--        union all
+--        select 'it_sw_seats',            count(*) from public.it_sw_seats     where source = 'sales_confirm';
+--   2) 둘 다 0 일 때만 아래로 되돌림(0 이 아니면 스스로 멈추고 아무것도 안 바꿈):
+--        do $$
+--        begin
+--          if exists (select 1 from public.it_sw_contracts where source = 'sales_confirm')
+--             or exists (select 1 from public.it_sw_seats where source = 'sales_confirm') then
+--            raise exception '영업 확인서에서 올라온 상품·좌석이 있어 되돌리지 않았어요 — 3) 을 먼저 하세요.';
+--          end if;
+--          alter table public.it_sw_contracts drop constraint if exists it_sw_contracts_source_check;
+--          alter table public.it_sw_contracts add constraint it_sw_contracts_source_check
+--            check (source in ('app', 'sheet_renew', 'sheet_perm'));
+--          alter table public.it_sw_seats drop constraint if exists it_sw_seats_source_check;
+--          alter table public.it_sw_seats add constraint it_sw_seats_source_check
+--            check (source in ('app', 'sheet_renew', 'sheet_perm'));
+--        end
+--        $$;
+--        notify pgrst, 'reload schema';
+--   3) 0 이 아니면 둘 중 하나를 먼저:
+--      (가 — 추천, 키·좌석 유지) 출처만 'app' 으로(source_key 는 그대로 — 다시 적용하면 같은 줄을 찾음):
+--        update public.it_sw_seats     set source = 'app' where source = 'sales_confirm';
+--        update public.it_sw_contracts set source = 'app' where source = 'sales_confirm';
+--      (나) 그 줄을 지우기 — !! 좌석을 지우면 그 좌석의 라이선스 키(it_contract_secrets)도 cascade 로 영구히 사라집니다.
+--           상품은 좌석을 먼저 지워야 지워짐(restrict). 지우기 전에 계약관리 화면에서 키를 옮겨 두세요. !!
+--      그다음 1) → 2).
+--   (위쪽 create table 의 CHECK 목록도 옛 목록으로 돌려 둘 것 — 새 DB 용.)
+-- ==================================================================
+do $$
+begin
+  -- 먼저 있어야 하는 표 확인(위 SQL 전이면 아무것도 안 바꾸고 멈춤 — 쉬운 말로)
+  if to_regclass('public.it_sw_contracts') is null or to_regclass('public.it_sw_seats') is null then
+    raise exception '계약관리 표가 없어요 — supabase/contracts_schema.sql 파일 전체를 먼저 실행해 주세요.';
+  end if;
+
+  alter table public.it_sw_contracts drop constraint if exists it_sw_contracts_source_check;
+  alter table public.it_sw_contracts add constraint it_sw_contracts_source_check
+    check (source in ('app', 'sheet_renew', 'sheet_perm', 'sales_confirm'));
+
+  alter table public.it_sw_seats drop constraint if exists it_sw_seats_source_check;
+  alter table public.it_sw_seats add constraint it_sw_seats_source_check
+    check (source in ('app', 'sheet_renew', 'sheet_perm', 'sales_confirm'));
+
+  -- 다른 이름의 출처 검사가 남아 있으면(이 파일 밖에서 만든 것) 'sales_confirm' 이 여전히 막힘 → 바꾼 것까지 되돌리고 알림.
+  -- (\msource\M = 'source' 낱말만 — source_key·source_raw 검사는 해당 없음)
+  if exists (select 1 from pg_constraint c
+             where c.conrelid in ('public.it_sw_contracts'::regclass, 'public.it_sw_seats'::regclass)
+               and c.contype = 'c'
+               and c.conname not in ('it_sw_contracts_source_check', 'it_sw_seats_source_check')
+               and pg_get_constraintdef(c.oid) ~ '\msource\M') then
+    raise exception '상품·좌석 표에 다른 이름의 출처(source) 검사가 있어요 — 아무것도 바꾸지 않았어요. 팀장에게 알려 주세요.';
+  end if;
+end
+$$;
 
 notify pgrst, 'reload schema';

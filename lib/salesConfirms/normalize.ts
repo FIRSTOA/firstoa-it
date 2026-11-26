@@ -8,6 +8,7 @@ import type {
   SalesConfirmContacts,
   SalesConfirmItem,
   SalesConfirmSupply,
+  SalesPrintExtra,
   SalesSpec,
   SalesSpecKey,
 } from './types';
@@ -218,6 +219,53 @@ function specExtraOf(v: unknown): Record<string, string> {
   return out;
 }
 
+// ───────── 출력용 칸(2+3단계, developer D) — 영업 가져오기에 아직 없는 칸. hash(원문 기준)와는 무관 ─────────
+// null = 응답에 칸이 없음(안 옴 → 종이에 빈칸, 가짜 ₩0·자동 체크 안 찍음 — D17), '' = 영업이 비워서 보냄(영업 출력과 같게)
+
+/** 출력용 글자 칸: 없거나 null → null, 글자 → 앞뒤 공백 뗀 값, 숫자 → 글자, 그 밖(객체 등) → '' */
+function printStr(o: Record<string, unknown>, k: string): string | null {
+  if (!(k in o)) return null;
+  const v = o[k];
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '';
+  return '';
+}
+
+/** 품목 월 렌탈료: 없거나 null → null, 숫자 → 그대로, 글자 → 영업 양식처럼 숫자만 읽음(못 읽으면 0 — 영업 출력도 ₩0) */
+function rentOf(o: Record<string, unknown>): number | null {
+  if (!('rent' in o)) return null;
+  const v = o.rent;
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'string') {
+    const n = Number(v.replace(/[^\d.-]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  }
+  return null;
+}
+
+/** 확인서 1면 계약·청구 요약 칸. 팩스·계산서메일·계약서메일은 연락처 묶음(contacts) 안에 올 수도 있어 거기도 봄 */
+function printOf(raw: Record<string, unknown>): SalesPrintExtra {
+  const contacts = isObj(raw.contacts) ? raw.contacts : {};
+  const top = (k: string) => printStr(raw, k);
+  const either = (k: string) => top(k) ?? printStr(contacts, k);
+  const orderDate = top('orderDate');
+  return {
+    kind: top('kind'),
+    months: top('months'),
+    deposit: top('deposit'),
+    payNote: top('payNote'),
+    extra: top('extra'),
+    orderDate: orderDate ? (toDate(orderDate) ?? orderDate) : orderDate,
+    industry: top('industry'),
+    statusNo: top('statusNo'),
+    fax: either('fax'),
+    taxMail: either('taxMail'),
+    contractMail: either('contractMail'),
+  };
+}
+
 function itemOf(v: unknown): SalesConfirmItem | null {
   if (!isObj(v)) return null;
   const extra = specExtraOf(v.spec);
@@ -230,12 +278,13 @@ function itemOf(v: unknown): SalesConfirmItem | null {
     spec: specOf(v.spec),
     ...(Object.keys(extra).length ? { specExtra: extra } : {}),
     place: str(v.place),
+    rent: rentOf(v),
   };
 }
 
 function supplyOf(v: unknown): SalesConfirmSupply | null {
   if (!isObj(v)) return null;
-  return { name: str(v.name), qty: qtyOf(v.qty), charge: str(v.charge), note: str(v.note) };
+  return { name: str(v.name), qty: qtyOf(v.qty), charge: str(v.charge), note: str(v.note), price: printStr(v, 'price') };
 }
 
 function contactsOf(v: unknown): SalesConfirmContacts {
@@ -299,6 +348,7 @@ export function normalizeSalesConfirm(raw: unknown): NormalizeResult {
       inflow: str(raw.inflow),
       leaseNo: str(raw.leaseNo),
       reason: str(raw.reason),
+      print: printOf(raw),
     },
   };
 }

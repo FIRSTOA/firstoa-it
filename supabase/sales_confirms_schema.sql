@@ -1,5 +1,6 @@
 -- ==================================================================
 -- 영업 확인서 가져오기 — 표 5개 (2026-11-26)
+-- 2+3단계 블록 A 추가(2026-11-26) — 맨 끝 블록(④ extra·diff_ack, ③ printed_ver·printed_by). 1단계를 이미 실행했으면 그 블록만 실행.
 --
 -- 목적: 영업 웹앱 읽기 전용 API(it-confirms)에서 받은 IT 확인서를 '확인서/출고및반출준비'(/confirm-form)
 --       기본 목록으로 보여 주고, IT가 건마다 처리여부·기기 칸(자산번호·시리얼·사양 수정·체크)을 적는 표.
@@ -323,5 +324,93 @@ comment on table public.it_sales_import_state     is '영업 확인서 — 가�
 comment on column public.it_sales_confirms.payload        is '영업 원문 전체(연락처·주소 포함) — 로그·오류 문구·라우트 응답에 넣지 말 것';
 comment on column public.it_sales_confirms.first_saved_at is '처음 본 버전의 savedAt = 목록 접수일시';
 comment on column public.it_sales_confirm_work.prep_event_id is '4단계용(출고 준비 일정 연결) — 1~3단계 코드는 안 씀';
+
+notify pgrst, 'reload schema';
+
+
+-- ==================================================================
+-- 2+3단계 블록 A (2026-11-26) — ④ 기기 칸 종류별 값·차이 확인 기록, ③ 출력 기록
+--
+-- ※ 위(1단계)를 이미 실행한 DB 는 **이 블록만** 복사해서 SQL Editor 에서 실행하세요.
+--   파일 전체를 다시 실행해도 결과는 같습니다(위쪽은 전부 if not exists·on conflict do nothing).
+--   앱 2+3단계 배포 전에 실행. 실행 전에도 앱은 열림 — 상세는 보이고 기기 칸 저장만 "SQL 실행 필요",
+--   출력은 되고 기록은 printed_at 만(설계 §3-2 "SQL 전 동작").
+--
+-- 무엇(칸 이름·모양 = lib/salesConfirms/types.ts SalesUnitRow·SalesUnitExtra·DiffAckMap·SalesConfirmDetailData.work):
+--   ④ it_sales_confirm_units
+--      extra       jsonb not null default '{}' — 품목 종류별 칸. 소프트웨어 = { pc: 설치 PC 자산번호, user: 사용자,
+--                  ledgerPushed: { product, pc, user, at } }(지난번 대장 좌석에 올린 값 — 대장에서 사람이 고친 칸을
+--                  안 덮기 위한 비교용, 설계 §3-11). 다른 종류는 지금 비어 있음('{}').
+--      diff_ack    jsonb not null default '{}' — 영업 요청과 다른 칸을 확인한 기록(D27).
+--                  { 'maker' | 'model' | 'spec:<사양 칸>'(예 'spec:RAM'): { sales, actual, at, by } }
+--                  지금의 (영업 값, 출고 값) 쌍이 기록과 같을 때만 "확인됨" — 다르면 화면·서버가 다시 물음.
+--   ③ it_sales_confirm_work
+--      printed_ver integer null            — 마지막으로 출력한 영업 판(ver). 출력 전이면 null(D25).
+--      printed_by  text not null default '' — 출력한 사람(열 때 적은 이름). printed_at 은 1단계에 이미 있음.
+--
+-- !! 라이선스 키는 이 표들(①~⑤) 어디에도 넣지 않습니다 — extra·diff_ack·note·item_snapshot·checks 포함.
+--    키는 계약관리 잠긴 비밀 칸(it_contract_secrets, lib/contracts/secrets.ts 한 파일)에만 저장(D28·D29). !!
+--
+-- 권한: 위 표 단위 RLS·revoke 그대로 — 새 칸도 서버(관리자 키)만 읽고 씀. 정책·grant 없음.
+-- 데이터를 바꾸는 문장 없음(기존 줄은 기본값 '{}'·null·'' 로 채워짐 — 기존 칸은 안 건드림).
+-- 여러 번 실행해도 안전: add column if not exists, 검사(제약)는 이름 고정 + 이미 있으면 건너뜀.
+--
+-- 되돌리기(롤백) — 앱을 먼저 2+3단계 전으로 되돌린 뒤에(앱이 남아 있으면 기기 칸 저장이 "SQL 실행 필요"로 막힘):
+--   !! 지우면 영구히 사라집니다:
+--      diff_ack = 누가 언제 어느 칸의 차이(영업 요청 → 출고 값)를 확인했는지,
+--      extra    = 소프트웨어 칸의 설치 PC·사용자와 대장 비교값(ledgerPushed — 지우면 다음 대장 반영 때
+--                 대장에서 사람이 고친 칸을 구별 못 함),
+--      printed_ver·printed_by = 출력 기록("출력 뒤 바뀜 — 다시 뽑기" 판단이 사라짐).
+--      데이터가 있으면 먼저 Table Editor 에서 it_sales_confirm_units·it_sales_confirm_work 를 CSV 로 내보내 두세요.
+--      칸을 지우면 그 칸의 검사(_is_object 제약)도 같이 지워집니다. !!
+--   alter table public.it_sales_confirm_units drop column if exists diff_ack, drop column if exists extra;
+--   alter table public.it_sales_confirm_work  drop column if exists printed_ver, drop column if exists printed_by;
+--   notify pgrst, 'reload schema';
+-- ==================================================================
+
+-- 먼저 있어야 하는 표 확인(1단계 SQL 전이면 아무것도 안 바꾸고 멈춤 — 쉬운 말로)
+do $$
+begin
+  if to_regclass('public.it_sales_confirm_units') is null
+     or to_regclass('public.it_sales_confirm_work') is null then
+    raise exception '영업 확인서 표가 없어요 — supabase/sales_confirms_schema.sql 파일 전체를 먼저 실행해 주세요.';
+  end if;
+end
+$$;
+
+-- ④ 기기 칸: 종류별 칸 · 차이 확인 기록
+alter table public.it_sales_confirm_units
+  add column if not exists extra    jsonb not null default '{}'::jsonb,
+  add column if not exists diff_ack jsonb not null default '{}'::jsonb;
+
+-- ③ IT 처리: 출력 기록(판·사람)
+alter table public.it_sales_confirm_work
+  add column if not exists printed_ver integer,
+  add column if not exists printed_by  text not null default '';
+
+-- ④ 두 칸은 객체({…})만(1단계 checks·spec_override 와 같은 꼴). 이름 고정 — 이미 있으면 건너뜀.
+do $$
+begin
+  if not exists (select 1 from pg_constraint
+                 where conrelid = 'public.it_sales_confirm_units'::regclass
+                   and conname  = 'it_sales_confirm_units_extra_is_object') then
+    alter table public.it_sales_confirm_units
+      add constraint it_sales_confirm_units_extra_is_object check (jsonb_typeof(extra) = 'object');
+  end if;
+
+  if not exists (select 1 from pg_constraint
+                 where conrelid = 'public.it_sales_confirm_units'::regclass
+                   and conname  = 'it_sales_confirm_units_diff_ack_is_object') then
+    alter table public.it_sales_confirm_units
+      add constraint it_sales_confirm_units_diff_ack_is_object check (jsonb_typeof(diff_ack) = 'object');
+  end if;
+end
+$$;
+
+-- 칸 설명(Supabase Table Editor 에 보임)
+comment on column public.it_sales_confirm_units.extra       is '종류별 칸(소프트웨어: pc·user·ledgerPushed) — 라이선스 키는 절대 넣지 않음(키는 it_contract_secrets 에만)';
+comment on column public.it_sales_confirm_units.diff_ack    is '영업 요청과 다른 칸 확인 기록 {maker|model|spec:<칸>: {sales, actual, at, by}} — 지금 쌍과 같을 때만 확인됨(D27)';
+comment on column public.it_sales_confirm_work.printed_ver  is '마지막으로 출력한 영업 판(ver) — 출력 전 null(D25)';
+comment on column public.it_sales_confirm_work.printed_by   is '마지막으로 출력한 사람(D25)';
 
 notify pgrst, 'reload schema';

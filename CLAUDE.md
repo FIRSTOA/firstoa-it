@@ -126,7 +126,7 @@
 
 ## 영업 확인서 가져오기 (/confirm-form 기본 보기) — 2026-11-26, 1단계(목록)
 
-설계 `docs/tasks/2026-11-26-sales-confirm-import.md`(맨 위 D1~D14 우선). 영업이 확인서를 영업 웹앱(firstoa-smart-sales-os)에서 만들게 되어
+설계 `docs/tasks/2026-11-26-sales-confirm-import.md`(맨 위 D1~D30 우선). 영업이 확인서를 영업 웹앱(firstoa-smart-sales-os)에서 만들게 되어
 'IT확인서리스트' 시트 방식이 끊김 → 이 메뉴 기본 보기가 영업 확인서 목록. 1 목록 → 2 상세(자산번호·시리얼·사양·체크) → 3 출력, 단계마다 사용자 확인. 4단계 = 출고 준비 리스트와 합치기(따로 설계).
 - **사용자 결정**: 영업은 IT 값을 안 봄 → 영업 쪽 되돌려 쓰기 없음(D4). 연락처·주소는 **지금은 안 잠금**(D7, 지침의 "로그인한 사람만"과 다름 —
   로그인 붙일 때 `/confirm-form`(목록·미리보기·인쇄)과 `/dispatch`(연락처)를 같이 막을 것). 새 메뉴 없음 — 주소 `/confirm-form` 그대로,
@@ -153,6 +153,33 @@
 - 시트와 비교(`sheetCompare.ts`): 켰을 때만 IT확인서리스트 batchGet 1회, **연락처 N칸은 읽지 않음**, 쓰기 0. 처리여부 대응은 `sheetMatch.ts` `statusSame` 한 곳.
 - 상세 주소(2단계) = `salesConfirmHref(id)` 로만(encodeURIComponent). `app/confirm-form/` 아래 정적 하위 폴더 만들지 말 것(id 를 가림).
 - docUrl 은 `safeDocUrl`(https + 영업 웹앱 호스트만). 로그·오류 문구·⑤·라우트 응답에 payload·연락처 금지.
+  Supabase 오류의 `details`("Failing row contains (…)")에는 행 값이 통째로 들어가므로 **로그·응답엔 code 만**.
+
+### 2+3단계 — 상세(/confirm-form/[id]) + 영업 양식 그대로 출력 (2026-11-26, 결정 D15~D30)
+- **사용자 결정**: 기기마다 **제조사·모델명·자산번호·시리얼·출고사양**(이 순서). 종이엔 영업 값 그대로 + 출고 값 **덧붙임**("요청 8GB → 출고 16GB").
+  영업 요청과 다르면 저장할 때 **닫을 수 없는 확인 창**(서버도 같은 검사 — acks 없으면 `needAck`). 유지보수도 **대마다**.
+  라이선스 키는 **적음** — 입력은 확인서, 저장·보기는 계약관리 잠금 칸(넣을 때도 비밀번호), **종이에도 찍음**.
+  출력은 **영업 웹앱 확인서 양식 그대로**(회색 빈칸 채움). 교체·유지보수 출력은 영업 최신 양식을 받은 뒤(지금은 blocked, 입력은 됨).
+- **품목 종류**(`itemKind.ts`): 유지보수(PC유지보수 포함) → 소프트웨어 → 모니터 → 장비 → 기타. 칸 계산은 `slots.ts` 한 곳(목록 진행 m 도) —
+  유지보수·소프트웨어는 수량 0이면 1칸. 칸 열쇠 = `<품목구분>#n` + unit_no. 갈 곳 없는 칸(IT가 뭐라도 적은 것)은 "영업에서 빠진 칸"으로 남김(자동 삭제 없음).
+- **같다고 보는 기준**(`specCompare.ts`): 공백·대소문자·하이픈 무시, 용량 16GB=16G=16·1TB=1000GB=1024GB, 애매하면 다름. diff_ack 는 칸마다 (영업, 출고) 쌍 —
+  쌍이 바뀌면 다시 확인. 출고 값을 안 바꾸는 저장(자산번호·시리얼·체크만)은 막지 않음(창고 핸드폰 체크가 안 막히게).
+- **양식 사본**: `lib/salesConfirms/salesForm/confirm.ts`(영업 lib/confirm.ts 그대로) · `confirmDoc.ts`(영업 lib/confirmDoc.ts + `[IT 바꿈 P1~P6]`) · `public/confirm/rabbit.png`.
+  **fill 없이 그리면 영업 원본과 글자까지 같아야 함.** P1 품목 줄(사양 덧붙임·회색 칸) · P2 안 온 돈·계약서 칸은 ₩0·자동 체크 대신 빈칸 ·
+  P3 출고 명세(대수별) 장 · P4 2면 출고 준비자·출고일 · P5 꼬리 "IT 기재" · P6 신호 스크립트.
+  **영업 새 판 받는 법**: 두 파일을 통째로 바꾸고(머리 주석만 새 커밋으로) P1~P6 다시 적용 → "사본 정확" 비교 → 교체 양식 회색 칸 자리 정하고 blocked 풂.
+  채우기 규칙은 `printFill.ts` `buildSalesPrintHtml`(순수, 화면에서 바로). 출력 창은 `iframe srcDoc` + `sandbox="allow-scripts allow-modals"`
+  (**allow-same-origin 넣지 말 것**), 신호는 `{source:'sales-confirm', type:'sales-confirm:print|overflow|size'}` postMessage.
+- **영업 가져오기에 아직 없는 칸**: 계약·금액(months·deposit·payNote·extra·orderDate·industry·statusNo·fax·taxMail·contractMail·kind·items[].rent·supplies[].price) —
+  normalize 가 `print`(안 오면 null)로 읽음. 영업 쪽에 추가·소프트웨어 포함·최신 양식 GitHub push·취소 표시를 요청함(사용자가 전달, 답 대기).
+- **라이선스 키**(`lib/contracts/salesConfirmLink.ts` — 계약관리 쪽 유일한 새 파일, 기존 contracts 파일은 import 만): 확인서 소프트웨어 칸 하나 = 좌석 하나.
+  거래처 → 상품(`source='sales_confirm'`, `source_key='sales_confirm:<확인서id>:<제품명 정규화>'`) → 좌석(`'sales_confirm_unit:<④ id>'`) → 키(`writeSecret`).
+  키 넣기·보기·대장 쓰기는 전부 `requireUnlock`. 대장에서 사람이 고친 칸은 ④ `extra.ledgerPushed` 와 비교해 안 덮음. 키 값은 ③④·로그·localStorage 어디에도 없음.
+  키 저장·대장 올리기는 ④ updated_at 을 바꾸므로 화면은 그 뒤 상세를 다시 읽음.
+- **출고 준비 일정 시간 = 지역**(사용자 설명): 09:00 수도권A · 12:00 B · 15:00 C · 18:00 D · 21:00 E(`regionSlot.ts`, 정각 외 = 모름).
+  상세의 "같은 건으로 보이는 출고 준비 일정"(`prepMatch.ts`)은 상호·±3일·구분 + 지역(둘 다 있을 때) — 읽기만, 연결 저장은 4단계.
+- **SQL**: `sales_confirms_schema.sql` 맨 끝 블록 A(④ extra·diff_ack, ③ printed_ver·printed_by), `contracts_schema.sql` 맨 끝 블록 B(source 에 'sales_confirm').
+  블록 A 전 판정 = 42703/PGRST204 + 칸 이름, 블록 B 전 = 23514 + `it_sw_*_source_check`(좁게). `select('*')` 는 없는 칸에 오류를 안 내니 판정엔 칸 이름을 적어서.
 
 ## 확인서 출고 기재 (/confirm-form?view=legacy 첫 탭 — 예전 방식) — 2026-11-18
 

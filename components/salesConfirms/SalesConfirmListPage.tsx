@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MobileFilterRows from '@/components/MobileFilterRows';
 import {
@@ -12,6 +13,7 @@ import {
   SALES_CONFIRM_ACTOR_KEY,
   SALES_CONFIRM_DONE_STATUSES,
   SALES_CONFIRM_STATUSES,
+  salesConfirmHref,
   type SalesConfirmListData,
   type SalesConfirmListResult,
   type SalesConfirmListRow,
@@ -23,7 +25,6 @@ import {
 } from '@/lib/salesConfirms/types';
 import { addDays, digitsOnly, fmtDate, kstToday, weekRange } from './format';
 import ImportStatusBar from './ImportStatusBar';
-import SalesConfirmPreview from './SalesConfirmPreview';
 import SalesConfirmTable, { type SheetColumnState } from './SalesConfirmTable';
 
 const INTERVAL_MS = 3 * 60 * 1000;
@@ -88,6 +89,7 @@ function matchSearch(row: SalesConfirmListRow, q: string): boolean {
  * 영업 웹앱이 안 돼도 저장된 목록은 그대로 보임(띠에만 이유).
  */
 export default function SalesConfirmListPage({ initial }: { initial: SalesConfirmListResult }) {
+  const router = useRouter();
   const initialError = initial.ok ? '' : 'error' in initial ? initial.error : '영업 확인서 표가 아직 없어요.';
   const [rows, setRows] = useState<SalesConfirmListRow[]>(initial.ok ? initial.data.rows : []);
   const [meta, setMeta] = useState<Meta>({
@@ -120,9 +122,8 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   const [sheet, setSheet] = useState<SheetColumnState>({ state: 'idle' });
   const [sheetOnly, setSheetOnly] = useState<SheetOnlyRow[]>([]);
 
-  // 줄 저장·미리보기·이름·알림
+  // 줄 저장·이름·알림
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
-  const [previewId, setPreviewId] = useState<string | null>(null);
   const [actor, setActor] = useState('');
   const [nameAsk, setNameAsk] = useState<{ initial: string; resolve: (v: string | null) => void } | null>(null);
   const [nameDraft, setNameDraft] = useState('');
@@ -440,26 +441,6 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     }
   }
 
-  // ───────── 미리보기 ─────────
-  const closePreview = useCallback((id: string) => {
-    setPreviewId(null);
-    patchRow(id, { isNew: false });
-  }, [patchRow]);
-
-  const onPreviewLoaded = useCallback(
-    (id: string, info: { workUpdatedAt: string | null; status: SalesConfirmStatus; processors: string[]; note: string }) => {
-      patchRow(id, { workUpdatedAt: info.workUpdatedAt, status: info.status, processors: info.processors, note: info.note });
-    },
-    [patchRow],
-  );
-
-  const onPreviewAcknowledged = useCallback(
-    (id: string, workUpdatedAt: string) => {
-      patchRow(id, { salesChanged: null, workUpdatedAt });
-    },
-    [patchRow],
-  );
-
   // ───────── 띠에 보여 줄 오류(방금 결과가 있으면 그것, 없으면 저장돼 있던 상태) ─────────
   let barCode = liveRun ? liveRun.errorCode : (meta.importState?.lastErrorCode ?? null);
   let barError = liveRun ? liveRun.error : (meta.importState?.lastError ?? '');
@@ -633,7 +614,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 showSheet={showSheet}
                 sheet={sheet}
                 busyIds={busyIds}
-                onOpen={(r) => setPreviewId(r.id)}
+                onOpen={(r) => router.push(salesConfirmHref(r.id))}
                 onStatus={(r, s) => void onStatus(r, s)}
                 onProcessors={(r, list) => void onProcessors(r, list)}
               />
@@ -701,18 +682,6 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
             </details>
           )}
         </>
-      )}
-
-      {previewId && (
-        <SalesConfirmPreview
-          key={previewId}
-          id={previewId}
-          actor={actor}
-          ensureActor={ensureActor}
-          onClose={closePreview}
-          onLoaded={onPreviewLoaded}
-          onAcknowledged={onPreviewAcknowledged}
-        />
       )}
 
       {nameAsk && (
