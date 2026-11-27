@@ -9,6 +9,8 @@
  *     소프트웨어: 제조사·제품명·설치 PC(자산번호 칸)·"키 …"(시리얼 칸 — keys 'shown' 일 때만, E16)
  *     요청과 다른 칸만 강조(같음 판정 = specCompare — D27 확인 창과 같은 기준), 출고 사양은 다른 토막만(E14)
  *     E15: 자산번호나 시리얼(소프트웨어는 설치 PC나 키)을 적은 기기의 빈 제조사·모델명 = 영업 요청 값, 빈 출고 사양 = '요청과 같음'
+ *     출고 사양 칸: 칸별 출고 값(spec_override)이 없고 표의 '사양' 칸 글자(④ extra.specText — specLine.ts)가 있으면 그 글자 그대로(강조 없음).
+ *       모니터·기타·사양 칸 없는 장비도 specText 가 있으면 출고 사양 칸에(2026-11-27 예전 방식 표 — 없으면 예전처럼 빈칸).
  *     `＋ 줄 추가`한 칸(SalesSlot.added — 2026-11-27 사용자 결정): 영업 종이엔 그 줄이 없음 → cells 에 안 넣고(missing 아님)
  *     extraSheet('추가 출고 기기' 장 — 순·품목·제조사·모델명·자산번호·S/N·출고 사양, 품목 순 → 칸 번호 순)로. 출고 사양은 요청 값에 고친 칸을 덮은 한 줄(장만 따로 보므로).
  *   교체(swap) — 교체 후 열(E19): after-sn·after-asset·after-maker·after-model 은 비었으면 IT 값, 다르면 칸 아래 "출고 ○○",
@@ -115,6 +117,10 @@ function mergeParts(parts: SalesFillPart[]): SalesFillPart[] {
 }
 
 const specOf = (s: SalesSpec | null | undefined, k: string): string => tr((s as Json | null | undefined)?.[k]);
+/** 칸별 출고 값이 하나라도 있는지 */
+const anySpec = (s: SalesSpec | null | undefined): boolean => SPEC_LINE_ORDER.some((k) => !!specOf(s, k));
+/** 표의 '사양' 칸 글자(④ extra.specText) — 칸별 출고 값이 없을 때만 씀(specLine.ts 규칙) */
+const specTextOf = (u: { extra?: { specText?: string } | null } | null | undefined): string => tr(u?.extra?.specText);
 
 /** 품목구분(비면 '기타') — 상세 품목(normalize)과 영업 doc 품목이 같은 줄인지 볼 때 */
 const catOf = (v: unknown): string => tr(v) || '기타';
@@ -140,9 +146,10 @@ function nameCell(field: 'maker' | 'model', req: string, act: string, e15: boole
 
 /**
  * 출고 사양 칸(장비 + hasSpec) — IT가 고친 토막(요청과 다르거나 요청에 없던 것)이 있으면 요청 순서로 한 줄("윈11/I5/16GB/512GB"),
- * 요청과 다른 토막만 강조. 고친 게 없으면 E15('요청과 같음' — 요청 사양이 있을 때만).
+ * 요청과 다른 토막만 강조. 칸별 값이 없고 '사양' 칸 글자(specText)가 있으면 그 글자 그대로. 둘 다 없으면 E15('요청과 같음' — 요청 사양이 있을 때만).
  */
-function specCell(item: { spec: SalesSpec }, override: SalesSpec, e15: boolean, used: { e15: boolean }): SalesFillCell | null {
+function specCell(item: { spec: SalesSpec }, override: SalesSpec, e15: boolean, used: { e15: boolean }, specText = ''): SalesFillCell | null {
+  if (!anySpec(override) && specText) return plainCell(specText);
   const tokens: SalesFillPart[] = [];
   let changed = false;
   let anyReq = false;
@@ -200,7 +207,8 @@ function confirmUnitCells(line: SalesSlotLine, slot: SalesSlot, ctx: Ctx): Parti
   put(IT_MARK.model, nameCell('model', tr(item.model), tr(u.actualModel), has, used));
   put(IT_MARK.asset, plainCell(asset));
   put(IT_MARK.sn, plainCell(serial));
-  if (line.kind === 'device' && hasSpec(item.cat)) put(IT_MARK.spec, specCell(item, u.specOverride ?? {}, has, used));
+  if (line.kind === 'device' && hasSpec(item.cat)) put(IT_MARK.spec, specCell(item, u.specOverride ?? {}, has, used, specTextOf(u)));
+  else put(IT_MARK.spec, plainCell(specTextOf(u))); // 모니터·기타·사양 칸 없는 장비 — 표에 적은 사양 글이 있을 때만(없으면 예전처럼 빈칸)
   if (used.e15) ctx.e15 += 1;
   return out;
 }
@@ -217,7 +225,8 @@ const blankCell = (): SalesFillCell => ({ parts: [], sub: '' });
  * 장의 출고 사양 칸 — 요청 사양에 IT가 고친 칸을 덮은 한 줄(요청과 다른 토막만 강조). 장은 따로 보므로 '요청과 같음' 대신 값 그대로.
  * 자산번호·시리얼도 고친 사양도 없는 빈 줄이면 null(손으로 적기).
  */
-function extraSpecCell(item: { spec: SalesSpec }, override: SalesSpec, has: boolean): SalesFillCell | null {
+function extraSpecCell(item: { spec: SalesSpec }, override: SalesSpec, has: boolean, specText = ''): SalesFillCell | null {
+  if (!anySpec(override) && specText) return plainCell(specText); // 칸별 값 없이 '사양' 칸 글자만 적은 줄
   const tokens: SalesFillPart[] = [];
   let overridden = false;
   for (const k of SPEC_LINE_ORDER) {
@@ -243,7 +252,11 @@ function extraRow(seq: number, line: SalesSlotLine, slot: SalesSlot, ctx: Ctx): 
   const has = !!(asset || serial);
   const maker = u ? nameCell('maker', tr(item.maker), tr(u.actualMaker), has, used) : null;
   const model = u ? nameCell('model', tr(item.model), tr(u.actualModel), has, used) : null;
-  const spec = u && line.kind === 'device' && hasSpec(item.cat) ? extraSpecCell(item, u.specOverride ?? {}, has) : null;
+  const spec = !u
+    ? null
+    : line.kind === 'device' && hasSpec(item.cat)
+      ? extraSpecCell(item, u.specOverride ?? {}, has, specTextOf(u))
+      : plainCell(specTextOf(u));
   if (used.e15) ctx.e15 += 1;
   return [
     plainCell(String(seq)) ?? blankCell(),
@@ -285,6 +298,7 @@ function swapCells(after: Json, slot: SalesSlot | null): Partial<Record<ItMark, 
   const ov = u.specOverride ?? {};
   const hw = SPEC_LINE_ORDER.map((k) => specOf(ov, k)).filter(Boolean);
   if (hw.length) put(IT_MARK.afterHw, subCell(`출고: ${hw.join('/')}`));
+  else if (specTextOf(u)) put(IT_MARK.afterHw, subCell(`출고: ${specTextOf(u)}`)); // 칸별로 못 읽은 '사양' 칸 글자
   return out;
 }
 

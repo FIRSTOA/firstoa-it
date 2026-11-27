@@ -3,6 +3,16 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "c49628436d",
+    "date": "2026-11-27",
+    "time": "18:08",
+    "subject": "왼쪽 메뉴 순서 — 확인서/출고및반출준비를 출고 준비 리스트 위로 — 사용자 요청(\"확인서/출고및반출준비 한 다음에 출고준비리스트로 넘어가니 왼쪽 메뉴 위치를 바꿔 줘\") · Shell SIDEBAR_SECTIONS 재고관리 묶음 두 줄 순서만(라벨·주소·tabForPath 그대로) · 설명서 ORDER 같은 순서 · releases",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "8bd0c268cb",
     "date": "2026-11-27",
     "time": "17:46",

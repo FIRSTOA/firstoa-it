@@ -61,7 +61,7 @@ export function parseChecks(raw: unknown): Record<string, { at: string; by: stri
   return out;
 }
 
-/** ④ extra — pc·user·ledgerPushed·added 만(라이선스 키 같은 다른 칸은 버림 — 키는 ④ 에 절대 안 둠) */
+/** ④ extra — pc·user·ledgerPushed·added·specText 만(라이선스 키 같은 다른 칸은 버림 — 키는 ④ 에 절대 안 둠) */
 export function parseExtra(raw: unknown): SalesUnitExtra {
   const out: SalesUnitExtra = {};
   if (!isObj(raw)) return out;
@@ -70,6 +70,9 @@ export function parseExtra(raw: unknown): SalesUnitExtra {
   if (pc) out.pc = pc;
   const user = str(raw.user, 100);
   if (user) out.user = user;
+  // 표의 '사양' 칸 글자(칸별로 못 읽은 것 — specLine.ts, 최대 200자). 여기서 버리면 extra 를 합쳐 쓰는 저장이 이 글을 지워 버림
+  const specText = str(raw.specText, 200);
+  if (specText) out.specText = specText;
   if (isObj(raw.ledgerPushed)) {
     const lp: NonNullable<SalesUnitExtra['ledgerPushed']> = {};
     // 빈 글자도 의미 있음(대장에 빈 값으로 올렸음) — 문자열이면 그대로
@@ -261,7 +264,7 @@ export function unitHasContent(u: SalesUnitRow): boolean {
   if (Object.values(u.specOverride ?? {}).some((v) => String(v ?? '').trim())) return true;
   if (Object.keys(u.checks ?? {}).length) return true;
   const e = u.extra ?? {};
-  return !!(e.pc || e.user || e.ledgerPushed);
+  return !!(e.pc || e.user || e.ledgerPushed || e.specText);
 }
 
 /** 진행 "자산 n/m" 에 채운 칸으로 셀지 — 유지보수는 자산번호 또는 시리얼, 나머지는 자산번호 */

@@ -198,6 +198,11 @@
   **＋ 줄 추가**(납품의 장비·모니터·기타만 — `slots.addLineAllowed`): ④ `extra.added=true` 행은 영업 수량 칸 뒤 정상 칸(표시 없는 넘는 칸은 지금처럼 "영업에서 빠진 칸"),
   종이엔 영업 칸이 아니라 뒤 **'추가 출고 기기' 장**(plan.extraSheet → itFill.appendExtraSheet, missing 으로 안 셈), 완료 보고·카톡·IT재고에도 감(prepLink 가 ④ extra 를 읽음).
   처리 상태 상자의 시작·끝·출고 시각 칸은 화면에서 없앰(서버가 처리여부 바꿀 때 빈 칸만 자동 기록). 유지보수도 **대마다**.
+  **입력 화면 = 예전 방식 표**(2026-11-27 사용자가 캡처로 요청 — 카드 화면 DeviceSlotCard·SoftwareSlotCard 지움): 품목마다 `SlotLineBlock`(왼쪽 작성시 요청 / 오른쪽 출고시
+  제조사 한 칸 → `applyLineValues({actualMaker})` 로 모든 줄 + 표 `SlotTableRows` — 한 줄 = ④ 한 행, 저장 규칙 그대로). 표의 '사양' 칸 = 한 줄 글(`specLine.ts` 한 곳 —
+  `CPU / RAM / SSD / HDD / 그래픽`, 없음 X): 읽히면 칸별 spec_override(specText 지움), 못 읽거나 모니터·기타면 ④ `extra.specText`(200자, 칸별 비움 — SQL 없음).
+  출력은 칸별 값이 없을 때 specText 를 출고 사양 칸에 그대로(강조·차이 확인 없음, 모니터·기타도). 완료 보고 units·목록 요약·영업에서 빠진 칸은 specText 안 읽음(4-2 그대로).
+  parseExtra 에서 specText 를 버리면 extra 를 합쳐 쓰는 저장이 지워 버림 — ④ extra 에 칸을 더하면 parseExtra 도 같이.
   라이선스 키는 **적음** — 입력은 확인서, 저장·보기는 계약관리 잠금 칸(넣을 때도 비밀번호), **종이에도 찍음**.
   출력은 **영업 웹앱 확인서 양식 그대로**. (2026-11-27 사용자: 영업이 **지금** 뽑는 양식 그대로 + 내용·양식 **실시간** — 아래 "출력 1차" 가 이 줄보다 우선)
 - **품목 종류**(`itemKind.ts`): 유지보수(PC유지보수 포함) → 소프트웨어 → 모니터 → 장비 → 기타. 칸 계산은 `slots.ts` 한 곳(목록 진행 m 도) —

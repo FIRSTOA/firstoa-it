@@ -19,6 +19,7 @@ import { lookupUnitByAsset } from '@/app/shipment-prep/reportActions';
 import { ITEM_KIND_RULES, checkGroupFor, type ItemKind } from '@/lib/salesConfirms/itemKind';
 import { isMissingSalesColumn, isMissingSalesTable } from '@/lib/salesConfirms/listQuery';
 import { hasSpec, specKeys } from '@/lib/salesConfirms/salesForm/confirm';
+import { SPEC_TEXT_MAX, specTextAllowed } from '@/lib/salesConfirms/specLine';
 import {
   ADDED_LINE_MAX,
   addLineAllowed,
@@ -161,6 +162,8 @@ function allowedFields(kind: ItemKind, cat: string) {
     specKeys: specOk ? (specKeys(cat) as readonly string[]) : ([] as readonly string[]),
     pc: f.includes('pc'),
     user: f.includes('user'),
+    /** 표의 '사양' 칸 글자(extra.specText — specLine.ts) — 장비·모니터·기타 */
+    specText: specTextAllowed(kind),
     checks: checkGroupFor(kind, cat) !== null,
   };
 }
@@ -268,10 +271,20 @@ function applyUnitPatch(cur: SalesUnitRow | null, patch: UnitPatchInput, kind: I
     const next: SalesSpec = {};
     for (const k of allow.specKeys) if (spec[k as SalesSpecKey]) next[k as SalesSpecKey] = spec[k as SalesSpecKey];
     v.spec_override = next;
+    // 칸별 값이 생기면 '사양' 칸 글자(specText)는 지움 — 글자는 칸별 값이 없을 때만 씀(specLine.ts)
+    if (Object.keys(next).length) delete v.extra.specText;
   }
   if (own(patch, 'note')) v.note = text(patch.note, 2000);
-  // extra: 설치 PC·사용자만(ledgerPushed 는 대장 쪽이 씀 — 지금 값 유지, 키 같은 다른 칸은 버림)
+  // extra: 설치 PC·사용자·'사양' 칸 글자만(ledgerPushed 는 대장 쪽이 씀 — 지금 값 유지, 키 같은 다른 칸은 버림)
   const ex = patch.extra && typeof patch.extra === 'object' ? patch.extra : null;
+  if (allow.specText && own(ex, 'specText')) {
+    // 표의 '사양' 칸을 칸별로 못 읽은 글(또는 모니터·기타의 사양 글) — 글이 있으면 칸별 값은 비움(출력은 칸별 값이 없을 때 이 글)
+    const st = text(ex!.specText, SPEC_TEXT_MAX);
+    if (st) {
+      v.extra.specText = st;
+      v.spec_override = {};
+    } else delete v.extra.specText;
+  }
   if (allow.pc && own(ex, 'pc')) {
     const pc = assetText(ex!.pc);
     if (pc) v.extra.pc = pc;
@@ -402,11 +415,18 @@ export async function applyLineValues(input: {
         if (val) spec[k] = val;
         else delete spec[k];
       }
-      return {
+      const out: { actual_maker: string; actual_model: string; spec_override: SalesSpec; extra?: SalesUnitExtra } = {
         actual_maker: setMaker ? text(values.actualMaker, 100) : (cur?.actualMaker ?? ''),
         actual_model: setModel ? text(values.actualModel, 200) : (cur?.actualModel ?? ''),
         spec_override: spec,
       };
+      // 칸별 사양을 한꺼번에 넣으면 그 칸의 '사양' 칸 글자(specText)는 지움 — 글자는 칸별 값이 없을 때만 씀(specLine.ts)
+      if (specOps.length && cur?.extra?.specText && Object.keys(spec).length) {
+        const extra: SalesUnitExtra = { ...cur.extra };
+        delete extra.specText;
+        out.extra = extra;
+      }
+      return out;
     };
     const diffsOf = (b: ReturnType<typeof build>) =>
       unitDiffs(line.kind, line.item, { actualMaker: b.actual_maker, actualModel: b.actual_model, specOverride: b.spec_override });

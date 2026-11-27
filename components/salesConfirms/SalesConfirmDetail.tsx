@@ -18,9 +18,9 @@ import {
   saveSalesWork,
 } from '@/app/confirm-form/salesDetailActions';
 import { getConfirmLicenseState, pushUnitsToLedger, saveLineLicenseKey, saveUnitLicenseKey } from '@/app/confirm-form/salesLicenseActions';
-import { ITEM_KIND_LABEL, ITEM_KIND_RULES, checkGroupFor, type ItemKind } from '@/lib/salesConfirms/itemKind';
-import { hasSpec } from '@/lib/salesConfirms/salesForm/confirm';
-import { ADDED_LINE_MAX, addLineAllowed, addedSlotCount, unackedDiffsFor, unitHasContent } from '@/lib/salesConfirms/slots';
+import { ITEM_KIND_RULES, checkGroupFor } from '@/lib/salesConfirms/itemKind';
+import { addLineAllowed, unackedDiffsFor, unitHasContent } from '@/lib/salesConfirms/slots';
+import { lineMakerState } from '@/lib/salesConfirms/specLine';
 import {
   CHECK_GROUP_PER_CONFIRM,
   SALES_CONFIRM_STATUSES,
@@ -43,7 +43,6 @@ import {
   type SalesUnitSaveResult,
 } from '@/lib/salesConfirms/types';
 import ChecklistPanel from './ChecklistPanel';
-import DeviceSlotCard from './DeviceSlotCard';
 import DiffConfirmDialog from './DiffConfirmDialog';
 import {
   minutesText,
@@ -63,7 +62,8 @@ import PrepLinkPanel from './PrepLinkPanel';
 import SalesChangeBanner from './SalesChangeBanner';
 import SalesPrintDialog, { syncSalesConfirmOne } from './SalesPrintDialog';
 import { useSalesActor, useSalesToast } from './salesUi';
-import SoftwareSlotCard from './SoftwareSlotCard';
+import SlotLineBlock from './SlotLineBlock';
+import type { LicenseProps } from './SlotTableRows';
 import UnknownValue from './UnknownValue';
 import { isBlank } from './unknownValueHelpers';
 
@@ -330,12 +330,12 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
   );
 
   const applyLine = useCallback(
-    (itemIndex: number, values: { specOverride?: SalesSpec; actualModel?: string; actualMaker?: string }): Promise<boolean> =>
+    (itemIndex: number, values: { specOverride?: SalesSpec; actualModel?: string; actualMaker?: string }, doneText = '모든 칸에 적용했어요.'): Promise<boolean> =>
       serial(async () => {
         const r = await runUnitAction((acks, who) => applyLineValues({ confirmId, itemIndex, values, acks, actor: who }), modelLabelOf(itemIndex));
         if (r.ok) {
           await reload(true); // 칸 행이 새로 만들어졌을 수 있어서
-          toast.show('모든 칸에 적용했어요.');
+          toast.show(doneText);
         }
         return r.ok;
       }),
@@ -373,6 +373,8 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
   function addLine(line: SalesSlotLine) {
     if (addingLine !== null) return;
     setAddingLine(line.itemIndex);
+    // 품목 한 칸 제조사가 모든 줄에 같게 적혀 있으면 새 줄에도 같은 제조사(안 하면 새 줄만 종이에 영업 요청 제조사로 나감)
+    const maker = lineMakerState(line.slots.map((s) => s.unit));
     void serial(async () => {
       try {
         const r = await runUnitAction(
@@ -381,10 +383,28 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         );
         if (!r.ok) return;
         const fresh = await reload(true);
-        toast.show('줄을 하나 더했어요 — 자산번호를 적어 주세요.');
-        // 새 칸(그 줄의 마지막 추가 칸)으로 — 그려진 뒤에
+        // 새 칸(그 줄의 마지막 추가 칸)
         const added = fresh?.lines.find((l) => l.itemIndex === line.itemIndex)?.slots.filter((s) => s.added) ?? [];
         const last = added[added.length - 1];
+        if (last && maker.values.length === 1 && maker.blank === 0 && !(last.unit?.actualMaker ?? '').trim()) {
+          // 저장 줄 안이라 saveUnit(줄 세우기)을 부르면 서로 기다림 — 같은 저장 길(runUnitAction)을 바로 부름
+          await runUnitAction(
+            (acks, who) =>
+              saveSalesUnit({
+                confirmId,
+                slotKey: last.slotKey,
+                unitNo: last.unitNo,
+                unitId: last.unit?.id ?? null,
+                expectedUpdatedAt: last.unit?.updatedAt ?? null,
+                patch: { actualMaker: maker.value },
+                acks,
+                actor: who,
+              }),
+            modelLabelOf(line.itemIndex),
+          );
+        }
+        toast.show('줄을 하나 더했어요 — 자산번호를 적어 주세요.');
+        // 새 칸으로 — 그려진 뒤에
         if (last) window.setTimeout(() => scrollToSlot(line.itemIndex, last.unitNo), 60);
       } finally {
         setAddingLine(null);
@@ -394,7 +414,8 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
   function removeLine(line: SalesSlotLine, slot: SalesSlot) {
     const u = slot.unit;
     if (!u || !slot.added) return;
-    if (unitHasContent(u)) {
+    // 제조사는 품목 한 칸(줄 추가 때 저절로 따라 적힘)이라 줄에 적은 값으로 안 셈
+    if (unitHasContent({ ...u, actualMaker: '' })) {
       const what = u.assetId ? `자산번호 ${u.assetId} 등 ` : '';
       if (!window.confirm(`${line.item.cat || '기타'} ${slot.unitNo}번(추가한 줄)에 적은 ${what}값도 같이 지워져요. 이 줄을 뺄까요?`)) return;
     }
@@ -624,6 +645,23 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
     setUnlockReq(null);
     if (ok) void loadLicense();
   }
+
+  /** 소프트웨어 표 줄의 라이선스 키·대장(예전 SoftwareSlotCard 에 넘기던 것 그대로) */
+  const licenseProps = useMemo(
+    (): LicenseProps => ({
+      stateFor: (unitId) => (unitId ? lic.state?.units.find((u) => u.unitId === unitId) : undefined),
+      clientName: lic.state?.clientName ?? null,
+      unlocked: lic.state ? lic.state.unlocked : null,
+      loading: lic.loading,
+      error: lic.error,
+      needSql: sqlB,
+      onUnlock: () => void askUnlock(),
+      onRetry: () => void loadLicense(),
+      onSaveKey: saveKey,
+      onPushLedger: pushLedger,
+    }),
+    [lic, sqlB, askUnlock, loadLicense, saveKey, pushLedger],
+  );
 
   // ───── 화면용 계산 ─────
   const region = c.region.trim() || data.regionGuess || '';
@@ -1110,59 +1148,11 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
       ) : (
         data.lines.map((line) => {
           const item = line.item;
-          const kind: ItemKind = line.kind;
-          // `＋ 줄 추가` — 납품 확인서의 장비·모니터·기타 줄만(서버도 같은 판정 slots.addLineAllowed)
-          const lineAddable = addLineAllowed(c, kind);
-          const specChips: [string, string][] = [
-            ...SALES_SPEC_KEYS.filter((k) => (item.spec[k] ?? '').trim()).map((k): [string, string] => [k, item.spec[k] ?? '']),
-            ...Object.entries(item.specExtra ?? {}),
-          ];
           const firstSnap = line.slots.find((s) => s.unit?.itemSnapshot)?.unit?.itemSnapshot ?? null;
           const snapText = (it: { cat: string; maker: string; model: string } | null) => (it ? [it.cat, it.maker, it.model].filter(Boolean).join(' ') || '(비어 있음)' : '');
+          const lineCount = line.slots.length;
           return (
-            <section key={line.itemIndex} className="panel sc-line">
-              <div className="sc-line-head">
-                <div className="sc-line-title">
-                  <span className="sc-line-no">{line.itemIndex + 1}</span>
-                  <b>{item.cat || '기타'}</b>
-                  <span>{[item.maker, item.model].filter(Boolean).join(' ') || '(모델 미정)'}</span>
-                  {item.state && <span className="sc-pill sc-pill-gray">{item.state}</span>}
-                  <span className="sc-pill sc-pill-indigo">수량 {item.qty}</span>
-                  <span className="sc-pill sc-pill-gray">{ITEM_KIND_LABEL[kind]}</span>
-                </div>
-                <div className="sc-line-btns">
-                  {kind === 'device' && hasSpec(item.cat) && line.slots.length > 0 && (
-                    <button type="button" className="btn btn-ghost sc-btn" disabled={unitsDisabled} onClick={() => setBulk({ mode: 'spec', itemIndex: line.itemIndex })}>
-                      이 품목 사양 한꺼번에
-                    </button>
-                  )}
-                  {kind === 'software' && (
-                    <>
-                      <button type="button" className="btn btn-ghost sc-btn" disabled={unitsDisabled} onClick={() => setBulk({ mode: 'software', itemIndex: line.itemIndex })}>
-                        제품명 한꺼번에
-                      </button>
-                      <button type="button" className="btn btn-ghost sc-btn" disabled={unitsDisabled || sqlB} onClick={() => setBulk({ mode: 'key', itemIndex: line.itemIndex })}>
-                        같은 키를 모든 칸에
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-              {(specChips.length > 0 || item.place) && (
-                <div className="sc-line-req">
-                  <span className="sc-muted">영업 요청</span>
-                  {specChips.length > 0 && (
-                    <span className="sc-specs">
-                      {specChips.map(([k, v]) => (
-                        <span key={k} className="sc-spec">
-                          <b>{k}</b> {v}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                  {item.place && <span className="sc-line-place">설치장소·요청: {item.place}</span>}
-                </div>
-              )}
+            <section key={line.itemIndex} className="panel sc-lb">
               {line.snapshotChanged && (
                 <div className="ct-band warn sc-snap-band" role="status">
                   <span>
@@ -1174,65 +1164,34 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
                 </div>
               )}
               {isSwap && c.replaceInfo && line.itemIndex === data.lines[0]?.itemIndex && <SwapBeforeBox before={c.replaceInfo.before} />}
-              {line.slots.length === 0 ? (
-                <div className="detail-empty sc-line-empty">수량이 0이라 기기 칸이 없어요.</div>
-              ) : (
-                <div className="sc-slots">
-                  {line.slots.map((slot) =>
-                    kind === 'software' ? (
-                      <SoftwareSlotCard
-                        key={`${slot.slotKey}-${slot.unitNo}`}
-                        line={line}
-                        slot={slot}
-                        disabled={unitsDisabled}
-                        saveUnit={saveUnit}
-                        onRecheck={recheck}
-                        onDirtyChange={onDirtyChange}
-                        licState={lic.state?.units.find((u) => u.unitId === slot.unit?.id)}
-                        clientName={lic.state?.clientName ?? null}
-                        unlocked={lic.state ? lic.state.unlocked : null}
-                        licLoading={lic.loading}
-                        licError={lic.error}
-                        needContractsSql={sqlB}
-                        onUnlock={() => void askUnlock()}
-                        onRetryLicense={() => void loadLicense()}
-                        onSaveKey={(s, key) => saveKey({ itemIndex: line.itemIndex, slotKey: s.slotKey, unitNo: s.unitNo }, key)}
-                        onPushLedger={pushLedger}
-                      />
-                    ) : (
-                      <DeviceSlotCard
-                        key={`${slot.slotKey}-${slot.unitNo}`}
-                        line={line}
-                        slot={slot}
-                        kind={kind}
-                        disabled={unitsDisabled}
-                        saveUnit={saveUnit}
-                        lookupAsset={lookupAsset}
-                        onRecheck={recheck}
-                        checkItems={checkItemsFor(line)}
-                        dupAsset={!!slot.unit && dupAssets.has(slot.unit.assetId.trim().toUpperCase())}
-                        assetElsewhere={data.assetElsewhere}
-                        headLabel={isSwap ? (line.slots.length > 1 ? `교체 후 기기 ${slot.unitNo}` : '교체 후 기기') : undefined}
-                        onDirtyChange={onDirtyChange}
-                        onRemove={slot.added && slot.unit ? () => removeLine(line, slot) : undefined}
-                      />
-                    ),
-                  )}
-                </div>
-              )}
-              {lineAddable && (
-                <div className="sc-add-line">
-                  <button
-                    type="button"
-                    className="btn btn-ghost sc-btn"
-                    disabled={unitsDisabled || addingLine !== null || addedSlotCount(line) >= ADDED_LINE_MAX}
-                    onClick={() => addLine(line)}
-                  >
-                    {addingLine === line.itemIndex ? '줄 추가 중…' : '＋ 줄 추가'}
-                  </button>
-                  <span className="sc-muted">영업 수량({item.qty}대)보다 더 내보낼 때 — 종이 뒤 &lsquo;추가 출고 기기&rsquo; 장에 나가요</span>
-                </div>
-              )}
+              {/* 예전 방식 모양 — 왼쪽 작성시(요청) · 오른쪽 출고시(제조사 한 칸 + 표). 한 줄 = ④ 한 행, 저장 길은 그대로 */}
+              <SlotLineBlock
+                line={line}
+                isSwap={isSwap}
+                disabled={unitsDisabled}
+                addable={addLineAllowed(c, line.kind)}
+                adding={addingLine === line.itemIndex}
+                addBusy={addingLine !== null}
+                onAddLine={() => addLine(line)}
+                onRemoveAdded={(slot) => removeLine(line, slot)}
+                saveUnit={saveUnit}
+                lookupAsset={lookupAsset}
+                onRecheck={recheck}
+                onApplyMaker={(maker) =>
+                  applyLine(
+                    line.itemIndex,
+                    { actualMaker: maker },
+                    maker ? `제조사 '${maker}'를 이 품목 ${lineCount}줄 모두에 적었어요.` : '제조사를 지웠어요 — 종이엔 영업 요청 제조사가 나가요.',
+                  )
+                }
+                onBulk={(mode) => setBulk({ mode, itemIndex: line.itemIndex })}
+                bulkKeyDisabled={sqlB}
+                checkItems={checkItemsFor(line)}
+                dupAssets={dupAssets}
+                assetElsewhere={data.assetElsewhere}
+                onDirtyChange={onDirtyChange}
+                license={licenseProps}
+              />
             </section>
           );
         })
