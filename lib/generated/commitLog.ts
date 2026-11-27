@@ -3,6 +3,17 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "e8b64c1de3",
+    "date": "2026-11-27",
+    "time": "14:02",
+    "subject": "영업 확인서 2차 · 영업에서 지운 확인서 표시 · 옛 줄 칸 다시 맞추기 · 철수·이전·판매 따로 보기 — 설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md E26~E30, 사용자 결정(판매·철수·이전도 받되 출고 준비가 아니니 별도 항목으로만) · 가져오기: ① sales_state '지움'(진짜 지움 = deleted 이고 savedAt ≤ deletedAt, 되살아나면 ''), first_saved_at = createdAt, 그날 첫 90일·날짜 골라 받기 때 hash 가 같아도 first_saved_at·saved_at·sales_state·type·items 가 지금 normalize 와 다르면 그 칸만 고침(9시간 늦게 저장된 옛 줄 — SQL 없음, ② 안 씀), counts repaired·sameVer·missing·bytes·ms, 원문 묶음 50 · normalize: renderer sale·pull·move → otherRenderer, formDoc null(판매 매입가 안 실림), 품목은 doc 에서 · 목록: 기본 보기 숨김 규칙 isHiddenByDefault 한 곳(지운 건 숨김·IT가 손댄 건 빨강, 끝난 건 납품일 7일 안·수정됨이면 보임), `영업에서 지움 n` 칩, 지운 시각·사람(payload 칸만 읽음), 목록 위 `출고 준비 확인서` / `철수·이전·판매` 두 항목(따로 보기는 자산번호·진행·출력·시트 비교 없음) · 상세: 지운 건 빨간 띠 + [처리여부를 '취소'로](자동 변경 없음), 따로 보는 종류는 보기만(기기 칸·출력·체크 없음, ④ 등 안 읽음) · 출력 창: 지운 건은 확인 체크해야 인쇄, 따로 보는 종류는 영업 원본만 · 홈: 지운 건·따로 보는 종류를 숫자에서 빼고 \"영업에서 지웠는데 준비 중 n\"(bad) · 설명서 꼭지 2개, releases, CLAUDE.md",
+    "crew": [
+      "developer",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "d9c7f6b99b",
     "date": "2026-11-27",
     "time": "12:36",

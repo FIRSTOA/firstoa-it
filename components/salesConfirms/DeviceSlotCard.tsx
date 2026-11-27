@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ITEM_KIND_RULES, type ItemKind } from '@/lib/salesConfirms/itemKind';
 import { hasSpec, specKeys } from '@/lib/salesConfirms/salesForm/confirm';
+import { isGenericModel, sameSpecValue } from '@/lib/salesConfirms/specCompare';
+import { specFromStockLabel } from '@/lib/salesConfirms/stockSpec';
 import { salesConfirmHref, type SalesSlot, type SalesSlotLine, type SalesSpecKey, type SalesUnitRow } from '@/lib/salesConfirms/types';
 import ChecklistPanel from './ChecklistPanel';
 import {
@@ -193,9 +195,27 @@ export default function DeviceSlotCard({
         setLooked({ asset: asset.toUpperCase(), dupes: res.dupes ?? [], error: res.dupesError ?? '' });
         found = true;
         const cur = draftRef.current;
-        if (!cur.maker.trim() && res.maker) over.maker = res.maker;
-        if (!cur.model.trim() && res.model) over.model = res.model;
+        // 영업 요청과 같은 제조사(조립=조립PC 등)·종류 이름뿐인 모델("데스크탑")은 채우지 않음 — 비워 두면 영업 요청 그대로(가짜 차이 확인 창 방지)
+        if (!cur.maker.trim() && res.maker && !sameSpecValue('maker', String(line.item.maker ?? ''), res.maker)) over.maker = res.maker;
+        if (!cur.model.trim() && res.model && !isGenericModel(res.model) && !sameSpecValue('model', String(line.item.model ?? ''), res.model)) {
+          over.model = res.model;
+        }
         if (!cur.serial.trim() && res.serials[0]) over.serial = res.serials[0];
+        // 출고사양 칸(CPU·RAM·SSD·HDD·그래픽)도 IT재고 사양 글자에서 채움 — 빈 칸만, 읽기 자신 없으면 안 채움(stockSpec.ts).
+        // 영업 요청과 다르면 저장 때 지금처럼 확인 창이 뜸(SSD 500=512 같은 급은 같다고 봄 — specCompare).
+        if (keys.length > 0 && res.specHint) {
+          const stock = specFromStockLabel(res.specHint);
+          const next = { ...cur.spec };
+          let filledSpec = false;
+          for (const k of keys) {
+            const v = stock[k];
+            if (v && !(next[k] ?? '').trim()) {
+              next[k] = v;
+              filledSpec = true;
+            }
+          }
+          if (filledSpec) over.spec = next;
+        }
         setHint({ text: res.specHint ? `IT재고: ${res.specHint}` : 'IT재고에서 찾았어요.', warn: false });
       } else {
         // 못 찾아도 다른 확인서에 같은 자산번호가 있으면 링크 경고는 그대로
