@@ -5,8 +5,10 @@ import { isSupabaseConfigured } from '@/lib/supabase/server';
 import { openSalesConfirm } from '../salesDetailActions';
 
 export const dynamic = 'force-dynamic';
-// 자산번호 조회(IT재고 시트 색인)·출고 준비 후보 읽기가 같이 돌 수 있어 목록 화면과 같게 넉넉히.
-export const maxDuration = 60;
+// 자산번호 조회(IT재고 시트 색인)·출고 준비 후보 읽기가 같이 돌 수 있어 넉넉히.
+// 4-2(F22): 이 화면에서 완료 보고를 보내면 IT재고 반영이 응답 뒤(after())에 16대에 1분 넘게 돎 — 서버 액션은 부른 페이지의
+// 시간 한도를 따르므로 출고 준비 리스트(app/shipment-prep/page.tsx)와 같게 300.
+export const maxDuration = 300;
 
 const MENU = '확인서/출고및반출준비';
 

@@ -3,6 +3,39 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "a56439f96b",
+    "date": "2026-11-27",
+    "time": "16:50",
+    "subject": "확인서 기기 칸 · 이미 넣어 둔 자산번호도 출고사양을 IT재고에서 채움 — 사용자 신고(\"자산번호 입력했는데 출고사양은 자동으로 기입이 안 돼\") · 원인: 자산번호가 바뀔 때만 IT재고를 찾아서, 자동 채우기 배포(14c5a76) 전에 저장한 자산번호는 다시 안 찾음 · onAssetBlur: 자산번호가 그대로여도 빈 칸(시리얼·보이는 출고사양)이 있으면 채움(이 화면에서 같은 번호로 이미 찾아봤으면 칸 나갈 때 다시 안 읽음 — 시트 한도), 조회를 fillFromStock 으로 떼어 자산번호 아래 `↻ IT재고에서 빈 칸 채우기` 단추 — 빈 칸만, 적은 값은 안 덮음, 저장·확인 창 경로 그대로 · 설명서·releases",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
+    "hash": "70fde6c0aa",
+    "date": "2026-11-27",
+    "time": "16:46",
+    "subject": "확인서 출력 · 왼쪽 위 토끼 로고가 X 로 나오던 것 고침 + zone_status SQL 재실행 안전 — 사용자 신고(영업 확인서를 우리 쪽에서 보면 로고가 엑박) · 원인: 영업 실시간 HTML 의 로고가 영업 웹앱 주소(/confirm/rabbit.png)인데 그 주소는 영업 로그인이 있어야 열림(없으면 307 → /login) · itFill.applyFillPlan 이 맨 먼저 영업 호스트의 /confirm/… img 를 우리 public/confirm 사본(같은 파일)으로 바꿔 끼움 — IT 기재 출력·영업 원본 보기·철수·이전·판매 원본 모든 경로 · supabase/zone_status_schema.sql: 재실행하면 1차 수량 체크 기록(it_quantity_checks)을 지우던 drop table 을 없애고 create table if not exists 로(sql-review 지적 — 사용자는 안전재고·담당자 표 부분만 따로 실행함) · releases·CLAUDE.md",
+    "crew": [
+      "sql-review",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
+    "hash": "8a2eca3394",
+    "date": "2026-11-27",
+    "time": "15:52",
+    "subject": "IT재고 시트 한 번에 읽기(batchGet) · 못 읽은 탭 화면 경고 — 사용자 결정(11-18 보류했던 두 제안, 실재고 조사에서 분당 60회 한도가 실제로 터져 \"둘 다 하기\") · listAllAssets 가 5탭을 spreadsheets.values.batchGet 1회로(화면 한 번 읽기 5 → 1), 해석은 parseTabValues 하나(기존 코드 옮김 — 쓰기용 행 번호 색인 규칙 그대로, 547개 줄 번호 예전과 같음), 반환 {assets, failed}(429 면 전부 실패·탭별로 안 되돌아감, 400 등은 탭별 읽기로 한 번, 못 읽은 탭은 색인을 안 건드림) · 새 lib/inventory/tabRead.ts·components/InventoryReadWarning.tsx — IT 재고 리스트·재고 현황판·입고·판매·홈 IT재고 카드·청구 시리얼 찾기·자산 이력에 \"○○ 탭을 못 읽었어요\" 띠(예전엔 그 탭 장비가 말없이 빠짐) · assetIndex 는 실패가 섞이면 throw(빈 결과 캐시 안 함) · 쓰기 함수 변경 없음(integration-rules 통과) · 시트 결과 캐시 새로 안 만듦 · 설명서 4개 FAQ, releases, CLAUDE.md 속도 절",
+    "crew": [
+      "developer",
+      "qa-checker",
+      "integration-rules",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "4203de74bc",
     "date": "2026-11-27",
     "time": "15:28",

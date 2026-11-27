@@ -170,6 +170,12 @@
     **화면 열기만으론 안 씀**(자동은 보여 주기만 — 저장은 4-2·4-3 에서 사람이 무언가 할 때 'auto'). 일정 하나에 확인서 여럿 허용(그래서 "다른 확인서가 이미 연결 → 자동 아님(taken)"은 뺌).
     확인서 상세 "출고 준비" 상자(PrepLinkPanel), 출고 준비 카드 📋 배지(PrepConfirmBadge — 60초 동기화 때 같은 일정 묶음이면 안 다시 읽음), `/shipment-prep?event=<id>`,
     홈 "다음 영업일 출고 일정 없음 n". 복제본 정리(duplicateActions)는 ③ 연결도 "기록"으로 셈 — 연결된 앱 줄을 안 지움.
+    **4-2 기기 한 번만 적기**(카톡·IT재고 경로 — integration-rules 전후 검사): 확인서와 연결된 일정의 완료 보고 기기(units)는 **서버가 savePrepReport update 직전 한 곳에서
+    확인서 ④ 기기 칸으로 다시 만듦**(prepLink `linkedReportSource` — 장비·모니터·기타 중 자산번호/시리얼 있는 칸, 교체는 교체 후만, 유지보수·소프트웨어·빠진 칸·지움/취소/따로 보는 확인서 제외).
+    sendPrepReport 는 저장 뒤 DB 를 다시 읽으므로 카톡·재고 반영·앨범·재고 다시 반영·예전 시트 채우기가 모두 같은 사본. buildPrepMessage·enqueueOutbox·applyStockUnit·retryPrepStock·stockTargetIds·confirmLink 는 **안 바뀜**.
+    처음 발송 = `.is('sent_at', null)` 조건부 update 로 선점(두 창 동시에도 카톡 1번), 카톡 넣기 실패면 내가 쓴 sent_at 일 때만 되돌림, 이미 보낸 보고의 send 는 저장 전에 거절.
+    확인서 읽기 실패 = 창 기기로 저장 + linkWarning(0대면 send 거절). 0대·보고에만 있던 기기가 빠짐은 needAck(noUnits·dropUnits) 확인 창 → opts.ack 로 다시.
+    상세에서 `📷 완료 보고`(getPrepEventRow → PrepReportModal), 보고에만 적힌 기기는 `importReportUnitsToConfirm`(④ 자산번호·시리얼만). 상세 page maxDuration 300(after() 재고 반영).
   - ver 0~2147483647 밖·`\u0000` 든 건은 그 건만 건너뜀(묶음 실패 방지). 일부만 모양이 다르면 나머지 반영 + 'bad_shape' 주황 띠.
 - **표**(`supabase/sales_confirms_schema.sql`, 칸 이름은 `lib/salesConfirms/types.ts` 맨 위 주석이 기준): ①② 영업 원본 = **importer.ts 만 씀**,
   ③ work·④ units = IT 값 = 화면 액션만 씀. **가져오기 코드(normalize·source·importer·route)는 ③④ 표 이름을 import 도 하지 말 것**(IT 값 덮어쓰기를 구조로 막음).

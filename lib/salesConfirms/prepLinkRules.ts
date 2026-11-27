@@ -1,6 +1,7 @@
 /**
  * 영업 확인서 ↔ 출고 준비 일정 — 짝 찾기·연결 상태 판정 한 곳 (4-1, 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md §4-B·§4-C, F3·F4·F8).
- * 순수 함수 — import 는 prepMatch(상호 정규화)·regionSlot·salesForm/confTitle(영업 제목 사본) + types 의 **타입만**(실행 때 지워짐).
+ * 순수 함수 — import 는 prepMatch(상호 정규화)·regionSlot·salesForm/confTitle(영업 제목 사본) + types·itemKind·shipmentPrep 의 **타입만**(실행 때 지워짐).
+ * 4-2(맨 아래 절): 확인서 기기 칸 → 완료 보고 기기(prepUnitsFromLines) · 보고에만 있는 기기 → 확인서 빈 칸 계획(planReportUnitMove).
  * Node 로 바로 돌려 봄. 서버 읽기·쓰기는 prepLink.ts(server-only) — 이 파일은 DB·네이버·시트를 모름.
  *
  * 예전 prepMatch.matchPrepEvents 의 틈(H9)을 고침:
@@ -18,8 +19,14 @@ import type {
   PrepLinkGrade,
   PrepLinkSource,
   PrepLinkState,
+  PrepUnitRef,
   SalesConfirmStatus,
+  SalesSlotLine,
+  SalesSpec,
+  SalesUnitRow,
 } from './types';
+import type { ItemKind } from './itemKind';
+import type { PrepUnit } from '@/lib/shipmentPrep';
 
 // ───────────────────────── 제목 열쇠(sure 비교) ─────────────────────────
 
@@ -503,4 +510,301 @@ export function resolvePrepLinks(input: ResolvePrepLinksInput): ResolvePrepLinks
   }
 
   return { byConfirm, byEvent };
+}
+
+// ───────────────────────── 4-2 확인서 기기 → 완료 보고 기기(§4-D · F10~F13) ─────────────────────────
+// 서버(prepLink.linkedReportSource)가 ①④ 와 IT재고 색인을 한 번씩 읽어 넘기고, 여기는 계산만(DB·시트 모름).
+
+const clean = (v: unknown): string =>
+  typeof v === 'string' ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : '';
+
+/** 보고로 가는 칸 종류 — 장비·모니터·기타. 유지보수(고객 PC)·소프트웨어는 IT재고 '임대중' 대상이 아니라 안 감(F10) */
+const REPORT_KINDS: readonly ItemKind[] = ['device', 'monitor', 'other'];
+export function isReportSlotKind(kind: ItemKind): boolean {
+  return REPORT_KINDS.includes(kind);
+}
+
+const hasIdOrSerial = (u: { assetId?: string | null; serial?: string | null } | null | undefined): boolean =>
+  !!(clean(u?.assetId) || clean(u?.serial));
+
+/** 보고 기기 열쇠 — 자산번호(대문자)가 있으면 'A:자산번호', 없으면 'S:시리얼(대문자)', 둘 다 없으면 '' */
+export function reportUnitKey(u: { assetId?: string | null; serial?: string | null } | null | undefined): string {
+  const a = clean(u?.assetId).toUpperCase();
+  if (a) return `A:${a}`;
+  const s = clean(u?.serial).toUpperCase();
+  return s ? `S:${s}` : '';
+}
+
+/** CPU 짧게: i5-12400 → i5, Ryzen 5 → R5 — listQuery.shortCpu 와 같은 규칙(그쪽은 server-only 라 import 못 함 — 바꾸면 같이) */
+function shortCpuOf(raw: string): string {
+  const s = raw.trim();
+  if (!s) return '';
+  const i = /\bi([3579])\b|\bi([3579])[-\s]?\d{3,5}/i.exec(s);
+  if (i) return `i${i[1] ?? i[2]}`;
+  const r = /ryzen\s*([3579])/i.exec(s);
+  if (r) return `R${r[1]}`;
+  const w = /(celeron|pentium|xeon|core\s*ultra)/i.exec(s);
+  if (w) return w[1].replace(/\s+/g, '');
+  return s.replace(/\s+/g, '').slice(0, 10);
+}
+
+/**
+ * 출고 사양 한 줄 — 목록 사양 요약(listQuery specLine)과 같은 꼴: 장비 "i5/16GB/512GB", CPU·RAM·저장장치가 없으면 인치(모니터). 바꾸면 같이.
+ */
+export function reportSpecLine(cat: string, spec: SalesSpec | null | undefined): string {
+  const s = spec ?? {};
+  const g = (k: keyof SalesSpec) => clean(s[k]).replace(/\s+/g, '');
+  const inch = g('인치');
+  if (!g('CPU') && !g('RAM') && !g('SSD') && !g('HDD')) return inch ? (/\D/.test(inch) ? inch : `${inch}인치`) : '';
+  const parts = [shortCpuOf(clean(s.CPU)), g('RAM'), g('SSD') || g('HDD')].filter(Boolean);
+  if (inch && /모니터/.test(cat)) parts.push(/\D/.test(inch) ? inch : `${inch}인치`);
+  return parts.join('/');
+}
+
+/** IT재고 한 줄(prepLink.readAssetBriefs 가 자산번호마다 고른 것) */
+export interface ReportUnitBrief {
+  category: string;
+  gubun: string;
+  specLabel: string;
+}
+
+export interface PrepUnitsConfirmInput {
+  confirmId: string;
+  docNo: string;
+  /** buildSlotLines(slotItems(확인서), ④) 의 lines — 교체 건은 칸이 곧 교체 후 기기(slots.ts: 교체 전 기기 칸은 없음) */
+  lines: readonly SalesSlotLine[];
+  /** buildSlotLines 의 orphans(영업에서 빠진 칸) — 보고에 안 넣고 개수만 셈 */
+  orphans?: readonly SalesUnitRow[];
+}
+
+export interface PrepUnitsFromLinesInput {
+  confirms: readonly PrepUnitsConfirmInput[];
+  /** 자산번호(대문자) → IT재고 한 줄. 없으면 IT재고에 없음(또는 못 읽음) */
+  briefs?: Readonly<Record<string, ReportUnitBrief>>;
+  /** 지금 보고(DB)의 기기 — 외관 등급 유지, IT재고에 없을 때 구분·사양 */
+  prevUnits?: readonly PrepUnit[] | null;
+}
+
+export interface PrepUnitsFromLinesResult {
+  units: PrepUnit[];
+  /** 장비·모니터·기타 칸 수(채웠든 안 채웠든) — 1 이상이면 확인서 모드 */
+  deviceSlots: number;
+  /** 확인서마다 장비·모니터·기타 칸 수 · 보고로 간 기기 수 */
+  perConfirm: Record<string, { deviceSlots: number; unitCount: number }>;
+  skipped: { svc: number; orphan: number; empty: number; dupe: number };
+}
+
+/**
+ * 확인서 기기 칸 → 완료 보고 기기(F10·F11). 확인서는 문서번호 순, 그 안은 품목 줄·칸 순.
+ *   넣는 칸: 장비·모니터·기타 중 자산번호나 시리얼이 있는 칸. 유지보수·소프트웨어·영업에서 빠진 칸·빈 칸은 개수만(skipped).
+ *   같은 자산번호(없으면 시리얼)는 한 번만 — 확인서 둘 사이에서도.
+ *   assetId 대문자·앞뒤 공백 뗌, serial 앞뒤 공백 뗌(대소문자 그대로 — 저장 규칙과 같음).
+ *   model = [출고 제조사 || 영업 제조사, 출고 모델 || 영업 모델] · gubun = IT재고 || 지금 보고 ·
+ *   spec = IT가 고친 출고사양(spec_override)이 있으면 영업 사양에 덮은 요약, 없으면 IT재고 사양 || 지금 보고 ·
+ *   category = IT재고 품목 || 영업 품목구분 · grade = 지금 보고의 같은 기기(자산번호, 자산번호 없는 기기는 시리얼로 찾음).
+ */
+export function prepUnitsFromLines(input: PrepUnitsFromLinesInput): PrepUnitsFromLinesResult {
+  const prevByKey = new Map<string, PrepUnit>();
+  const prevBySerial = new Map<string, PrepUnit>(); // 자산번호 없이 적힌 보고 기기만(다른 자산번호 기기의 값을 가져오지 않게)
+  for (const p of input.prevUnits ?? []) {
+    const k = reportUnitKey(p);
+    if (k && !prevByKey.has(k)) prevByKey.set(k, p);
+    const s = clean(p?.serial).toUpperCase();
+    if (s && !clean(p?.assetId) && !prevBySerial.has(s)) prevBySerial.set(s, p);
+  }
+  const briefs = input.briefs ?? {};
+  const confirms = [...input.confirms].sort(
+    (a, b) => String(a.docNo ?? '').localeCompare(String(b.docNo ?? '')) || String(a.confirmId).localeCompare(String(b.confirmId)),
+  );
+  const units: PrepUnit[] = [];
+  const seen = new Set<string>();
+  const skipped = { svc: 0, orphan: 0, empty: 0, dupe: 0 };
+  const perConfirm: Record<string, { deviceSlots: number; unitCount: number }> = {};
+  let deviceSlots = 0;
+
+  for (const c of confirms) {
+    const pc = { deviceSlots: 0, unitCount: 0 };
+    for (const line of c.lines) {
+      if (!isReportSlotKind(line.kind)) {
+        skipped.svc += line.slots.filter((s) => hasIdOrSerial(s.unit)).length;
+        continue;
+      }
+      for (const slot of line.slots) {
+        pc.deviceSlots++;
+        const u = slot.unit;
+        const assetId = clean(u?.assetId).toUpperCase();
+        const serial = clean(u?.serial);
+        if (!u || (!assetId && !serial)) {
+          skipped.empty++;
+          continue;
+        }
+        const key = reportUnitKey({ assetId, serial });
+        if (seen.has(key)) {
+          skipped.dupe++;
+          continue;
+        }
+        seen.add(key);
+        const prev = prevByKey.get(key) ?? (!assetId && serial ? prevBySerial.get(serial.toUpperCase()) : undefined);
+        const brief = assetId ? briefs[assetId] : undefined;
+        const item = line.item;
+        const override = u.specOverride ?? {};
+        const overridden = Object.values(override).some((v) => clean(v) !== '');
+        const shipped = overridden ? reportSpecLine(item.cat, { ...(item.spec ?? {}), ...override }) : '';
+        units.push({
+          serial,
+          assetId,
+          grade: clean(prev?.grade),
+          model: [clean(u.actualMaker) || clean(item.maker), clean(u.actualModel) || clean(item.model)].filter(Boolean).join(' '),
+          gubun: clean(brief?.gubun) || clean(prev?.gubun),
+          spec: shipped || clean(brief?.specLabel) || clean(prev?.spec),
+          category: clean(brief?.category) || clean(item.cat) || '기타',
+        });
+        pc.unitCount++;
+      }
+    }
+    for (const o of c.orphans ?? []) if (hasIdOrSerial(o)) skipped.orphan++;
+    perConfirm[c.confirmId] = pc;
+    deviceSlots += pc.deviceSlots;
+  }
+  return { units, deviceSlots, perConfirm, skipped };
+}
+
+/**
+ * prev 중 next 에 없는 기기(자산번호가 같거나 시리얼이 같으면 "있음") — 저장 때 "빠지는 기기" 확인(dropUnits)·"보고에만 있는 기기"(F12).
+ * 자산번호 대문자, 같은 기기는 한 번.
+ */
+export function droppedReportUnits(
+  prev: readonly PrepUnit[] | null | undefined,
+  next: readonly PrepUnit[] | null | undefined,
+): PrepUnitRef[] {
+  const assets = new Set<string>();
+  const serials = new Set<string>();
+  for (const u of next ?? []) {
+    const a = clean(u?.assetId).toUpperCase();
+    if (a) assets.add(a);
+    const s = clean(u?.serial).toUpperCase();
+    if (s) serials.add(s);
+  }
+  const out: PrepUnitRef[] = [];
+  const seen = new Set<string>();
+  for (const u of prev ?? []) {
+    const assetId = clean(u?.assetId).toUpperCase();
+    const serial = clean(u?.serial);
+    if (!assetId && !serial) continue;
+    if ((assetId && assets.has(assetId)) || (serial && serials.has(serial.toUpperCase()))) continue;
+    const k = reportUnitKey({ assetId, serial });
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ assetId, serial });
+  }
+  return out;
+}
+
+/** 두 기기 목록의 (자산번호, 시리얼) 묶음이 같은지(순서 무관, 대소문자 무시) — "보고 뒤 바뀜"(F13) */
+export function sameReportUnitSet(a: readonly PrepUnit[] | null | undefined, b: readonly PrepUnit[] | null | undefined): boolean {
+  const sig = (list: readonly PrepUnit[] | null | undefined) =>
+    (list ?? [])
+      .filter((u) => hasIdOrSerial(u))
+      .map((u) => `${clean(u.assetId).toUpperCase()}|${clean(u.serial).toUpperCase()}`)
+      .sort()
+      .join('\n');
+  return sig(a) === sig(b);
+}
+
+// ── 보고에만 있는 기기 → 확인서 빈 칸(F12) ──
+
+export type ReportMoveKind = 'device' | 'monitor' | 'other';
+
+/** IT재고 품목 → 옮길 칸 종류: 노트북·데스크탑 → 장비, 모니터 → 모니터, 나머지 → 기타. 품목을 모르면 null(안 옮김) */
+export function moveKindOfCategory(category: string | null | undefined): ReportMoveKind | null {
+  const c = clean(category);
+  if (!c) return null;
+  if (/노트북|데스크/.test(c)) return 'device';
+  if (/모니터/.test(c)) return 'monitor';
+  return 'other';
+}
+
+export interface ReportUnitMove extends PrepUnitRef {
+  /** 그 칸의 품목 줄(lines[].itemIndex — ④ 를 새로 만들 때 item_snapshot) */
+  itemIndex: number;
+  slotKey: string;
+  unitNo: number;
+  /** ④ 줄이 있으면 그 id(조건부 update), 없으면 null(새로 만듦) */
+  unitId: string | null;
+  kind: ReportMoveKind;
+}
+
+export interface ReportUnitMovePlan {
+  moves: ReportUnitMove[];
+  /** noCategory IT재고에서 품목을 못 찾음(시리얼만 적힌 기기 포함) · noSlot 같은 종류 빈 칸이 모자람 */
+  left: (PrepUnitRef & { reason: 'noCategory' | 'noSlot' })[];
+  /** 이미 확인서에 있는 보고 기기 수(자산번호나 시리얼이 같음 — 안 옮김) */
+  present: number;
+}
+
+/**
+ * 보고 기기 중 확인서(칸 + 영업에서 빠진 칸)에 없는 것을 같은 종류 빈 칸(자산번호·시리얼 둘 다 빔)에 차례로 —
+ * 같은 품목 이름 줄 먼저(노트북은 노트북 줄 → 그 밖 장비 줄). 자산번호·시리얼만 옮기는 계획(쓰기는 부르는 쪽 — 칸마다 조건부).
+ */
+export function planReportUnitMove(input: {
+  lines: readonly SalesSlotLine[];
+  orphans?: readonly SalesUnitRow[];
+  reportUnits: readonly PrepUnit[] | null | undefined;
+  /** 자산번호(대문자) → IT재고 품목 */
+  categories: Readonly<Record<string, string>>;
+}): ReportUnitMovePlan {
+  const assets = new Set<string>();
+  const serials = new Set<string>();
+  const mark = (assetId: string, serial: string) => {
+    if (assetId) assets.add(assetId.toUpperCase());
+    if (serial) serials.add(serial.toUpperCase());
+  };
+  for (const line of input.lines) for (const s of line.slots) if (s.unit) mark(clean(s.unit.assetId), clean(s.unit.serial));
+  for (const o of input.orphans ?? []) mark(clean(o.assetId), clean(o.serial));
+
+  type Free = { itemIndex: number; slotKey: string; unitNo: number; unitId: string | null; cat: string };
+  const free: Record<ReportMoveKind, Free[]> = { device: [], monitor: [], other: [] };
+  for (const line of input.lines) {
+    if (!isReportSlotKind(line.kind)) continue;
+    const kind = line.kind as ReportMoveKind;
+    for (const s of line.slots) {
+      if (hasIdOrSerial(s.unit)) continue;
+      free[kind].push({ itemIndex: line.itemIndex, slotKey: s.slotKey, unitNo: s.unitNo, unitId: s.unit?.id || null, cat: clean(line.item.cat) });
+    }
+  }
+
+  const used = new Set<string>();
+  const seenKeys = new Set<string>();
+  const moves: ReportUnitMove[] = [];
+  const left: ReportUnitMovePlan['left'] = [];
+  let present = 0;
+  for (const u of input.reportUnits ?? []) {
+    const assetId = clean(u?.assetId).toUpperCase();
+    const serial = clean(u?.serial);
+    if (!assetId && !serial) continue;
+    if ((assetId && assets.has(assetId)) || (serial && serials.has(serial.toUpperCase()))) {
+      present++;
+      continue;
+    }
+    const key = reportUnitKey({ assetId, serial });
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    const category = (assetId && clean(input.categories[assetId])) || clean(u?.category);
+    const kind = moveKindOfCategory(category);
+    if (!kind) {
+      left.push({ assetId, serial, reason: 'noCategory' });
+      continue;
+    }
+    const pool = free[kind].filter((f) => !used.has(`${f.slotKey}\u0000${f.unitNo}`));
+    const word = /노트북/.test(category) ? '노트북' : /데스크/.test(category) ? '데스크' : category;
+    const pick = pool.find((f) => !!word && f.cat.includes(word)) ?? pool[0];
+    if (!pick) {
+      left.push({ assetId, serial, reason: 'noSlot' });
+      continue;
+    }
+    used.add(`${pick.slotKey}\u0000${pick.unitNo}`);
+    moves.push({ assetId, serial, itemIndex: pick.itemIndex, slotKey: pick.slotKey, unitNo: pick.unitNo, unitId: pick.unitId, kind });
+    mark(assetId, serial); // 보고에 같은 기기가 두 번 있어도 한 칸만
+  }
+  return { moves, left, present };
 }

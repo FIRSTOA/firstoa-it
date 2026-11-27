@@ -139,6 +139,83 @@ export async function listPrepEvents(): Promise<PrepListResult> {
   };
 }
 
+/**
+ * 4-2: 일정 하나의 출고 준비 줄 — 확인서 상세에서 완료 보고 창(PrepReportModal)을 열 때. listPrepEvents 한 줄과 같은 모양·같은 계산
+ * (listPrepEvents 는 안 바꿈 — 홈도 씀). ★·IT 거르기 없음: 연결된 일정이면 ★ 가 없어도 보고는 열림(설계 위험 10). 읽기만.
+ */
+export async function getPrepEventRow(eventId: string): Promise<{ ok: true; event: PrepEventRow } | { ok: false; error: string }> {
+  if (!isSupabaseConfigured()) return { ok: false, error: 'Supabase 설정이 필요해요.' };
+  const id = String(eventId ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return { ok: false, error: '출고 일정을 못 찾았어요 — 새로고침해 주세요.' };
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from(CALENDAR_TABLE)
+    .select('id,date,time,created_at,title,description,location,naver_uid')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: '출고 일정을 못 찾았어요 — 네이버에서 지워졌을 수 있어요. 새로고침해 주세요.' };
+  const r = data as {
+    id: string; date: string; time: string | null; created_at: string; title: string; description: string | null;
+    location: string | null; naver_uid: string | null;
+  };
+  type ReportBrief = {
+    sent_at: string | null;
+    photos: unknown[];
+    units: PrepUnit[] | null;
+    stock_applied: string[] | null;
+    stock_issues?: PrepStockIssues | null;
+    updated_at: string | null;
+  };
+  // 재고 반영 결과(stock_issues)도 같이 — SQL 실행 전이라 칸이 없을 때만 그 칸 빼고 다시 읽음(listPrepEvents 와 같게)
+  const cols = 'sent_at,photos,units,stock_applied,updated_at';
+  const [prepRes, reportRes] = await Promise.all([
+    supabase.from(PREP_EVENTS_TABLE).select('prep_checks').eq('event_id', id).maybeSingle(),
+    supabase
+      .from(PREP_REPORTS_TABLE)
+      .select(`${cols},stock_issues`)
+      .eq('event_id', id)
+      .maybeSingle()
+      .then(async (full) => (isMissingStockIssuesColumn(full.error) ? await supabase.from(PREP_REPORTS_TABLE).select(cols).eq('event_id', id).maybeSingle() : full)),
+  ]);
+  if (prepRes.error) return { ok: false, error: prepRes.error.message };
+  if (reportRes.error) return { ok: false, error: reportRes.error.message };
+  const rep = (reportRes.data ?? null) as unknown as ReportBrief | null;
+  const title = r.title ?? '';
+  return {
+    ok: true,
+    event: {
+      id: r.id,
+      date: r.date,
+      time: r.time ?? '',
+      createdAt: r.created_at,
+      title,
+      description: r.description ?? '',
+      location: r.location ?? '',
+      company: guessCompany(title),
+      kind: eventKindOf(title),
+      items: (() => {
+        const fromTitle = parseEventTitle(title).items;
+        return fromTitle.length ? fromTitle : parseItemsFromMemo(r.description ?? '');
+      })(),
+      naverUid: r.naver_uid,
+      prepChecks: ((prepRes.data as { prep_checks?: PrepChecks } | null)?.prep_checks ?? {}) as PrepChecks,
+      reportSent: !!rep?.sent_at,
+      photoCount: Array.isArray(rep?.photos) ? rep!.photos.length : 0,
+      stockProblem: rep
+        ? prepStockView({
+            kind: eventKindOf(title),
+            units: rep.units ?? [],
+            applied: rep.stock_applied ?? [],
+            issues: rep.stock_issues ?? {},
+            attempted: !!rep.sent_at || (rep.stock_applied ?? []).length > 0 || Object.keys(rep.stock_issues ?? {}).length > 0,
+            updatedAt: rep.updated_at,
+          }).problemCount
+        : 0,
+    },
+  };
+}
+
 export type TitleTagResult = { ok: true; title?: string; skipped?: string } | { ok: false; error: string };
 
 /** 담당자 단계 체크 저장(DB만 — 빠르게). */

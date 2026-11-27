@@ -40,6 +40,7 @@
  */
 
 import type { ItemKind } from './itemKind';
+import type { PrepUnit } from '@/lib/shipmentPrep'; // 4-2 절(타입만 — 실행 때 지워짐)
 
 // ───────────────────────── 영업 원문(지침 기준 — 키 받은 뒤 1회 실측으로 확정, §3-6) ─────────────────────────
 
@@ -1179,4 +1180,150 @@ export type PrepLinkReadResult<T> =
  *   saveComputedAutoLink(confirmId: string, eventId: string, actor: string)
  *       : Promise<{ saved: boolean; workUpdatedAt: string | null }>   // 4-2·4-3(보고 저장·발송·준비 단추)에서: 지금도 그 일정이 자동 짝이고
  *                                                                      // ③ 이 prep_event_id null + link_source '' 일 때만 'auto' 로(사람이 정한 것 안 덮음)
+ */
+
+// =====================================================================================
+// 4단계 4-2 — 기기 한 번만 적기(연결된 건의 완료 보고 기기 = 확인서 ④ 기기 칸)
+// 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md F9~F14 · F22 · F23 · §4-D · §8 "4-2 연동 규칙 기준"(이 기준이 우선).
+// 파일·담당(developer C):
+//   lib/salesConfirms/prepLinkRules.ts (순수)   prepUnitsFromLines · planReportUnitMove · droppedReportUnits · sameReportUnitSet · reportSpecLine
+//   lib/salesConfirms/prepLink.ts (server-only) linkedReportSource(eventId, opts) — 연결 판정 + ④ 칸 → 보고 기기(IT재고 색인 1회) · readAssetBriefs
+//   app/shipment-prep/reportActions.ts          getPrepReport·savePrepReport·sendPrepReport 확장(아래 주석)
+//   app/shipment-prep/actions.ts                getPrepEventRow(eventId) — 확인서 상세에서 완료 보고 창을 열 때
+//   app/confirm-form/prepLinkActions.ts         getConfirmPrepReport · importReportUnitsToConfirm
+//   app/confirm-form/[id]/page.tsx              maxDuration 60 → 300(상세에서 보낸 보고의 IT재고 반영이 응답 뒤 1분 넘게 돎 — F22)
+//   화면(ui-designer): PrepReportModal(확인서 모드) · PrepLinkPanel(📷 완료 보고·보고 상태) · SalesConfirmDetail
+// 바뀌지 않는 것: 카톡 문구(buildPrepMessage — units 값만 다름)·방(KAKAO_ROOM)·outbox(enqueueOutbox), stockTargetIds·applyStockUnit·
+//   recordStockOutcome·retryPrepStock·getAlbum, 저장 → after() 재고 순서, savePrepReport 의 after(syncPrepToConfirm)·lib/confirmLink.ts.
+// 보고 기기를 바꿔 넣는 곳 = reportActions 의 저장(update 직전) 한 곳 — 발송은 저장 뒤 DB 를 다시 읽으므로 카톡·재고·앨범·예전 시트 채우기가 같은 사본을 씀.
+// =====================================================================================
+
+/** 보고 기기 하나를 가리키는 두 값(자산번호는 대문자) — "보고에만 있는 기기"·"빠지는 기기" 목록 */
+export interface PrepUnitRef {
+  assetId: string;
+  serial: string;
+}
+
+/** 이 일정의 보고 기기 출처 확인서 하나 */
+export interface LinkedReportConfirm {
+  confirmId: string;
+  docNo: string;
+  /** 영업 상호(상호-현장) — 연락처·주소 없음 */
+  company: string;
+  type: string;
+  deliveryDate: string | null;
+  /** 'manual'·'auto' = ③ 에 저장 · 'computed' = 화면 계산 자동(보고 저장·발송 때 서버가 'auto' 로 굳힘 — F4) */
+  link: 'manual' | 'auto' | 'computed';
+  status: SalesConfirmStatus;
+  directShip: boolean;
+  /** 이 확인서의 장비·모니터·기타 칸 수(채웠든 안 채웠든) */
+  deviceSlots: number;
+  /** 그중 보고로 간 기기 수(자산번호나 시리얼 있음, 같은 번호 1번) */
+  unitCount: number;
+}
+
+/** 연결됐지만 보고 기기에서 뺀 확인서 — deleted 영업에서 지움 · cancelled 처리여부 취소 · other 따로 보는 종류(철수·이전·판매 — 보고 창에서 직접, F7) */
+export interface LinkedReportExcluded {
+  confirmId: string;
+  docNo: string;
+  reason: 'deleted' | 'cancelled' | 'other';
+}
+
+/**
+ * 출고 일정 하나의 완료 보고 기기 출처(§4-D) — prepLink.linkedReportSource 결과.
+ *   mode 'confirm' = 연결된 확인서(저장 연결 또는 확실 자동 — 후보는 안 셈)에 장비·모니터·기타 칸이 하나라도 있음 →
+ *                    보고 창의 기기는 보기만 + [확인서에서 고치기], 저장·발송 때 서버가 확인서에서 다시 만듦(화면이 보낸 units 는 무시 — F9)
+ *   mode 'legacy'  = 연결 없음 · 유지보수·소프트웨어만 · 따로 보는 종류 → 지금처럼 보고 창에서 직접(F10)
+ */
+export interface LinkedReportSource {
+  mode: 'confirm' | 'legacy';
+  /** 보고 기기 출처 확인서(문서번호 순). legacy 여도 연결된 확인서는 여기(유지보수만 있는 확인서 등) */
+  confirms: LinkedReportConfirm[];
+  excluded: LinkedReportExcluded[];
+  /**
+   * 확인서 칸 → 보고 기기(F10·F11): 장비·모니터·기타 칸 중 자산번호나 시리얼이 있는 것(교체 건은 칸이 곧 교체 후 기기), 같은 자산번호 1번.
+   * assetId = ④ 자산번호(대문자) · serial = ④ 시리얼 · model = [출고 제조사 || 영업 제조사, 출고 모델 || 영업 모델] ·
+   * gubun = IT재고 구분 · spec = IT가 고친 출고사양이 있으면 그 요약(목록 사양 요약과 같은 꼴), 없으면 IT재고 사양 ·
+   * category = IT재고 품목 || 영업 품목구분 · grade = 지금 보고의 같은 기기 값.
+   * IT재고에 없거나 못 읽으면(inventoryWarning) 구분·사양은 지금 보고의 같은 기기 값. legacy 면 [].
+   */
+  units: PrepUnit[];
+  skipped: {
+    /** 유지보수·소프트웨어 칸 중 자산번호·시리얼 있는 것(보고에 안 넣음 — F10) */
+    svc: number;
+    /** "영업에서 빠진 칸" 중 자산번호·시리얼 있는 것(안 넣음 — 창에 "n칸은 영업에서 빠져 안 넣었어요") */
+    orphan: number;
+    /** 장비·모니터·기타 칸 중 아직 자산번호·시리얼이 빈 칸 */
+    empty: number;
+    /** 같은 자산번호(자산번호 없으면 시리얼)가 두 번 — 한 번만 넣음 */
+    dupe: number;
+  };
+  /** 지금 보고에만 있는 기기(확인서에 없음 — F12 [확인서 빈 칸으로 옮기기]). confirm 모드에서만, 아니면 [] */
+  reportOnly: PrepUnitRef[];
+  /** 보낸 보고(sent_at)의 기기(자산번호·시리얼 묶음) ≠ 지금 확인서에서 만든 기기 → "보고 뒤 바뀜"(표시만 — 자동 재발송·재반영 없음, F13) */
+  changedSinceSent: boolean;
+  /** 같은 확인서의 다른 일정(제목·날짜가 같은 복사본)에서 이미 보낸 보고 — 보고 창 경고(F14). 없으면 [] */
+  copyReports: { eventId: string; date: string; title: string; sentAt: string }[];
+  /** IT재고 색인을 못 읽음(구글시트) — 쉬운 말, 아니면 null(색인을 안 읽은 요약 읽기도 null) */
+  inventoryWarning: string | null;
+}
+
+/** 보고에만 있는 기기 → 확인서 빈 칸 옮기기 결과(F12 — 자산번호·시리얼만, 제조사·모델·사양은 안 옮김) */
+export type ReportUnitsImportResult =
+  | {
+      ok: true;
+      /** 옮긴 것(칸 위치) */
+      moved: (PrepUnitRef & { slotKey: string; unitNo: number })[];
+      /** 못 옮긴 것 — noCategory IT재고에서 품목을 못 찾음 · noSlot 같은 종류 빈 칸 없음 · conflict 그 사이 누가 그 칸을 고침(멈춤) */
+      left: (PrepUnitRef & { reason: 'noCategory' | 'noSlot' | 'conflict' })[];
+      /** 하나라도 옮겼으면 ④ updated_at 이 바뀜 → 화면은 상세를 다시 읽을 것(가짜 충돌 방지) */
+      changed: boolean;
+    }
+  | { ok: false; error: string };
+
+/*
+ * 4-2 서버 액션 — 화면(ui-designer)이 부르는 것. 실패 문구는 쉬운 말, 로그는 code 만(payload·연락처·Supabase details 없음).
+ *
+ * app/shipment-prep/reportActions.ts ('use server' — 이름·앞 인자는 예전 그대로, 뒤에 opts 만 더함):
+ *   getPrepReport(eventId: string)
+ *     : Promise<{ ok: true; report: PrepReport | null; photoItems: CheckItem[];
+ *                 linked: LinkedReportSource | null;   // null = 확인서 표 없음(예전처럼, 안내 없음) 또는 못 읽음(linkWarning 있음)
+ *                 linkWarning?: string }                // 확인서를 못 읽음 → 주황 알림, 창은 예전 모드(직접 적기)
+ *               | { ok: false; error: string }>
+ *       → linked?.mode === 'confirm' 이면 기기 칸은 linked.units 보기만 + [확인서에서 고치기](salesConfirmHref(confirms[0].confirmId)),
+ *         linked.reportOnly(보고에만 있는 기기 n대 + [확인서 빈 칸으로 옮기기] — 확인서가 둘 이상이면 고르게), skipped(빠진 칸 안내),
+ *         copyReports(복사본 일정에서 이미 보냄 경고), changedSinceSent("보고 뒤 바뀜"), inventoryWarning, excluded(뺀 확인서 안내).
+ *         맨 위 "확인서 D-… 기기 n대를 보내요"(설계 위험 1). 확인서 모드에서도 draft.units 에는 linked.units 를 그대로 넣어 보낼 것
+ *         (서버가 확인서를 못 읽으면 그 목록으로 저장·발송 — F23).
+ *       ※ linked 는 report 와 따로(보고 줄이 아직 없어도 확인서 기기를 보여 줘야 해서 — 설계의 "PrepReport.linked?" 대신).
+ *   savePrepReport(eventId: string, draft: ReportDraft, opts?: PrepReportSaveOptions)
+ *     : Promise<({ ok: true } & PrepReportSaved) | PrepReportFail>
+ *   sendPrepReport(eventId: string, draft: ReportDraft, photoItemCount: number, mode: 'send' | 'resend' | 'fix' = 'send', opts?: PrepReportSaveOptions)
+ *     : Promise<({ ok: true; message: string; stockPending: number } & PrepReportSaved) | PrepReportFail>
+ *       (PrepReportSaveOptions·PrepReportSaved·PrepReportFail·PrepReportAckKind 는 lib/shipmentPrep.ts)
+ *       - 확인서 모드: 서버가 확인서에서 기기를 다시 만들어 저장(unitsFrom 'confirm', units = 저장한 기기 → 창 갱신)
+ *       - needAck(PrepReportFail) = 저장 안 함 → 화면이 확인 창(error 문구 그대로 + dropped 목록)을 띄우고 "예"면 같은 호출에 opts.ack 로 다시:
+ *           'noUnits'   확인서 모드인데 자산번호·시리얼 있는 칸 0대(send·resend 만) — "확인서에 기기가 없어요. 기기 없이 보낼까요?"(§4-D)
+ *           'dropUnits' 지금 보고에 있던 기기가 이번 저장에서 빠짐(확인서에 없음 — 확인서 모드의 모든 저장·발송) — 보고에만 있는 기기를 조용히 지우지 않게
+ *       - alreadySent(PrepReportFail) = 처음 발송(send)인데 이미 보낸 보고(F14 — 서버가 막음) → "수정해서 다시 보내기"로 안내, 창은 다시 읽기
+ *       - linkWarning(성공) = 확인서를 못 읽어 창에 보이던 기기로 저장·발송함 → 주황 알림(toast-warn, 저절로 안 닫힘 — F23).
+ *         확인서를 못 읽었는데 보낸 기기가 0대면 send·resend 는 거절(쉬운 말 error)
+ *       - inventoryWarning(성공) = IT재고를 못 읽어 구분·사양은 예전 보고 값 → 주황 알림
+ *       - autoLinked(성공) = 이번 저장으로 'auto' 로 굳힌 확인서와 새 ③ updated_at → 열린 확인서 상세는 work.updatedAt 갱신(H16)
+ *
+ * app/shipment-prep/actions.ts ('use server'):
+ *   getPrepEventRow(eventId: string): Promise<{ ok: true; event: PrepEventRow } | { ok: false; error: string }>
+ *       → listPrepEvents 한 줄과 같은 모양·계산(reportSent·photoCount·stockProblem). ★·IT 거르기 없음(★ 없는 일정도 연결돼 있으면 보고는 열림 — 위험 10).
+ *         확인서 상세에서 <PrepReportModal event={…} people={data.people} /> 를 열 때.
+ *
+ * app/confirm-form/prepLinkActions.ts ('use server'):
+ *   getConfirmPrepReport(input: { confirmId: string; eventId: string })
+ *     : Promise<PrepLinkReadResult<{ event: PrepEventRow; linked: LinkedReportSource; role: 'source' | 'excluded' | 'notLinked' }>>
+ *       → 출고 준비 상자의 보고 상태(보냄·사진 n장·재고 문제 n대 = event, 보고 뒤 바뀜·보고에만 있는 기기 = linked) + 창 열기용 event.
+ *         IT재고 색인은 안 읽음(linked.units 의 구분·사양은 비어 있을 수 있음 — 숫자·묶음 비교용). role = 이 확인서가 보고 기기 출처인지.
+ *   importReportUnitsToConfirm(input: { confirmId: string; eventId: string; actor: string }): Promise<ReportUnitsImportResult>
+ *       → F12 [확인서 빈 칸으로 옮기기]. 이 확인서가 그 일정에 연결(저장·자동)돼 있을 때만. 보고 기기 중 확인서에 없는 것을
+ *         IT재고 품목(노트북·데스크탑 → 장비, 모니터 → 모니터, 나머지 → 기타)으로 같은 종류 빈 칸에 차례로(자산번호·시리얼만,
+ *         ④ 줄 없으면 item_snapshot = 지금 영업 품목으로 만듦, 칸마다 updated_at 조건부 — 그 사이 누가 고치면 멈춤). 보고는 안 고침.
+ *         뒤에 화면은 상세를 다시 읽고(④ updated_at), 완료 보고 창을 다시 열면 기기가 확인서 기준으로 보임.
  */

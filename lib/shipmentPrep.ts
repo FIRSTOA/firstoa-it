@@ -158,6 +158,42 @@ export type PrepReport = {
   updatedAt: string | null;
 };
 
+// ── 4-2 확인서 연결 모드 — 완료 보고 저장·발송의 입력·결과(타입만 — 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md §4-D·F9~F14·F23) ──
+// 액션 시그니처·화면이 할 일은 lib/salesConfirms/types.ts 맨 아래 4-2 절 주석.
+
+/**
+ * 저장 전에 화면 확인이 필요한 것(서버가 저장하지 않고 돌려줌 → 화면이 확인 창 → "예"면 opts.ack 에 넣어 같은 호출을 다시):
+ *   noUnits   확인서 모드인데 자산번호·시리얼 있는 칸이 0대(send·resend) — "확인서에 기기가 없어요. 기기 없이 보낼까요?"
+ *   dropUnits 지금 보고에 있던 기기가 이번 저장에서 빠짐(확인서에 없음) — 보고에만 적어 둔 기기를 조용히 지우지 않게
+ */
+export type PrepReportAckKind = 'noUnits' | 'dropUnits';
+
+export type PrepReportSaveOptions = { ack?: PrepReportAckKind[] };
+
+/** 저장·발송 성공 때 같이 오는 것 */
+export type PrepReportSaved = {
+  /** confirm = 서버가 확인서 기기로 다시 만들어 저장 · draft = 화면이 보낸 기기(예전 모드 또는 확인서를 못 읽음) */
+  unitsFrom: 'confirm' | 'draft';
+  /** 저장한 기기(보고 줄의 units 와 같음) — 창 갱신용 */
+  units: PrepUnit[];
+  /** 확인서를 못 읽어 화면이 보낸 기기로 저장함(F23) — 주황 알림 */
+  linkWarning?: string;
+  /** IT재고를 못 읽어 구분·사양은 예전 보고 값으로 넣음 — 주황 알림 */
+  inventoryWarning?: string;
+  /** 이번 저장으로 'auto' 로 굳힌 확인서(③ updated_at 이 바뀜 — 열린 확인서 상세는 갱신) */
+  autoLinked: { confirmId: string; workUpdatedAt: string | null }[];
+};
+
+/** 저장·발송 실패 — needAck 면 아무것도 안 씀, alreadySent 면 처음 발송을 서버가 막음(F14) */
+export type PrepReportFail = {
+  ok: false;
+  error: string;
+  needAck?: PrepReportAckKind[];
+  /** needAck 에 dropUnits 가 있을 때 빠지는 기기 */
+  dropped?: { assetId: string; serial: string }[];
+  alreadySent?: true;
+};
+
 // ── 재고 반영 결과(완료 보고 → IT재고 위치 '임대중') ─────────────────────
 // 반영은 카톡 발송 응답 뒤(after)에 돌아서, 결과를 보고 행(stock_applied·stock_issues)에 적어 두고
 // 완료 보고 창·출고 준비 목록·홈이 이 함수로 읽어 "재고 반영 안 됨 n대"를 보여 줌.

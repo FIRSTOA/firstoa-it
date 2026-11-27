@@ -7,6 +7,10 @@ import { findAssetBriefs } from '@/lib/inventory/assetIndex';
 import { getAssetFromSheets, updateAssetInSheet } from '@/lib/inventory/sheets';
 import { logAssetMovement } from '@/lib/inventory/movements';
 import { extractSaleInfoFromImage, isOcrConfigured } from '@/lib/ocr';
+import { isMissingSalesTable } from '@/lib/salesConfirms/listQuery';
+import { linkedReportSource, saveComputedAutoLink, type LinkedReportSourceOptions } from '@/lib/salesConfirms/prepLink';
+import { droppedReportUnits } from '@/lib/salesConfirms/prepLinkRules';
+import type { LinkedReportSource, PrepUnitRef } from '@/lib/salesConfirms/types';
 import {
   buildPrepMessage,
   eventKindOf,
@@ -15,6 +19,10 @@ import {
   stockTargetIds,
   type PrepPhoto,
   type PrepReport,
+  type PrepReportAckKind,
+  type PrepReportFail,
+  type PrepReportSaved,
+  type PrepReportSaveOptions,
   type PrepStockIssue,
   type PrepStockIssues,
   type PrepUnit,
@@ -67,9 +75,52 @@ async function ensureReport(eventId: string): Promise<ReportRow> {
 
 export type CheckItem = { label: string; grp: string };
 
-export async function getPrepReport(eventId: string): Promise<Result<{ report: PrepReport | null; photoItems: CheckItem[] }>> {
+// ── 4-2 확인서 연결 모드(설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md §4-D·F9~F14·F23, "4-2 연동 규칙 기준") ──
+// 연결된 확인서에 장비·모니터·기타 칸이 있으면 보고 기기 = 확인서 ④ 기기(서버가 저장 때 다시 만듦 — 아래 saveReport 의 update 직전 한 곳).
+// 발송·재고 반영·앨범·예전 시트 채우기는 저장된 보고 줄을 다시 읽어 쓰므로 지금 코드 그대로.
+
+const MSG_LINK_READ_FAIL = '확인서 정보를 못 읽었어요 — 이 창에서 기기를 직접 적을 수 있어요(확인서와 연결된 건이면 잠시 뒤 창을 다시 열어 주세요).';
+const MSG_SAVE_LINK_FAIL =
+  '확인서 기기를 못 읽어서 창에 보이던 기기로 저장했어요 — 확인서와 연결된 건이면 잠시 뒤 [✏️ 고치기만]으로 한 번 더 저장해 주세요(그때 확인서 기기로 맞춰져요).';
+const MSG_SEND_LINK_FAIL_EMPTY = '확인서 기기를 못 읽었고 창에도 보낼 기기가 없어서 보내지 않았어요 — 잠시 뒤 창을 다시 열어 보내 주세요.';
+const MSG_ALREADY_SENT = '이 보고는 이미 카톡으로 보냈어요 — 바뀐 내용을 보내려면 [🔁 수정해서 다시 보내기]를 눌러 주세요.';
+const ACK_KINDS: readonly PrepReportAckKind[] = ['noUnits', 'dropUnits'];
+
+/** 확인서 기기 출처 읽기 — 표 없음(42P01/PGRST205)은 예전처럼(경고 없음), 그 밖 실패는 failed(F23). 로그는 code 만 */
+async function readLinkedSource(
+  eventId: string,
+  opts: LinkedReportSourceOptions,
+): Promise<{ linked: LinkedReportSource | null; failed: boolean }> {
+  try {
+    return { linked: await linkedReportSource(eventId, opts), failed: false };
+  } catch (err) {
+    if (isMissingSalesTable(err)) return { linked: null, failed: false };
+    console.warn('[prep] 확인서 기기 읽기 실패', (err as { code?: string } | null)?.code ?? 'unknown');
+    return { linked: null, failed: true };
+  }
+}
+
+const hasUnitId = (u: Pick<PrepUnit, 'serial' | 'assetId'>) => !!((u.serial ?? '').trim() || (u.assetId ?? '').trim());
+
+function ackMessage(need: PrepReportAckKind[], dropped: PrepUnitRef[]): string {
+  const lines: string[] = [];
+  if (need.includes('noUnits')) lines.push('확인서에 자산번호·시리얼을 적은 기기가 없어요. 기기 없이 보낼까요?');
+  if (need.includes('dropUnits')) {
+    const names = dropped.map((u) => u.assetId || u.serial);
+    const list = names.length > 5 ? `${names.slice(0, 5).join(', ')} 외 ${names.length - 5}대` : names.join(', ');
+    lines.push(
+      `지금 보고에 있는 기기 ${dropped.length}대(${list})는 확인서에 없어서 이번 저장에서 빠져요(카톡·IT재고에도 안 가요). ` +
+        '확인서에 적어야 하면 [확인서 빈 칸으로 옮기기]를 먼저 눌러 주세요. 그대로 진행할까요?',
+    );
+  }
+  return lines.join('\n');
+}
+
+export async function getPrepReport(
+  eventId: string,
+): Promise<Result<{ report: PrepReport | null; photoItems: CheckItem[]; linked: LinkedReportSource | null; linkWarning?: string }>> {
   const supabase = createAdminClient();
-  const [rep, items] = await Promise.all([
+  const [rep, items, link] = await Promise.all([
     supabase.from(REPORTS_TABLE).select('*').eq('event_id', eventId).maybeSingle(),
     supabase
       .from(PHOTO_ITEMS_TABLE)
@@ -80,12 +131,16 @@ export async function getPrepReport(eventId: string): Promise<Result<{ report: P
         // shipment_prep_checklist.sql 실행 전이면 grp 칸이 없어요 — 묶음 없이 읽기
         r.error ? await supabase.from(PHOTO_ITEMS_TABLE).select('label').order('sort_order').order('created_at') : r,
       ),
+    // 4-2: 연결된 확인서 기기(보기용 — 읽기만, 쓰기 없음)
+    readLinkedSource(eventId, { withBriefs: true, supabase }),
   ]);
   if (rep.error) return { ok: false, error: /it_prep_reports/.test(rep.error.message) ? 'supabase/shipment_prep_schema.sql 을 먼저 실행해주세요.' : rep.error.message };
   return {
     ok: true,
     report: rep.data ? toReport(rep.data as ReportRow) : null,
     photoItems: ((items.data ?? []) as { label: string; grp?: string }[]).map((i) => ({ label: i.label, grp: i.grp || '기타' })),
+    linked: link.linked,
+    ...(link.failed ? { linkWarning: MSG_LINK_READ_FAIL } : {}),
   };
 }
 
@@ -98,36 +153,103 @@ export type ReportDraft = {
   note: string;
 };
 
-export async function savePrepReport(eventId: string, draft: ReportDraft): Promise<Result> {
+/** 임시 저장. 4-2: 확인서 모드면 기기는 서버가 확인서에서 다시 만듦 — opts·결과는 lib/salesConfirms/types.ts 4-2 절 주석 */
+export async function savePrepReport(
+  eventId: string,
+  draft: ReportDraft,
+  opts?: PrepReportSaveOptions,
+): Promise<({ ok: true } & PrepReportSaved) | PrepReportFail> {
+  return saveReport(eventId, draft, 'save', opts);
+}
+
+/**
+ * 보고 저장 한 곳(임시 저장·발송·다시 보내기·고치기만이 모두 여기 — 예전 savePrepReport 본문).
+ * 4-2: 보고 기기를 확인서 기기로 바꿔 넣는 곳은 아래 update 직전 **이 한 곳**뿐(sendPrepReport 는 저장 뒤 보고 줄을 다시 읽어 씀).
+ */
+async function saveReport(
+  eventId: string,
+  draft: ReportDraft,
+  mode: 'save' | 'send' | 'resend' | 'fix',
+  opts?: PrepReportSaveOptions,
+): Promise<({ ok: true } & PrepReportSaved) | PrepReportFail> {
   try {
-    await ensureReport(eventId);
+    const row = await ensureReport(eventId);
+
+    // 4-2: 연결된 확인서(저장 연결·확실 자동 — 후보 아님)에 장비·모니터·기타 칸이 있으면 그 기기로(화면이 보낸 units 는 무시 — F9).
+    //   유지보수·소프트웨어만·연결 없음·확인서 표 없음 → 화면 기기 그대로(예전). 확인서를 못 읽음 → 화면 기기 + linkWarning(F23).
+    const acks = new Set(Array.isArray(opts?.ack) ? opts.ack.filter((k) => ACK_KINDS.includes(k)) : []);
+    const src = await readLinkedSource(eventId, { report: row, withBriefs: true });
+    let source: PrepUnit[] = draft.units;
+    let unitsFrom: PrepReportSaved['unitsFrom'] = 'draft';
+    let linkWarning: string | undefined;
+    let inventoryWarning: string | undefined;
+    if (src.failed) {
+      if ((mode === 'send' || mode === 'resend') && !draft.units.some(hasUnitId)) return { ok: false, error: MSG_SEND_LINK_FAIL_EMPTY };
+      linkWarning = MSG_SAVE_LINK_FAIL;
+    } else if (src.linked?.mode === 'confirm') {
+      inventoryWarning = src.linked.inventoryWarning ?? undefined;
+      // 자산번호·시리얼 있는 칸이 0대면 화면 기기 그대로(거절하지 않음) — 보내기 전엔 화면 확인(noUnits)을 거친 요청만
+      if (src.linked.units.length) {
+        source = src.linked.units;
+        unitsFrom = 'confirm';
+      }
+      const need: PrepReportAckKind[] = [];
+      if ((mode === 'send' || mode === 'resend') && !source.some(hasUnitId) && !acks.has('noUnits')) need.push('noUnits');
+      // 보고에 있던 기기가 빠지면(확인서에 없음) 조용히 지우지 않고 화면 확인(dropUnits)
+      const dropped = droppedReportUnits(row.units ?? [], source);
+      if (dropped.length && !acks.has('dropUnits')) need.push('dropUnits');
+      if (need.length) return { ok: false, needAck: need, ...(dropped.length ? { dropped } : {}), error: ackMessage(need, dropped) };
+    }
+    const units = source.map((u) => ({
+      serial: u.serial.trim(),
+      assetId: u.assetId.trim().toUpperCase(),
+      grade: u.grade,
+      model: (u.model ?? '').trim(),
+      gubun: (u.gubun ?? '').trim(),
+      spec: (u.spec ?? '').trim(),
+    }));
+
     const { error } = await createAdminClient()
       .from(REPORTS_TABLE)
       .update({
         company: draft.company.trim(),
         model: draft.model.trim(),
         author: draft.author.trim(),
-        units: draft.units.map((u) => ({
-          serial: u.serial.trim(),
-          assetId: u.assetId.trim().toUpperCase(),
-          grade: u.grade,
-          model: (u.model ?? '').trim(),
-          gubun: (u.gubun ?? '').trim(),
-          spec: (u.spec ?? '').trim(),
-        })),
+        units,
         checked_items: draft.checkedItems,
         note: draft.note,
         updated_at: new Date().toISOString(),
       })
       .eq('event_id', eventId);
     if (error) return { ok: false, error: error.message };
+
+    // 4-2(F4): 확실 자동 짝은 사람이 보고를 저장·발송한 지금 'auto' 로 굳힘(③ 이 비어 있을 때만 — 사람이 정한 것 안 덮음).
+    //   일정 하나에 자동 짝은 많아야 하나(resolvePrepLinks). 실패해도 보고 저장은 그대로(로그 code 만).
+    const autoLinked: PrepReportSaved['autoLinked'] = [];
+    const computed = src.linked?.confirms.find((c) => c.link === 'computed');
+    if (computed) {
+      try {
+        const r = await saveComputedAutoLink(computed.confirmId, eventId, draft.author);
+        if (r.saved) autoLinked.push({ confirmId: computed.confirmId, workUpdatedAt: r.workUpdatedAt });
+      } catch (err) {
+        console.warn('[prep] 확인서 자동 연결 저장 실패', (err as { code?: string } | null)?.code ?? 'unknown');
+      }
+    }
+
     // 같은 건 확인서(확인서리스트 시트 탭)의 출고시 기재 칸도 채움 — 응답 뒤에
     after(() =>
       syncPrepToConfirm(eventId)
         .then((r) => r.startsWith('written') && console.log('[prep→확인서]', eventId, r))
         .catch((e) => console.error('[prep→확인서] 실패:', eventId, e)),
     );
-    return { ok: true };
+    return {
+      ok: true,
+      unitsFrom,
+      units,
+      autoLinked,
+      ...(linkWarning ? { linkWarning } : {}),
+      ...(inventoryWarning ? { inventoryWarning } : {}),
+    };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -354,9 +476,19 @@ export async function sendPrepReport(
   photoItemCount: number,
   /** send = 처음 발송, resend = "[수정]" 붙여 다시 발송, fix = 고치기만(카톡 안 보냄) */
   mode: 'send' | 'resend' | 'fix' = 'send',
-): Promise<Result<{ message: string; stockPending: number }>> {
-  const saved = await savePrepReport(eventId, draft);
+  /** 4-2: 화면 확인을 거친 것(noUnits·dropUnits) — lib/salesConfirms/types.ts 4-2 절 */
+  opts?: PrepReportSaveOptions,
+): Promise<({ ok: true; message: string; stockPending: number } & PrepReportSaved) | PrepReportFail> {
+  // 4-2(F14): 처음 발송인데 이미 보낸 보고면 저장보다 먼저 거절 — 보낸 뒤 보고 사본(기기)이 안 바뀌게
+  if (mode === 'send') {
+    const { data: cur, error: curError } = await createAdminClient().from(REPORTS_TABLE).select('sent_at').eq('event_id', eventId).maybeSingle();
+    if (curError) return { ok: false, error: curError.message };
+    if ((cur as { sent_at: string | null } | null)?.sent_at) return { ok: false, alreadySent: true, error: MSG_ALREADY_SENT };
+  }
+  const saved = await saveReport(eventId, draft, mode, opts);
   if (!saved.ok) return saved;
+  const { ok: _savedOk, ...savedInfo } = saved;
+  void _savedOk;
   const supabase = createAdminClient();
   const report = await ensureReport(eventId);
   const { data: ev } = await supabase.from(CALENDAR_TABLE).select('date,title').eq('id', eventId).single();
@@ -379,11 +511,38 @@ export async function sendPrepReport(
   });
   const message = mode === 'resend' ? `[수정] ${built}` : built;
 
+  // 4-2(F14): 처음 발송은 카톡에 넣기 전에 "보냄"을 먼저 차지(sent_at 이 비어 있을 때만) — 두 창·두 사람이 같이 눌러도 카톡은 한 번.
+  //   resend·fix 는 안 막음. 차지한 값은 DB 가 돌려준 문자열 그대로 기억(카톡 넣기 실패 때 그 값일 때만 되돌림).
+  let claimedAt: string | null = null;
+  if (mode === 'send') {
+    const { data: claimed, error: claimError } = await supabase
+      .from(REPORTS_TABLE)
+      .update({ sent_at: new Date().toISOString() })
+      .eq('id', report.id)
+      .is('sent_at', null)
+      .select('sent_at');
+    if (claimError) return { ok: false, error: `발송 표시를 못 해서 카톡을 보내지 않았어요: ${claimError.message}` };
+    const got = (claimed ?? []) as { sent_at: string | null }[];
+    if (!got.length || !got[0].sent_at) return { ok: false, alreadySent: true, error: MSG_ALREADY_SENT };
+    claimedAt = got[0].sent_at;
+  }
+
   if (mode !== 'fix') {
     try {
       await enqueueOutbox(KAKAO_ROOM, message);
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      const reason = err instanceof Error ? err.message : String(err);
+      if (claimedAt) {
+        // 카톡이 안 나갔으니 내가 차지한 "보냄"만 되돌림(그 사이 다른 값으로 바뀌었으면 안 건드림)
+        const { error: undoError } = await supabase.from(REPORTS_TABLE).update({ sent_at: null }).eq('id', report.id).eq('sent_at', claimedAt);
+        if (undoError) {
+          return {
+            ok: false,
+            error: `${reason}\n카톡은 안 나갔는데 '보냄' 표시를 되돌리지 못했어요(${undoError.message}) — 창을 다시 열어 [🔁 수정해서 다시 보내기]로 보내 주세요.`,
+          };
+        }
+      }
+      return { ok: false, error: reason };
     }
   }
 
@@ -403,7 +562,7 @@ export async function sendPrepReport(
       await applyStockForReport(report.id, pending, ctx);
     });
   }
-  return { ok: true, message, stockPending: pending.length };
+  return { ok: true, message, stockPending: pending.length, ...savedInfo };
 }
 
 // ── IT재고 반영(납품·교체 → 위치 '임대중' + 비고 "yy.mm.dd 업체명") ────────────

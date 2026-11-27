@@ -1,7 +1,9 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import type { PrepEventRow } from '@/app/shipment-prep/actions';
+import { salesConfirmHref, type LinkedReportSource } from '@/lib/salesConfirms/types';
 import {
   addPhotoItem,
   deletePhotoItem,
@@ -25,19 +27,51 @@ import {
   shortDateLabel,
   type PrepPhoto,
   type PrepReport,
+  type PrepReportAckKind,
+  type PrepReportSaved,
   type PrepStockIssues,
   type PrepUnit,
 } from '@/lib/shipmentPrep';
+
+/** 확인서 모드 안내 문구용 — 뺀 확인서 이유 */
+const EXCLUDED_TEXT: Record<'deleted' | 'cancelled' | 'other', string> = {
+  deleted: '영업에서 지운 확인서예요',
+  cancelled: '처리여부가 \'취소\'예요',
+  other: '철수·이전·판매 확인서라 따로 봐요',
+};
+
+/** 닫을 수 없는 확인 창에 띄울 내용(서버가 needAck 로 돌려준 것) */
+type AckAsk = {
+  mode: 'save' | 'send' | 'resend' | 'fix';
+  need: PrepReportAckKind[];
+  error: string;
+  dropped: { assetId: string; serial: string }[];
+};
 
 /** 저장된 보고의 재고 반영 기록(창에서 고치는 중인 기기 목록이 아니라 서버에 저장된 것 기준) */
 type StockRecord = { units: PrepUnit[]; applied: string[]; issues: PrepStockIssues; updatedAt: string | null };
 const toStockRecord = (r: PrepReport): StockRecord => ({ units: r.units, applied: r.stockApplied, issues: r.stockIssues, updatedAt: r.updatedAt });
 
-type Props = { event: PrepEventRow; people: string[]; onClose: () => void };
+type Props = {
+  event: PrepEventRow;
+  people: string[];
+  onClose: () => void;
+  /** 확인서 상세에서 연 경우 그 확인서 id — 그 확인서의 [확인서에서 고치기]는 창을 닫기만 함 */
+  currentConfirmId?: string;
+  /** 저장·발송 결과로 확인서가 'auto' 로 굳었을 때(③ updated_at 이 바뀜) — 열린 확인서 상세가 값을 갱신하게 */
+  onAutoLinked?: (list: PrepReportSaved['autoLinked']) => void;
+};
 
 const blankUnit = (): PrepUnit => ({ serial: '', assetId: '', grade: '' });
 
-export default function PrepReportModal({ event, people, onClose }: Props) {
+export default function PrepReportModal({ event, people, onClose, currentConfirmId, onAutoLinked }: Props) {
+  // 4-2 확인서 모드: 연결된 확인서의 기기를 보기만(고치기는 확인서에서)
+  const [linked, setLinked] = useState<LinkedReportSource | null>(null);
+  const confirmMode = linked?.mode === 'confirm';
+  // 저절로 안 닫히는 주황 알림(확인서·IT재고를 못 읽음 등)
+  const [warns, setWarns] = useState<string[]>([]);
+  const [ackAsk, setAckAsk] = useState<AckAsk | null>(null);
+  const [alreadySent, setAlreadySent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -103,32 +137,44 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
       })
     : null;
 
+  /** 창을 열 때 한 번, "이미 보냈어요"를 받았을 때 한 번 더 — 서버에 저장된 모습으로 다시 채움 */
+  async function loadReport() {
+    const res = await getPrepReport(event.id);
+    if (!alive.current) return;
+    setLoading(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    setPhotoItems(res.photoItems);
+    const r = res.report;
+    const lk = res.linked;
+    setLinked(lk);
+    const w: string[] = [];
+    if (res.linkWarning) w.push(res.linkWarning);
+    if (lk?.inventoryWarning) w.push(lk.inventoryWarning);
+    setWarns(w);
+    const doneBy = Object.entries(event.prepChecks).find(([, e]) => e?.completed_at && !e.handed_off)?.[0] ?? '';
+    if (r) {
+      setCompany(r.company || event.company);
+      setModel(r.model || event.items.join(', '));
+      setAuthor((cur) => cur || r.author || doneBy);
+      setUnits(
+        lk?.mode === 'confirm' ? lk.units : r.units.length ? r.units : Array.from({ length: countUnits(event.items) }, blankUnit),
+      );
+      setNote(r.note);
+      setPhotos(r.photos);
+      setChecked(r.checkedItems);
+      setSentAt(r.sentAt);
+      setStock(toStockRecord(r));
+    } else {
+      setAuthor((cur) => cur || doneBy);
+      setUnits(lk?.mode === 'confirm' ? lk.units : Array.from({ length: countUnits(event.items) }, blankUnit));
+    }
+  }
   useEffect(() => {
-    (async () => {
-      const res = await getPrepReport(event.id);
-      setLoading(false);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setPhotoItems(res.photoItems);
-      const r = res.report;
-      const doneBy = Object.entries(event.prepChecks).find(([, e]) => e?.completed_at && !e.handed_off)?.[0] ?? '';
-      if (r) {
-        setCompany(r.company || event.company);
-        setModel(r.model || event.items.join(', '));
-        setAuthor(r.author || doneBy);
-        setUnits(r.units.length ? r.units : Array.from({ length: countUnits(event.items) }, blankUnit));
-        setNote(r.note);
-        setPhotos(r.photos);
-        setChecked(r.checkedItems);
-        setSentAt(r.sentAt);
-        setStock(toStockRecord(r));
-      } else {
-        setAuthor(doneBy);
-        setUnits(Array.from({ length: countUnits(event.items) }, blankUnit));
-      }
-    })();
+    void loadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event]);
 
   const draft = () => ({ company, model, author, units, checkedItems: checked.filter((c) => visibleLabels.includes(c)), note });
@@ -221,12 +267,50 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
     } else setError(res.error);
   }
 
-  async function saveDraft() {
+  /** 저장·발송 성공 때 같이 온 것을 창에 반영. 주황 알림이 있으면 true(창을 닫지 않고 보여 줌) */
+  function applySaved(res: PrepReportSaved): boolean {
+    if (res.unitsFrom === 'confirm') setUnits(res.units);
+    const w: string[] = [];
+    if (res.linkWarning) w.push(res.linkWarning);
+    if (res.inventoryWarning) w.push(res.inventoryWarning);
+    setWarns(w);
+    if (res.autoLinked?.length) onAutoLinked?.(res.autoLinked);
+    return w.length > 0;
+  }
+
+  /** 저장 안 함 실패 처리 — 확인이 필요하면 확인 창, 이미 보냈으면 안내. 처리했으면 true */
+  function handleFail(
+    res: { error: string; needAck?: PrepReportAckKind[]; dropped?: { assetId: string; serial: string }[]; alreadySent?: true },
+    mode: AckAsk['mode'],
+  ): boolean {
+    if (res.needAck?.length) {
+      setAckAsk({ mode, need: res.needAck, error: res.error, dropped: res.dropped ?? [] });
+      return true;
+    }
+    if (res.alreadySent) {
+      setAlreadySent(true);
+      setError('');
+      setInfo('');
+      void loadReport(); // 보낸 시각을 다시 읽어 [수정해서 다시 보내기]가 켜지게
+      return true;
+    }
+    return false;
+  }
+
+  async function saveDraft(ack?: PrepReportAckKind[]) {
     setBusy(true);
-    const res = await savePrepReport(event.id, draft());
-    setBusy(false);
-    if (res.ok) setInfo('임시 저장했어요.');
-    else setError(res.error);
+    setError('');
+    try {
+      const res = await savePrepReport(event.id, draft(), ack ? { ack } : undefined);
+      if (res.ok) {
+        applySaved(res);
+        setInfo('임시 저장했어요.');
+      } else if (!handleFail(res, 'save')) setError(res.error);
+    } catch (err) {
+      setError(`저장 중 오류가 났어요: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function send(mode: 'send' | 'resend' | 'fix') {
@@ -242,14 +326,20 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
           ? `수정한 내용을 "[수정]" 표시로 "${KAKAO_ROOM}" 카톡방에 다시 보낼까요?`
           : `"${KAKAO_ROOM}" 카톡방으로 보고를 보낼까요?`;
     if (!confirm(ask + stockNote)) return;
+    await runSend(mode);
+  }
+
+  /** 서버 호출 한 번. 확인 창에서 "예"를 누르면 같은 호출을 ack 를 넣어 다시 부름 */
+  async function runSend(mode: 'send' | 'resend' | 'fix', ack?: PrepReportAckKind[]) {
     setBusy(true);
     setError('');
     try {
-      const res = await sendPrepReport(event.id, draft(), visibleItems.length, mode);
+      const res = await sendPrepReport(event.id, draft(), visibleItems.length, mode, ack ? { ack } : undefined);
       if (!res.ok) {
-        setError(res.error);
+        if (!handleFail(res, mode)) setError(res.error);
         return;
       }
+      const hasWarn = applySaved(res);
       if (mode === 'fix') {
         setInfo('수정 내용을 저장했어요(카톡은 안 보냈어요).');
         if (res.stockPending > 0) void watchStock();
@@ -261,6 +351,11 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
       if (res.stockPending > 0) {
         setInfo('카톡 보고를 보냈어요.');
         void watchStock();
+        return;
+      }
+      if (hasWarn) {
+        // 주황 알림은 저절로 안 닫혀야 해서 창을 닫지 않음
+        setInfo('카톡 보고를 보냈어요. 아래 주황 알림을 확인해 주세요.');
         return;
       }
       onClose();
@@ -371,7 +466,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
 
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && !busy && !uploading && onClose()}>
-      <div className="modal" style={{ width: 760, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }}>
+      <div className="modal pr-modal" style={{ width: 760, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }}>
         <h2>📷 완료 보고</h2>
         <div className="sub">
           {shortDateLabel(event.date)} {event.kind} · {event.title}
@@ -402,13 +497,35 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
               </div>
             </div>
 
+            {warns.length > 0 && (
+              <div className="pr-warn" role="alert">
+                {warns.map((w) => (
+                  <div key={w}>⚠️ {w}</div>
+                ))}
+                <button type="button" className="pr-warn-x" onClick={() => setWarns([])} aria-label="알림 닫기">
+                  ×
+                </button>
+              </div>
+            )}
+
             <div className="detail-section-title">
               기기 {units.length}대
-              <button type="button" className="chip" style={{ marginLeft: 8 }} onClick={() => setUnits([...units, blankUnit()])}>
-                + 줄 추가
-              </button>
+              {!confirmMode && (
+                <button type="button" className="chip" style={{ marginLeft: 8 }} onClick={() => setUnits([...units, blankUnit()])}>
+                  + 줄 추가
+                </button>
+              )}
             </div>
-            <div style={{ display: 'grid', gap: 6 }}>
+            {confirmMode && linked && (
+              <ConfirmUnits
+                linked={linked}
+                units={units}
+                sentAt={sentAt}
+                currentConfirmId={currentConfirmId}
+                onClose={onClose}
+              />
+            )}
+            <div style={{ display: confirmMode ? 'none' : 'grid', gap: 6 }}>
               {units.map((u, i) => (
                 <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', paddingBottom: 8, borderBottom: '1px dashed var(--ink-100)' }}>
                   <span style={{ width: 22, color: 'var(--ink-400)' }}>{i + 1})</span>
@@ -664,6 +781,11 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
             </div>
           );
         })()}
+        {alreadySent && (
+          <div className="pr-warn" role="alert" style={{ marginTop: 8 }}>
+            ⚠️ 이미 보냈어요 — 카톡을 또 보내지 않았어요. 고칠 게 있으면 [🔁 수정해서 다시 보내기]를 눌러 주세요.
+          </div>
+        )}
         {info && <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: '#166534', marginTop: 8 }}>{info}</div>}
         {error && <div style={{ whiteSpace: 'pre-wrap', fontSize: 12.5, color: 'var(--red-600)', marginTop: 8 }}>{error}</div>}
 
@@ -690,7 +812,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy || !!uploading}>
             닫기
           </button>
-          <button type="button" className="btn btn-ghost" onClick={saveDraft} disabled={busy || loading}>
+          <button type="button" className="btn btn-ghost" onClick={() => void saveDraft()} disabled={busy || loading}>
             임시 저장
           </button>
           <button
@@ -712,7 +834,7 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
           </button>
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn-primary pr-send"
             onClick={() => send('send')}
             disabled={busy || loading || !!uploading || !!sentAt}
             title={sentAt ? '이미 발송했어요 — 수정해서 다시 보내기를 써주세요' : ''}
@@ -722,6 +844,43 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
         </div>
       </div>
 
+      {ackAsk && (
+        // 닫을 수 없는 확인 창 — 바깥을 눌러도 안 닫히고, [예]나 [취소]로만
+        <div className="modal-overlay open pcb-overlay" role="alertdialog" aria-modal="true">
+          <div className="modal pr-ack">
+            <h2>한 번 확인해 주세요</h2>
+            <div className="pr-ack-text">{ackAsk.error}</div>
+            {ackAsk.need.includes('dropUnits') && ackAsk.dropped.length > 0 && (
+              <ul className="pr-ack-list">
+                {ackAsk.dropped.map((d, i) => (
+                  <li key={`${d.assetId}-${d.serial}-${i}`}>
+                    {d.assetId || '(자산번호 없음)'}
+                    {d.serial ? ` · 시리얼 ${d.serial}` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={() => setAckAsk(null)}>
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const a = ackAsk;
+                  setAckAsk(null);
+                  if (a.mode === 'save') void saveDraft(a.need);
+                  else void runSend(a.mode, a.need);
+                }}
+              >
+                예, 이대로
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {zoom && (
         <PhotoLightbox
           photos={photos.map((p) => ({ url: p.url }))}
@@ -730,6 +889,91 @@ export default function PrepReportModal({ event, people, onClose }: Props) {
           onClose={() => setZoom(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** 확인서 모드의 기기 목록 — 보기만. 고치기는 확인서에서 */
+function ConfirmUnits({
+  linked,
+  units,
+  sentAt,
+  currentConfirmId,
+  onClose,
+}: {
+  linked: LinkedReportSource;
+  units: PrepUnit[];
+  sentAt: string | null;
+  currentConfirmId?: string;
+  onClose: () => void;
+}) {
+  const sources = linked.confirms.filter((c) => c.unitCount > 0 || c.deviceSlots > 0);
+  const sk = linked.skipped;
+  return (
+    <div className="pr-cu">
+      <div className="pr-cu-head">
+        📋 확인서 {sources.map((c) => c.docNo || '(순번 없음)').join(', ')}의 기기 {units.length}대를 보내요
+        <span className="pr-cu-sub"> — 기기는 확인서에서 적고, 여기서는 보기만 해요.</span>
+      </div>
+      <div className="pr-cu-btns">
+        {sources.map((c) =>
+          c.confirmId === currentConfirmId ? (
+            <button key={c.confirmId} type="button" className="btn btn-ghost pr-btn" onClick={onClose}>
+              닫고 확인서에서 고치기
+            </button>
+          ) : (
+            <Link key={c.confirmId} href={salesConfirmHref(c.confirmId)} className="btn btn-ghost pr-btn">
+              확인서에서 고치기{sources.length > 1 ? ` (${c.docNo || '순번 없음'})` : ''} →
+            </Link>
+          ),
+        )}
+      </div>
+
+      {units.length === 0 ? (
+        <div className="empty-state">확인서에 기기가 없어요. 확인서에서 자산번호·시리얼을 먼저 적어 주세요.</div>
+      ) : (
+        <ol className="pr-cu-list">
+          {units.map((u, i) => (
+            <li key={`${u.assetId}-${u.serial}-${i}`} className="pr-cu-item">
+              <div className="pr-cu-line">
+                <span className="pr-cu-no">{i + 1})</span>
+                <b>{u.assetId || '자산번호 없음'}</b>
+                <span className="pr-cu-serial">{u.serial ? `시리얼 ${u.serial}` : '시리얼 없음'}</span>
+              </div>
+              {(u.model || u.gubun || u.spec) && (
+                <div className="pr-cu-sub2">{[u.model, u.gubun, u.spec].filter(Boolean).join(' · ')}</div>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {linked.reportOnly.length > 0 && (
+        <div className="pr-warn" role="alert">
+          ⚠️ 보고에만 적혀 있는 기기 {linked.reportOnly.length}대(
+          {linked.reportOnly.map((r) => r.assetId || r.serial).join(', ')})는 확인서에 없어요. 이대로 저장·발송하면 이 기기는 빠져요.
+          확인서 화면 &lsquo;출고 준비&rsquo; 상자의 [보고 기기를 확인서로 옮기기]를 먼저 눌러 주세요.
+        </div>
+      )}
+      {linked.copyReports.map((c) => (
+        <div key={c.eventId} className="pr-warn" role="alert">
+          ⚠️ 같은 확인서의 다른 일정({c.date} {c.title})에서 이미 보고를 보냈어요. 또 보내면 카톡이 두 번 가요.
+        </div>
+      ))}
+      {sentAt && linked.changedSinceSent && (
+        <div className="pr-warn" role="alert">
+          ⚠️ 보고를 보낸 뒤 확인서의 기기가 바뀌었어요. 카톡·IT재고는 저절로 안 바뀌어요 — 다시 알리려면 [🔁 수정해서 다시 보내기]를 눌러 주세요.
+        </div>
+      )}
+      {linked.excluded.map((x) => (
+        <div key={x.confirmId} className="pr-note">
+          확인서 {x.docNo || '(순번 없음)'}는 보고 기기에서 빠져요 — {EXCLUDED_TEXT[x.reason]}.
+        </div>
+      ))}
+      {sk.orphan > 0 && <div className="pr-note">{sk.orphan}칸은 영업에서 빠진 칸이라 안 넣었어요.</div>}
+      {sk.empty > 0 && <div className="pr-note">{sk.empty}칸은 아직 자산번호·시리얼이 비어 있어서 안 넣었어요.</div>}
+      {sk.dupe > 0 && <div className="pr-note">같은 기기가 {sk.dupe}번 더 적혀 있어서 한 번만 넣었어요.</div>}
+      {sk.svc > 0 && <div className="pr-note">유지보수·소프트웨어 {sk.svc}칸은 완료 보고에 안 넣어요.</div>}
     </div>
   );
 }

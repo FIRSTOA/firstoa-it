@@ -335,6 +335,19 @@
 | integration-rules | **구현 전**: 카톡 문구·`stockTargetIds`·`applyStockUnit` 경로가 안 바뀌는지 기준 정함. **구현 후**: `reportActions.ts` diff — 처음 발송 막기, `units` 바꿔 넣기 위치(저장 전), 실패 때 경로, `after()` 시트 채우기 그대로 | — |
 | qa-checker | §9 QA 4-2 | — |
 
+#### 4-2 연동 규칙 기준 (integration-rules 구현 전 검사 2026-11-27 — 이 기준이 위 표보다 우선)
+- **바뀌면 안 되는 것**: 카톡 KAKAO_ROOM·enqueueOutbox 본문·buildPrepMessage(units 값만 다름), stockTargetIds(납품·교체만, 철수 제외)·retryPrepStock 철수 거절·6대 한도,
+  applyStockUnit(읽은 줄 자산번호 ≠ id 면 안 씀, 임대중+같은 tag 면 이력 중복 안 씀, not_found/error 구분)·recordStockOutcome(stock_applied·stock_issues), 순서 = 보고 저장 → after() 재고,
+  공개 앨범 report.id(보고 행을 지우고 다시 만들지 말 것), savePrepReport 의 after(syncPrepToConfirm)·lib/confirmLink.ts 조건. 보낸 뒤 확인서 변경은 표시만(자동 재발송·재반영 금지).
+- **units 교체 위치 = savePrepReport 안 update 직전 한 곳**(sendPrepReport 는 저장 뒤 DB 를 다시 읽으므로 모든 경로가 같은 사본). 정규화는 지금과 같게(trim·자산번호 대문자·같은 번호 1회),
+  grade 는 DB 기존 값 유지. 교체는 확인서 읽기 성공 + 장비·모니터·기타 칸 ≥1 일 때만(유지보수·소프트웨어만이면 draft 그대로). "연결됨" = ③ 저장 연결 또는 확실 자동만(후보로 덮지 말 것).
+  자산번호·시리얼 있는 칸 0대면 거절하지 말고 draft 그대로 + 화면 "0대 확인 창"을 거친 요청만.
+- **확인서 읽기 실패**: "연결 없음"과 구분. 실패면 draft.units 로 계속 + 결과 warning(naverWarning/sheetWarning 방식, lib/syncFailure.ts) → 화면 주황 알림. 단 send/resend 에서 draft.units 가 비어 있으면 거절. 로그는 code 만.
+- **처음 발송 서버 막기**: mode==='send' 이면 enqueueOutbox 전에 `update({sent_at: now}).eq('id', report.id).is('sent_at', null).select('id')` 0행이면 "이미 보냈어요" 거절,
+  enqueue 실패면 `.eq('sent_at', 내가 쓴 값)` 으로만 null 되돌림(되돌림 실패도 알림). 이미 보낸 보고의 send 거절은 savePrepReport **보다 먼저**(보낸 뒤 사본이 안 바뀌게). resend/fix 는 안 막음.
+- 반복문 안 시트·DB 호출 금지(한 번 색인), outbox INSERT 요청당 1회, after() 두 개 그대로, app/confirm-form/[id]/page.tsx maxDuration 60 → 300, 가져오기 코드는 ③④ import 금지(확인서 읽기는 별도 server-only).
+- 구현 후 integration-rules 체크리스트 12개(위 항목 + confirmLink 무변경·설명서/releases/CLAUDE.md 에 "카톡·IT재고에 쓰는지" 명시).
+
 ### 4-3
 | 누가 | 할 일 | 파일 |
 |---|---|---|

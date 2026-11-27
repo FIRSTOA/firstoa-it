@@ -1280,6 +1280,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         onReload={() => void reload(true)}
         serial={serial}
         toast={toast}
+        people={data.people}
       />
 
       {/* ── 핸드폰 아래 고정 막대 ── */}

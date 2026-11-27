@@ -4,12 +4,30 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
   getConfirmPrepLink,
+  getConfirmPrepReport,
+  importReportUnitsToConfirm,
   linkConfirmPrepEvent,
   resetConfirmPrepLink,
   unlinkConfirmPrepEvent,
 } from '@/app/confirm-form/prepLinkActions';
-import type { PrepLinkCandidate, PrepLinkGrade, PrepLinkSaveResult, PrepLinkState } from '@/lib/salesConfirms/types';
+import { getPrepEventRow, type PrepEventRow } from '@/app/shipment-prep/actions';
+import PrepReportModal from '@/components/shipmentPrep/PrepReportModal';
+import type {
+  LinkedReportSource,
+  PrepLinkCandidate,
+  PrepLinkGrade,
+  PrepLinkSaveResult,
+  PrepLinkState,
+} from '@/lib/salesConfirms/types';
 import { fmtDate } from './format';
+
+type ReportStatus = { event: PrepEventRow; linked: LinkedReportSource; role: 'source' | 'excluded' | 'notLinked' };
+const EXCLUDED_WHY = { deleted: '영업에서 지운 확인서예요', cancelled: "처리여부가 '취소'예요", other: '철수·이전·판매 확인서라 따로 봐요' } as const;
+const LEFT_WHY = {
+  noCategory: 'IT재고에서 품목을 못 찾아서',
+  noSlot: '같은 종류의 빈 칸이 없어서',
+  conflict: '그 사이 다른 사람이 그 칸을 고쳐서(멈췄어요)',
+} as const;
 
 interface Props {
   confirmId: string;
@@ -26,6 +44,8 @@ interface Props {
   /** 저장을 한 번에 하나씩 줄 세우는 함수(상세의 serial) */
   serial: <T,>(fn: () => Promise<T>) => Promise<T>;
   toast: { show: (m: string) => void; warn: (m: string) => void };
+  /** 처리자 명단(완료 보고 창의 작성자 고르기) */
+  people?: string[];
 }
 
 const GRADE_TEXT: Record<PrepLinkGrade, string> = {
@@ -46,15 +66,85 @@ export function prepEventHref(eventId: string): string {
 }
 
 /** 확인서 상세 위 "출고 준비" 상자 — 이 확인서가 출고 준비 리스트의 어느 일정과 이어졌는지 */
-export default function PrepLinkPanel({ confirmId, link, getWorkUpdatedAt, ensureActor, onSaved, onReload, serial, toast }: Props) {
+export default function PrepLinkPanel({ confirmId, link, getWorkUpdatedAt, ensureActor, onSaved, onReload, serial, toast, people = [] }: Props) {
   const [state, setState] = useState<PrepLinkState | null>(link);
   const [busy, setBusy] = useState('');
   const [showCands, setShowCands] = useState(false);
+  // 4-2 완료 보고
+  const [rep, setRep] = useState<ReportStatus | null>(null);
+  const [repState, setRepState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [reportEvent, setReportEvent] = useState<PrepEventRow | null>(null);
+  const [opening, setOpening] = useState(false);
 
   // 상세를 다시 읽어 새 값이 오면 따라감
   useEffect(() => {
     setState(link);
   }, [link]);
+
+  const linkedEventId = state && (state.kind === 'linked' || state.kind === 'auto') ? state.event?.eventId ?? null : null;
+
+  async function loadRep(eventId: string) {
+    setRepState('loading');
+    try {
+      const r = await getConfirmPrepReport({ confirmId, eventId });
+      if (r.ok) {
+        setRep(r.data);
+        setRepState('idle');
+      } else {
+        setRep(null);
+        setRepState('error');
+      }
+    } catch {
+      setRep(null);
+      setRepState('error');
+    }
+  }
+  useEffect(() => {
+    if (!linkedEventId) {
+      setRep(null);
+      setRepState('idle');
+      return;
+    }
+    void loadRep(linkedEventId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedEventId, confirmId]);
+
+  async function openReport() {
+    if (!linkedEventId || opening) return;
+    setOpening(true);
+    try {
+      const r = await getPrepEventRow(linkedEventId);
+      if (r.ok) setReportEvent(r.event);
+      else toast.warn(`완료 보고를 열지 못했어요 — ${r.error}`);
+    } catch (e) {
+      toast.warn(`완료 보고를 열지 못했어요 — ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  async function doImport() {
+    if (!linkedEventId || busy) return;
+    const who = await ensureActor();
+    if (!who) return;
+    setBusy('import');
+    try {
+      const res = await serial(() => importReportUnitsToConfirm({ confirmId, eventId: linkedEventId, actor: who }));
+      if (!res.ok) {
+        toast.warn(`옮기지 못했어요 — ${res.error}`);
+        return;
+      }
+      const left = res.left.map((l) => `${l.assetId || l.serial}(${LEFT_WHY[l.reason]})`).join(', ');
+      if (res.left.length) toast.warn(`${res.moved.length}대를 확인서로 옮겼어요. 못 옮긴 ${res.left.length}대: ${left}`);
+      else toast.show(res.moved.length ? `${res.moved.length}대를 확인서로 옮겼어요.` : '옮길 기기가 없었어요.');
+      if (res.changed) onReload(); // ④ updated_at 이 바뀌었으니 상세를 다시 읽음
+      await loadRep(linkedEventId);
+    } catch (e) {
+      toast.warn(`옮기지 못했어요 — ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      setBusy('');
+    }
+  }
 
   async function run(key: string, exec: (who: string, expected: string | null) => Promise<PrepLinkSaveResult>, doneMsg: string) {
     if (busy) return;
@@ -158,6 +248,52 @@ export default function PrepLinkPanel({ confirmId, link, getWorkUpdatedAt, ensur
               {busy === 'unlink' ? '푸는 중…' : '풀기'}
             </button>
           </div>
+
+          <div className="sc-pl-report">
+            <div className="sc-pl-rephead">
+              <b>📷 완료 보고</b>
+              {repState === 'loading' && !rep && <span className="sc-pl-note-inline">읽는 중…</span>}
+              {rep && (
+                <>
+                  <span className={`sc-pill ${rep.event.reportSent ? 'sc-pill-green' : 'sc-pill-gray'}`}>
+                    {rep.event.reportSent ? '보냄' : '아직 안 보냄'}
+                  </span>
+                  {rep.event.photoCount > 0 && <span className="sc-pill sc-pill-gray">사진 {rep.event.photoCount}장</span>}
+                  {rep.event.stockProblem > 0 && <span className="sc-pill sc-pill-amber">재고 반영 안 됨 {rep.event.stockProblem}대</span>}
+                  {rep.event.reportSent && rep.linked.changedSinceSent && <span className="sc-pill sc-pill-amber">보낸 뒤 확인서 바뀜</span>}
+                </>
+              )}
+            </div>
+            {repState === 'error' && (
+              <div className="ct-band warn sc-pl-band" role="status">
+                <span>보고 상태를 읽지 못했어요.</span>
+                <button type="button" className="btn btn-ghost sc-pl-btn" onClick={() => linkedEventId && void loadRep(linkedEventId)}>
+                  다시 읽기
+                </button>
+              </div>
+            )}
+            {rep?.role === 'excluded' && rep.linked.excluded.some((x) => x.confirmId === confirmId) && (
+              <div className="sc-pl-note">
+                이 확인서는 보고 기기에서 빠져요 — {EXCLUDED_WHY[rep.linked.excluded.find((x) => x.confirmId === confirmId)?.reason ?? 'other']}.
+              </div>
+            )}
+            {rep?.role === 'source' && rep.linked.reportOnly.length > 0 && (
+              <div className="ct-band warn sc-pl-band" role="status">
+                <span>
+                  보고에만 적혀 있는 기기 {rep.linked.reportOnly.length}대({rep.linked.reportOnly.map((r) => r.assetId || r.serial).join(', ')})가 확인서에 없어요.
+                  이대로 보고를 저장하면 빠져요.
+                </span>
+                <button type="button" className="btn btn-primary sc-pl-btn" disabled={!!busy} onClick={() => void doImport()}>
+                  {busy === 'import' ? '옮기는 중…' : '보고 기기를 확인서로 옮기기'}
+                </button>
+              </div>
+            )}
+            <div className="sc-pl-btns">
+              <button type="button" className="btn btn-primary sc-pl-btn" disabled={!!busy || opening} onClick={() => void openReport()}>
+                {opening ? '여는 중…' : '📷 완료 보고'}
+              </button>
+            </div>
+          </div>
         </>
       )}
 
@@ -221,6 +357,25 @@ export default function PrepLinkPanel({ confirmId, link, getWorkUpdatedAt, ensur
             </button>
           )}
         </div>
+      )}
+
+      {reportEvent && (
+        <PrepReportModal
+          event={reportEvent}
+          people={people}
+          currentConfirmId={confirmId}
+          onAutoLinked={(list) => {
+            // 이 확인서가 자동으로 굳었으면 ③ updated_at 이 바뀐 것 — 상세 값을 갱신해 가짜 충돌 방지
+            const mine = list.find((x) => x.confirmId === confirmId);
+            if (mine?.workUpdatedAt) onSaved(mine.workUpdatedAt);
+          }}
+          onClose={() => {
+            const id = reportEvent.id;
+            setReportEvent(null);
+            void loadRep(id);
+            onReload(); // 보고 저장으로 확인서 쪽이 바뀌었을 수 있어 상세를 다시 읽음
+          }}
+        />
       )}
     </section>
   );

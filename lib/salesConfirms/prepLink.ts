@@ -9,31 +9,56 @@ import 'server-only';
  *   동시 수정: 화면이 본 ③ updated_at(DB 문자열 그대로)과 같을 때만 .eq — 0줄이면 conflict.
  *   로그는 code 만(Supabase details 에 행 값이 들어감).
  * 가져오기 코드(importer·normalize·source·라우트)는 이 파일을 import 하지 말 것.
+ *
+ * 4-2(맨 아래 절 — §4-D): linkedReportSource(eventId) = 그 일정의 완료 보고 기기 출처(연결된 확인서 ④ 칸 → 보고 기기). 읽기만 —
+ *   ①④·캘린더·it_prep_reports 읽기 + IT재고 색인(5분 캐시) 한 번. 보고에 쓰는 것은 app/shipment-prep/reportActions.ts 저장 한 곳.
  */
-import { CALENDAR_TABLE, SALES_CONFIRMS_TABLE, SALES_CONFIRM_WORK_TABLE, createAdminClient } from '@/lib/supabase/server';
-import { isItPrepTarget, isPrepDone, isPrepInProgress, isPrepOverhaul, type PrepChecks } from '@/lib/shipmentPrep';
+import {
+  CALENDAR_TABLE,
+  SALES_CONFIRMS_TABLE,
+  SALES_CONFIRM_UNITS_TABLE,
+  SALES_CONFIRM_WORK_TABLE,
+  createAdminClient,
+} from '@/lib/supabase/server';
+import { findAssetBriefs } from '@/lib/inventory/assetIndex';
+import { isItPrepTarget, isPrepDone, isPrepInProgress, isPrepOverhaul, type PrepChecks, type PrepUnit } from '@/lib/shipmentPrep';
+import { sheetFailReason } from '@/lib/syncFailure';
 import { isMissingSalesTable, readDeliveryModes } from './listQuery';
+import { normalizeSalesConfirm } from './normalize';
 import { regionWithGuess } from './prepMatch';
 import {
   PREP_LINK_MAX_DAYS,
   companyMatch,
+  droppedReportUnits,
+  isReportSlotKind,
+  prepUnitsFromLines,
   resolvePrepLinks,
   salesTitleOf,
+  sameReportUnitSet,
   shiftYmd,
   sortCandidates,
   type LinkRuleConfirm,
   type LinkRuleEvent,
+  type PrepUnitsConfirmInput,
+  type ReportUnitBrief,
 } from './prepLinkRules';
+import { buildSlotLines, slotItems, toSalesItems, unitRowFromDb } from './slots';
 import {
   SALES_STATE_DELETED,
   isOtherSalesType,
   isPrepLinkSource,
   isSalesConfirmStatus,
+  type LinkedReportConfirm,
+  type LinkedReportExcluded,
+  type LinkedReportSource,
   type PrepConfirmBadge,
+  type PrepConfirmBadgeItem,
   type PrepLinkCandidate,
   type PrepLinkSaveResult,
   type PrepLinkSource,
   type PrepLinkState,
+  type SalesSlotLine,
+  type SalesUnitRow,
 } from './types';
 
 type Supa = ReturnType<typeof createAdminClient>;
@@ -517,4 +542,218 @@ export async function saveComputedAutoLink(
   if (error.code !== '23505') throw error;
   const again = await updateIfUnset();
   return { saved: !!again, workUpdatedAt: again };
+}
+
+// ───────────────────────── 4-2 완료 보고 기기 출처(§4-D · F9~F14) ─────────────────────────
+
+type Json = Record<string, unknown>;
+const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** ① 에서 칸 계산에 필요한 것만(payload 는 서버 안에서 지금 normalize 로 다시 읽음 — 응답에 안 실음) */
+const REPORT_SRC_CONFIRM_COLS = 'id,items,replace_info,payload';
+/** ④ 1단계부터 있는 칸만(블록 A 의 extra·diff_ack 는 보고 기기에 필요 없음 — 칸 없음 판정 없이 읽음) */
+const REPORT_SRC_UNIT_COLS =
+  'id,confirm_id,slot_key,unit_no,item_snapshot,asset_id,serial,actual_maker,actual_model,spec_override,checks,note,updated_at,updated_by';
+
+/**
+ * 확인서들의 칸(상세와 같은 계산 — 저장된 payload 를 지금 normalize 로, 안 읽히면 ① 칸 사본) + ④ 를 붙임.
+ * ①·④ 를 id 묶음으로 한 번씩(확인서마다 따로 안 읽음). 없는 확인서는 빠짐.
+ */
+export async function readSlotLinesFor(
+  supabase: Supa,
+  confirmIds: readonly string[],
+): Promise<Map<string, { lines: SalesSlotLine[]; orphans: SalesUnitRow[] }>> {
+  const ids = [...new Set(confirmIds.map(cleanId).filter(Boolean))];
+  const out = new Map<string, { lines: SalesSlotLine[]; orphans: SalesUnitRow[] }>();
+  if (!ids.length) return out;
+  const confirmRows: Json[] = [];
+  const unitsBy = new Map<string, SalesUnitRow[]>();
+  for (const part of chunks(ids, CHUNK)) {
+    const { data, error } = await supabase.from(SALES_CONFIRMS_TABLE).select(REPORT_SRC_CONFIRM_COLS).in('id', part);
+    if (error) throw error;
+    confirmRows.push(...((data ?? []) as unknown as Json[]));
+    const units = await readAllPages<Json>((a, b) =>
+      supabase
+        .from(SALES_CONFIRM_UNITS_TABLE)
+        .select(REPORT_SRC_UNIT_COLS)
+        .in('confirm_id', part)
+        .order('confirm_id')
+        .order('slot_key')
+        .order('unit_no')
+        .order('id')
+        .range(a, b) as unknown as PromiseLike<{ data: Json[] | null; error: unknown }>,
+    );
+    for (const r of units) {
+      const cid = String(r.confirm_id ?? '');
+      (unitsBy.get(cid) ?? unitsBy.set(cid, []).get(cid)!).push(unitRowFromDb(r));
+    }
+  }
+  for (const r of confirmRows) {
+    const id = String(r.id ?? '');
+    if (!id) continue;
+    const n = normalizeSalesConfirm(r.payload);
+    const rep = isObj(r.replace_info) ? { before: r.replace_info.before ?? null, after: r.replace_info.after ?? null } : null;
+    const items = n.ok ? slotItems(n.value) : slotItems({ items: toSalesItems(r.items), replaceInfo: rep });
+    out.set(id, buildSlotLines(items, unitsBy.get(id) ?? []));
+  }
+  return out;
+}
+
+/**
+ * 자산번호들 → IT재고 한 줄(같은 번호가 여러 탭이면 hint(품목 글자)에 맞는 쪽 — findAssetBriefs 규칙).
+ * 색인(lib/inventory/assetIndex — 5분 캐시)은 **한 번만** 읽음: 첫 번호에서 색인을 채우고 나머지는 메모리에서 찾음.
+ * 색인을 못 읽으면(시트 한도 등) 거기서 멈추고 error — 번호마다 시트를 다시 읽지 않게(나머지 번호는 안 부름).
+ */
+export async function readAssetBriefs(
+  list: readonly { assetId: string | null | undefined; hint?: string }[],
+): Promise<{ briefs: Record<string, ReportUnitBrief>; error: unknown }> {
+  const briefs: Record<string, ReportUnitBrief> = {};
+  const seen = new Set<string>();
+  for (const x of list) {
+    const id = String(x.assetId ?? '').trim().toUpperCase();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    try {
+      const [b] = await findAssetBriefs(id, x.hint ?? '');
+      if (b) briefs[id] = { category: b.category ?? '', gubun: b.gubun ?? '', specLabel: b.specLabel ?? '' };
+    } catch (err) {
+      return { briefs, error: err };
+    }
+  }
+  return { briefs, error: null };
+}
+
+export interface LinkedReportSourceOptions {
+  /** 지금 보고 줄(units·sent_at) — undefined 면 읽음, null 이면 보고 없음 */
+  report?: { units?: PrepUnit[] | null; sent_at?: string | null } | null;
+  /** IT재고 색인으로 구분·사양을 채움(보고 창·저장·발송). 상자 요약은 false — 시트를 안 읽음 */
+  withBriefs?: boolean;
+  supabase?: Supa;
+}
+
+const NO_SKIPPED: LinkedReportSource['skipped'] = { svc: 0, orphan: 0, empty: 0, dupe: 0 };
+
+function legacySource(confirms: LinkedReportConfirm[] = [], excluded: LinkedReportExcluded[] = []): LinkedReportSource {
+  return {
+    mode: 'legacy',
+    confirms,
+    excluded,
+    units: [],
+    skipped: { ...NO_SKIPPED },
+    reportOnly: [],
+    changedSinceSent: false,
+    copyReports: [],
+    inventoryWarning: null,
+  };
+}
+
+/**
+ * 일정 하나의 완료 보고 기기 출처(§4-D). 읽기만 — 쓰기 0(자동 짝 'auto' 저장은 부르는 쪽이 saveComputedAutoLink 로).
+ *   연결 = 출고 준비 배지와 같은 판정(resolvePrepLinks): ③ 에 저장된 연결('manual'·'auto') + 확실 자동('computed'). **후보는 안 셈.**
+ *   그중 영업에서 지움·처리여부 취소·따로 보는 종류는 뺌(excluded) — 취소된 확인서 기기가 카톡·IT재고로 가지 않게.
+ *   mode 'confirm' = 남은 확인서에 장비·모니터·기타 칸이 하나라도 있음. 아니면 'legacy'(보고 창에서 직접 — 지금 그대로).
+ * DB 오류는 던짐 — 부르는 쪽이 isMissingSalesTable 로 "표 없음(예전처럼)"과 "못 읽음(경고 + 화면 기기 — F23)"을 나눔.
+ * IT재고 색인 실패는 던지지 않고 inventoryWarning(구분·사양은 지금 보고 값).
+ */
+export async function linkedReportSource(eventId: string, opts: LinkedReportSourceOptions = {}): Promise<LinkedReportSource> {
+  const id = cleanId(eventId).toLowerCase();
+  if (!isUuid(id)) return legacySource();
+  const supabase = opts.supabase ?? createAdminClient();
+  const rows = await readCalendarByIds(supabase, [id]);
+  if (!rows.length) return legacySource();
+
+  // 1) 연결된 확인서 — 출고 준비 리스트 배지와 같은 읽기·판정
+  const g = await gather(supabase, { windows: windowsOf(rows.map((r) => r.date)), seedConfirms: [], seedEvents: rows });
+  const resolved = resolvePrepLinks(g);
+  const included: PrepConfirmBadgeItem[] = [];
+  const excluded: LinkedReportExcluded[] = [];
+  for (const b of resolved.byEvent.get(id)?.linked ?? []) {
+    if (!b.link) continue;
+    const reason: LinkedReportExcluded['reason'] | null = b.other ? 'other' : b.salesDeleted ? 'deleted' : b.status === '취소' ? 'cancelled' : null;
+    if (reason) excluded.push({ confirmId: b.confirmId, docNo: b.docNo, reason });
+    else included.push(b);
+  }
+  if (!included.length) return legacySource([], excluded);
+
+  // 2) 칸(①④ 한 번씩) · 지금 보고 · IT재고(색인 한 번)
+  const slotMap = await readSlotLinesFor(
+    supabase,
+    included.map((b) => b.confirmId),
+  );
+  const inputs: PrepUnitsConfirmInput[] = included
+    .filter((b) => slotMap.has(b.confirmId))
+    .map((b) => ({ confirmId: b.confirmId, docNo: b.docNo, lines: slotMap.get(b.confirmId)!.lines, orphans: slotMap.get(b.confirmId)!.orphans }));
+  let report = opts.report;
+  if (report === undefined) {
+    const { data, error } = await supabase.from(PREP_REPORTS_TABLE).select('units,sent_at').eq('event_id', id).maybeSingle();
+    if (error) throw error;
+    report = (data as { units: PrepUnit[] | null; sent_at: string | null } | null) ?? null;
+  }
+  const prevUnits = Array.isArray(report?.units) ? report!.units! : [];
+  let briefs: Record<string, ReportUnitBrief> = {};
+  let inventoryWarning: string | null = null;
+  if (opts.withBriefs) {
+    const wanted = inputs.flatMap((c) =>
+      c.lines
+        .filter((l) => isReportSlotKind(l.kind))
+        .flatMap((l) => l.slots.map((s) => ({ assetId: s.unit?.assetId ?? '', hint: `${l.item.cat} ${l.item.model}` }))),
+    );
+    const r = await readAssetBriefs(wanted);
+    briefs = r.briefs;
+    if (r.error) {
+      logFail('IT재고 색인 읽기(완료 보고 기기)', r.error);
+      inventoryWarning = `IT재고를 못 읽어서(${sheetFailReason(r.error)}) 구분·사양은 지금 보고 값으로 넣었어요 — 잠시 뒤 다시 저장하면 채워져요.`;
+    }
+  }
+  const built = prepUnitsFromLines({ confirms: inputs, briefs, prevUnits });
+
+  const confirms: LinkedReportConfirm[] = included
+    .map((b) => ({
+      confirmId: b.confirmId,
+      docNo: b.docNo,
+      company: b.company,
+      type: b.type,
+      deliveryDate: b.deliveryDate,
+      link: b.link as LinkedReportConfirm['link'],
+      status: b.status,
+      directShip: b.directShip,
+      deviceSlots: built.perConfirm[b.confirmId]?.deviceSlots ?? 0,
+      unitCount: built.perConfirm[b.confirmId]?.unitCount ?? 0,
+    }))
+    .sort((a, b) => a.docNo.localeCompare(b.docNo) || a.confirmId.localeCompare(b.confirmId));
+  if (built.deviceSlots === 0) return legacySource(confirms, excluded);
+
+  // 3) 같은 확인서의 복사본 일정(제목·날짜가 같은 다른 일정 — sure)에서 이미 보낸 보고(F14 경고)
+  const copies = new Map<string, PrepLinkCandidate>();
+  for (const b of included) {
+    const st = resolved.byConfirm.get(b.confirmId);
+    for (const c of [st?.event ?? null, ...(st?.candidates ?? [])]) {
+      if (c && c.grade === 'sure' && c.eventId !== id) copies.set(c.eventId, c);
+    }
+  }
+  const copyReports: LinkedReportSource['copyReports'] = [];
+  if (copies.size) {
+    const { data, error } = await supabase
+      .from(PREP_REPORTS_TABLE)
+      .select('event_id,sent_at')
+      .in('event_id', [...copies.keys()])
+      .not('sent_at', 'is', null);
+    if (error) throw error;
+    for (const r of (data ?? []) as { event_id: string; sent_at: string | null }[]) {
+      const c = copies.get(r.event_id);
+      if (c && r.sent_at) copyReports.push({ eventId: c.eventId, date: c.date, title: c.title, sentAt: r.sent_at });
+    }
+  }
+
+  return {
+    mode: 'confirm',
+    confirms,
+    excluded,
+    units: built.units,
+    skipped: built.skipped,
+    reportOnly: droppedReportUnits(prevUnits, built.units),
+    changedSinceSent: !!report?.sent_at && !sameReportUnitSet(prevUnits, built.units),
+    copyReports,
+    inventoryWarning,
+  };
 }
