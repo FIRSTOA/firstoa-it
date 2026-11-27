@@ -937,10 +937,10 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
             </button>
             {!isOther && (
               <>
-                <button type="button" className="btn btn-primary sc-pc-only" onClick={() => setPrintMode('fill')}>
+                {/* 핸드폰에서도 출력(2026-11-27 사용자 결정 — 예전엔 "출력은 PC에서") */}
+                <button type="button" className="btn btn-primary" onClick={() => setPrintMode('fill')}>
                   🖨 확인서 출력
                 </button>
-                <span className="sc-phone-only sc-muted">출력은 PC에서 해 주세요.</span>
               </>
             )}
           </span>

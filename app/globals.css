@@ -1812,7 +1812,7 @@ a.chip{text-decoration:none; display:inline-flex; align-items:center;}
 .sc-before-cell{display:flex; flex-direction:column; gap:1px; min-width:0;}
 .sc-before-val{font-size:13px; font-weight:600; color:var(--ink-700); word-break:break-word; white-space:pre-wrap;}
 @media (max-width:640px){
-  /* 출력 창 — 핸드폰은 영업 원본 축소 보기만(인쇄·모드 칩은 .sc-pc-only 로 숨김). 위 설정·알림, 아래 종이. 높이는 100vh 대신 overlay(inset:0)를 채움 */
+  /* 출력 창 — 핸드폰도 인쇄·모드 칩·2면 그대로(2026-11-27). 위 설정·알림, 아래 종이(줄여 보기). 높이는 100vh 대신 overlay(inset:0)를 채움 */
   .modal-overlay.sc-print-overlay{align-items:stretch; padding:0;}
   .sc-print{border-radius:0;}
   .sc-print-head{padding:10px 12px;}

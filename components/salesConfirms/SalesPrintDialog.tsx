@@ -354,7 +354,9 @@ type BuildState = { state: 'loading' } | { state: 'error'; error: string } | { s
 
 /**
  * 출력 창 — 영업 양식 그대로(가능하면 그 순간 영업 최신 양식) 미리보고 인쇄. 왼쪽: 보기 모드·키 고르기·설정·알림, 오른쪽: 종이.
- * 핸드폰(≤640px)은 인쇄·모드 칩을 숨김(영업 원본 축소 보기만 — 상세의 🖨 버튼은 PC 에서만 보임).
+ * 핸드폰(≤640px)도 같음 — 인쇄·모드 칩·2면 모두(2026-11-27 사용자 결정, 예전엔 PC 만). 위 설정·알림, 아래 종이(globals.css 핸드폰 블록).
+ * 인쇄는 미리보기 안 우리 스크립트가 window.print() — 안드로이드 크롬은 그 종이만 인쇄·PDF 저장. 아이폰은 앱 화면째 찍힐 수 있음(실기기 확인 전) →
+ * 그렇다는 신고가 오면 아이폰만 [인쇄] 대신 "PC에서" 안내로 되돌릴 것(종이를 우리 문서에 넣어 인쇄하는 길은 sandbox 규칙 때문에 쓰지 않음).
  */
 export default function SalesPrintDialog({
   detail,
@@ -736,11 +738,10 @@ export default function SalesPrintDialog({
                 : '영업 웹앱 확인서 그대로, IT 칸(출고시 기재)에 우리가 적은 값을 넣어요.'}
           </span>
           <span className="sc-print-head-btns">
-            <span className="sc-phone-only sc-muted sc-print-phone-note">인쇄는 PC에서 해 주세요.</span>
             <button type="button" className="btn btn-ghost" disabled={printing} onClick={onClose}>
               닫기
             </button>
-            <button type="button" className="btn btn-primary sc-pc-only" disabled={!canPrint} onClick={() => void print()}>
+            <button type="button" className="btn btn-primary" disabled={!canPrint} onClick={() => void print()}>
               {printing ? '인쇄 창 여는 중…' : '인쇄'}
             </button>
           </span>
@@ -772,7 +773,7 @@ export default function SalesPrintDialog({
               </div>
             )}
             {!isOther && (
-              <div className="sc-print-modes sc-pc-only">
+              <div className="sc-print-modes">
                 <div className="sc-sec-title">보기</div>
                 <div className="chip-group" role="group" aria-label="보기 모드">
                   <button type="button" className={`chip${mode === 'fill' ? ' active' : ''}`} aria-pressed={mode === 'fill'} onClick={() => setMode('fill')}>
@@ -859,7 +860,7 @@ export default function SalesPrintDialog({
             )}
 
             {!isOther && renderer === 'confirm' && (
-              <div className="sc-print-opts sc-pc-only">
+              <div className="sc-print-opts">
                 <div className="sc-sec-title">인쇄 설정</div>
                 <label className="toggle">
                   <input type="checkbox" checked={withBack && mode === 'fill'} disabled={mode !== 'fill'} onChange={(e) => changeWithBack(e.target.checked)} />

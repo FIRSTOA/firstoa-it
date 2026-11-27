@@ -237,6 +237,8 @@
   - 신호는 그대로 `{source:'sales-confirm', type:'sales-confirm:print|overflow|size'}` postMessage(넘침은 알림만).
   - 영업 실시간 HTML 의 그림(토끼 로고 `https://<영업>/confirm/rabbit.png`)은 **영업 로그인이 있어야 열림**(없으면 307 → /login, 우리 출력에선 X) →
     `itFill.applyFillPlan` 이 영업 주소의 `/confirm/…` 그림을 우리 `public/confirm/` 사본으로 바꿔 끼움(모든 출력·원본 보기 경로가 이 함수를 거침). 영업이 새 그림을 쓰면 우리 public 에도 사본.
+  - **핸드폰에서도 출력·인쇄**(2026-11-27 사용자 결정 — 예전 설계는 "출력은 PC에서"): 같은 출력 창·같은 인쇄 신호(iframe 안 window.print()). 아이폰이 앱 화면째 찍는다는 신고가 오면
+    아이폰만 [인쇄] 대신 안내로 되돌릴 것 — 종이를 우리 문서(같은 출처)에 넣어 인쇄하는 우회는 sandbox 규칙 위반이라 쓰지 말 것.
 - **라이선스 키**(`lib/contracts/salesConfirmLink.ts` — 계약관리 쪽 유일한 새 파일, 기존 contracts 파일은 import 만): 확인서 소프트웨어 칸 하나 = 좌석 하나.
   거래처 → 상품(`source='sales_confirm'`, `source_key='sales_confirm:<확인서id>:<제품명 정규화>'`) → 좌석(`'sales_confirm_unit:<④ id>'`) → 키(`writeSecret`).
   키 넣기·보기·대장 쓰기는 전부 `requireUnlock`. 대장에서 사람이 고친 칸은 ④ `extra.ledgerPushed` 와 비교해 안 덮음. 키 값은 ③④·로그·localStorage 어디에도 없음.

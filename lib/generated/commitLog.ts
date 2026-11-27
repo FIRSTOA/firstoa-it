@@ -3,6 +3,17 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "7a70fc28f0",
+    "date": "2026-11-27",
+    "time": "18:24",
+    "subject": "확인서 상세 · 예전 방식처럼 품목마다 표로 입력 — 사용자 요청(캡처: \"현재 바뀐 이 버전으로 작성되는 부분이 이렇게 입력할 수 있는 화면을 원하는 거야 품목에 맞춰서\" — 예전 시트 기재 화면처럼) · 품목마다 SlotLineBlock(왼쪽 작성시 요청사항 / 오른쪽 출고시: 제조사 한 칸 → applyLineValues({actualMaker}) 로 모든 줄, 줄마다 다르면 \"여러 개\"·빈 n줄에도) + 표 SlotTableRows(장비·모니터·기타 # 자산번호 S/N 모델명 사양 ⋯ ×, 유지보수 # 대상 자산번호 S/N, 소프트웨어 # 제품명 설치 PC 사용자 라이선스 키 — LicenseKeyField 그대로) · 한 줄 = ④ 한 행(저장·동시 수정·＋ 줄 추가·인쇄 때 차이 확인 그대로), 자산번호 나가면 fillFromStock 예전 규칙(빈 칸만·같은 제조사/종류 이름 모델 안 채움·이미 찾은 번호 다시 안 읽음), Enter = 다음 줄 자산번호, 메모·체크·칸별 사양·IT재고 다시 채우기는 ⋯ 펼침 · 사양 한 줄 specLine.ts(CPU / RAM / SSD / HDD / 그래픽, 없음 X — 읽히면 칸별 spec_override, 못 읽거나 모니터·기타면 ④ extra.specText 200자, SQL 없음) · printFill: 칸별 출고사양 없으면 specText 를 출고 사양 칸에 그대로(모니터·기타·추가 장·교체 \"출고: …\") · parseExtra·unitHasContent 에 specText · DeviceSlotCard·SoftwareSlotCard 지움 · 핸드폰 m-cards · 시트·네이버·카톡 쓰기 코드 변경 없음 · 설명서 sales-detail 다시 씀(+ 4-2 뒤 낡은 \"아직 따로\" 안내 고침)·releases·CLAUDE.md",
+    "crew": [
+      "developer",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "c49628436d",
     "date": "2026-11-27",
     "time": "18:08",
