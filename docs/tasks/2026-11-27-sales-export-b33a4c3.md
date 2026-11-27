@@ -547,3 +547,17 @@
    확인 방법: ?id=…&type=납품&html=1 응답의 <body> 에 data-it-spec="1" 이 있고,
    data-it="maker" 가 그 확인서 대수 합만큼 있는지.
 ```
+
+**추가(2026-11-27 사용자 결정 — 판매·철수·이전도 받음, 우리 쪽은 "따로 보기"만)**: 위 글을 보낼 때 7번 앞에 아래를 넣음(사용자에게 준 최종본).
+```
+7. 판매·철수·이전 확인서도 export 에 넣어 주세요
+   - type: '판매' | '철수' | '이전',  renderer: 'sale' | 'pull' | 'move'  (doc 도 다른 종류처럼 renderSale·renderPull·renderMove 에 그대로 넣는 전체)
+   - 한 줄 모양은 다른 종류와 같게: id · no · ver · type · term · savedAt · savedBy · createdAt · createdBy · company · address · region ·
+     deliveryDate(판매일·철수일·이전일) · contacts · special · items · status · deletedAt · deletedBy · docUrl · renderer · doc
+   - items: 품목마다 { cat(품목), model, maker, qty } — 철수·이전은 기기 줄마다
+   - 한 건 ?id=…&type=판매|철수|이전 와 &html=1(영업 양식 그대로, IT 칸 표시는 필요 없음)도 되게
+   - IT/복합기 구분 칸이 없으니 IT 것만 고르기 어려우면 전부 보내 주세요(IT 쪽에서 거릅니다)
+   - 판매 doc 의 items[].cost(매입가)는 빼고 보내 주세요(IT 쪽에서도 화면에 안 보냅니다)
+(참고) 영업 코드 주석에 실제 거래처 이름·담당자 휴대폰 번호 예시가 있어요(kakaoParse·sale·svc 등) — 가짜 값으로 바꿔 두시길 권합니다.
+```
+(번호는 원래 7·8 → 8·9 로 밀림.)

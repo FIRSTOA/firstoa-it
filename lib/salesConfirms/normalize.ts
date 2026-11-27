@@ -8,6 +8,7 @@ import type {
   SalesConfirmContacts,
   SalesConfirmItem,
   SalesConfirmSupply,
+  SalesOtherRenderer,
   SalesPrintExtra,
   SalesSpec,
   SalesSpecKey,
@@ -326,6 +327,43 @@ function formDocOf(doc: unknown, renderer: 'confirm' | 'swap' | 'svc' | null): R
   return copy;
 }
 
+/** 따로 보는 종류(판매·철수·이전)의 품목 — 맨 위 items 가 비면 doc 에서. 판매 cost(매입가)는 절대 안 읽음. 모양이 다르면 그 칸만 비움 */
+function otherItemsFromDoc(doc: unknown, kind: SalesOtherRenderer, typeText: string): SalesConfirmItem[] {
+  if (!isObj(doc)) return [];
+  const out: SalesConfirmItem[] = [];
+  if (kind === 'sale') {
+    const list = Array.isArray(doc.items) ? doc.items : [];
+    for (const it of list) {
+      if (!isObj(it)) continue;
+      const name = str(it.name);
+      const spec = str(it.spec);
+      if (!name && !spec) continue;
+      out.push({
+        cat: typeText || '판매',
+        model: name,
+        maker: str(it.maker),
+        state: '',
+        qty: svcQty(it.qty),
+        spec: {},
+        ...(spec ? { specExtra: { 사양: spec } } : {}),
+        place: '',
+        rent: null,
+      });
+    }
+  } else {
+    // pull·move: 자산번호·시리얼은 버림(items 칸이 없으면)
+    const list = Array.isArray(doc.units) ? doc.units : [];
+    for (const u of list) {
+      if (!isObj(u)) continue;
+      const item = str(u.item);
+      const model = str(u.model);
+      if (!item && !model) continue;
+      out.push({ cat: item || '기타', model, maker: str(u.maker), state: '', qty: 1, spec: {}, place: '', rent: null });
+    }
+  }
+  return out;
+}
+
 /** 글자(키 포함) 안에 NUL 문자가 있는지 — Postgres jsonb·text 가 거절함 */
 function hasNulChar(v: unknown, depth = 0): boolean {
   if (depth > 20) return false;
@@ -348,10 +386,16 @@ export function normalizeSalesConfirm(raw: unknown): NormalizeResult {
 
   const renderer: 'confirm' | 'swap' | 'svc' | null =
     raw.renderer === 'confirm' || raw.renderer === 'swap' || raw.renderer === 'svc' ? raw.renderer : null;
-  const formDoc = formDocOf(raw.doc, renderer);
+  const otherRenderer: SalesOtherRenderer | null =
+    raw.renderer === 'sale' || raw.renderer === 'pull' || raw.renderer === 'move' ? raw.renderer : null;
+  // 판매 doc 에는 매입가(cost)가 있음 — 따로 보는 종류는 formDoc 을 아예 안 만들어 브라우저로 안 감
+  const formDoc = otherRenderer ? null : formDocOf(raw.doc, renderer);
 
   let items: SalesConfirmItem[];
-  if (renderer === 'svc' && isObj(raw.doc) && Array.isArray(raw.doc.items)) {
+  if (otherRenderer) {
+    const top = (Array.isArray(raw.items) ? raw.items : []).map(itemOf).filter((x): x is SalesConfirmItem => x !== null);
+    items = top.length > 0 ? top : otherItemsFromDoc(raw.doc, otherRenderer, str(raw.type));
+  } else if (renderer === 'svc' && isObj(raw.doc) && Array.isArray(raw.doc.items)) {
     // 유지보수·소프트웨어: 맨 위 items 의 qty 는 '3대' 면 0 이라 doc 에서(영업 종이도 이름 있는 줄만·숫자만 셈)
     const kind = str(raw.type);
     items = [];
@@ -401,6 +445,7 @@ export function normalizeSalesConfirm(raw: unknown): NormalizeResult {
       reason: str(raw.reason),
       print: printOf(raw),
       renderer,
+      otherRenderer,
       formDoc,
       salesStatus,
       salesDeleted,
@@ -424,4 +469,40 @@ export function stableStringify(raw: unknown): string {
   if (typeof raw === 'number' && !Number.isFinite(raw)) return 'null';
   const s = JSON.stringify(raw);
   return s === undefined ? 'null' : s;
+}
+
+// ───────── 칸 다시 맞추기(2차 E29 — importer 가 씀, 순수라 Node 로 시험 가능) ─────────
+
+/** ① 기존 줄에서 읽은 칸(맞추기 비교용) */
+export interface StoredCompareRow {
+  first_saved_at: string | null;
+  saved_at: string | null;
+  sales_state: string | null;
+  type: string | null;
+  items: unknown;
+}
+
+/** 같은 시각인지 — ms 로 비교(DB 가 +00:00 꼴로 돌려줘도 같게). 둘 다 비면 같음 */
+export function sameTimeMs(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = a ? Date.parse(a) : NaN;
+  const y = b ? Date.parse(b) : NaN;
+  if (Number.isNaN(x) && Number.isNaN(y)) return true;
+  return x === y;
+}
+
+/** ① 에 써야 할 칸 값 중 지금 normalize 결과와 다른 칸만(sales_state·first_saved_at 규칙 포함). 없으면 null */
+export function repairPatch(
+  row: StoredCompareRow,
+  n: { savedAt: string | null; createdAt?: string | null; salesDeleted?: boolean; type: string; items: unknown },
+  deletedState: string,
+): Record<string, unknown> | null {
+  const patch: Record<string, unknown> = {};
+  const firstSaved = n.createdAt ?? n.savedAt;
+  if (!sameTimeMs(row.first_saved_at, firstSaved)) patch.first_saved_at = firstSaved;
+  if (!sameTimeMs(row.saved_at, n.savedAt)) patch.saved_at = n.savedAt;
+  const state = n.salesDeleted ? deletedState : '';
+  if ((row.sales_state ?? '') !== state) patch.sales_state = state;
+  if ((row.type ?? '') !== n.type) patch.type = n.type;
+  if (stableStringify(row.items ?? null) !== stableStringify(n.items ?? null)) patch.items = n.items;
+  return Object.keys(patch).length ? patch : null;
 }

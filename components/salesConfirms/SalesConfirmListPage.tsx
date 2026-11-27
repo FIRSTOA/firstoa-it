@@ -11,8 +11,10 @@ import {
 } from '@/app/confirm-form/salesActions';
 import {
   SALES_CONFIRM_ACTOR_KEY,
-  SALES_CONFIRM_DONE_STATUSES,
   SALES_CONFIRM_STATUSES,
+  SALES_STATE_DELETED,
+  isHiddenByDefault,
+  isOtherSalesType,
   salesConfirmHref,
   type SalesConfirmListData,
   type SalesConfirmListResult,
@@ -31,8 +33,14 @@ import SalesConfirmTable, { type SheetColumnState } from './SalesConfirmTable';
 const INTERVAL_MS = 60 * 1000;
 const COMPARE_KEY = 'firstoa-it.sales-confirm-sheet-compare';
 
-type StatusFilter = 'default' | 'all' | SalesConfirmStatus;
+/** 'deleted' = 영업에서 지운 건만(칩 "영업에서 지움 n") */
+type StatusFilter = 'default' | 'all' | 'deleted' | SalesConfirmStatus;
 type DateFilter = 'all' | 'today' | 'tomorrow' | 'week' | 'past';
+/**
+ * 목록 위 두 항목(2026-11-27 사용자: 판매·철수·이전은 출고 준비가 아니니 "별도의 항목으로만 우선 보이게").
+ * 'ship' = 출고 준비 확인서(납품·교체·유지보수·소프트웨어, 기본) · 'other' = 철수·이전·판매(isOtherSalesType)
+ */
+type ListGroup = 'ship' | 'other';
 
 const DATE_FILTERS: { key: DateFilter; label: string }[] = [
   { key: 'all', label: '전체' },
@@ -67,12 +75,22 @@ function matchDate(row: SalesConfirmListRow, f: DateFilter, today: string): bool
   return !!d && d < today; // past
 }
 
+/** 영업에서 지운 확인서(① sales_state) */
+function isSalesDeletedRow(row: SalesConfirmListRow): boolean {
+  return row.salesState === SALES_STATE_DELETED;
+}
+
+/** 따로 보는 종류(판매·철수·이전) — 서버 값이 없으면 종류 이름으로 */
+function isOtherRow(row: SalesConfirmListRow): boolean {
+  return row.other ?? isOtherSalesType(row.type);
+}
+
 function matchStatus(row: SalesConfirmListRow, f: StatusFilter, today: string): boolean {
   if (f === 'all') return true;
+  if (f === 'deleted') return isSalesDeletedRow(row);
   if (f !== 'default') return row.status === f;
-  // 기본: 안 끝난 건 + 끝난 건 중 납품일이 지난 7일 안(앞으로 올 것 포함)
-  if (!SALES_CONFIRM_DONE_STATUSES.includes(row.status)) return true;
-  return !!row.deliveryDate && row.deliveryDate >= addDays(today, -7);
+  // 기본 보기 숨김 규칙은 types.ts isHiddenByDefault 한 곳(지운 건·끝난 건 — 설계 E27·E28, 끝난 건도 납품일 7일 안은 보임)
+  return !isHiddenByDefault(row, today);
 }
 
 function matchSearch(row: SalesConfirmListRow, q: string): boolean {
@@ -102,6 +120,8 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   const [loadError, setLoadError] = useState(initialError);
   const [reloading, setReloading] = useState(false);
 
+  // 목록 위 두 항목(출고 준비 / 철수·이전·판매)
+  const [group, setGroup] = useState<ListGroup>('ship');
   // 필터
   const [statusF, setStatusF] = useState<StatusFilter>('default');
   const [typeF, setTypeF] = useState('all');
@@ -336,27 +356,36 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   // ───────── 보이는 줄 계산 ─────────
   const today = useMemo(() => kstToday(nowMs), [nowMs]);
 
+  // 두 항목 나누기 — 아래 칩·숫자·필터는 고른 항목 안에서만
+  const groupCounts = useMemo(() => {
+    let other = 0;
+    for (const r of rows) if (isOtherRow(r)) other += 1;
+    return { ship: rows.length - other, other };
+  }, [rows]);
+  const groupRows = useMemo(() => rows.filter((r) => isOtherRow(r) === (group === 'other')), [rows, group]);
+  const deletedCount = useMemo(() => groupRows.filter(isSalesDeletedRow).length, [groupRows]);
+
   const typeOptions = useMemo(() => {
     const count = new Map<string, number>();
-    for (const r of rows) if (r.type) count.set(r.type, (count.get(r.type) ?? 0) + 1);
+    for (const r of groupRows) if (r.type) count.set(r.type, (count.get(r.type) ?? 0) + 1);
     return [...count.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
-  }, [rows]);
+  }, [groupRows]);
 
   // 지역 칩 — 이름순(수도권A → E), 빈 지역은 '지역 없음'
   const regionOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const r of rows) set.add(r.region || '');
+    for (const r of groupRows) set.add(r.region || '');
     return [...set].sort((a, b) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b, 'ko')));
-  }, [rows]);
+  }, [groupRows]);
 
   const procOptions = useMemo(() => {
     const set = new Set<string>(meta.people);
-    for (const r of rows) for (const p of r.processors) set.add(p);
+    for (const r of groupRows) for (const p of r.processors) set.add(p);
     return [...set];
-  }, [rows, meta.people]);
+  }, [groupRows, meta.people]);
 
   const visible = useMemo(() => {
-    return rows.filter((r) => {
+    return groupRows.filter((r) => {
       if (!matchStatus(r, statusF, today)) return false;
       if (typeF !== 'all' && r.type !== typeF) return false;
       if (regionF !== 'all' && (r.region || '') !== regionF) return false;
@@ -365,13 +394,22 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
       if (procF !== 'all' && procF !== 'none' && !r.processors.includes(procF)) return false;
       return matchSearch(r, q);
     });
-  }, [rows, statusF, typeF, regionF, dateF, procF, q, today]);
+  }, [groupRows, statusF, typeF, regionF, dateF, procF, q, today]);
 
   // 화면을 그릴 때마다 맞춰 둠 — 열 때 비교(effect)가 첫 줄 목록을 바로 쓰게
   visibleIdsRef.current = visible.map((r) => r.id);
 
   const filtersChanged =
     statusF !== 'default' || typeF !== 'all' || regionF !== 'all' || dateF !== 'all' || procF !== 'all' || q.trim() !== '';
+
+  /** 항목을 바꾸면 그 항목에 없을 수 있는 구분·지역 칩은 풂(다른 필터는 그대로) */
+  function changeGroup(next: ListGroup) {
+    if (next === group) return;
+    setGroup(next);
+    setTypeF('all');
+    setRegionF('all');
+  }
+
   function clearFilters() {
     setStatusF('default');
     setTypeF('all');
@@ -450,7 +488,10 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     barError = netError;
   }
 
-  const showSheet = compare && !isPhone;
+  // 시트 비교는 출고 준비 확인서에서만(철수·이전·판매는 예전 시트와 맞출 게 없음)
+  const isOtherGroup = group === 'other';
+  const showSheet = compare && !isPhone && !isOtherGroup;
+  const groupLabel = isOtherGroup ? '철수·이전·판매' : '출고 준비 확인서';
 
   // ───────── 그리기 ─────────
   return (
@@ -479,6 +520,35 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
         </div>
       ) : (
         <>
+          <div className="sc-groupbar" role="group" aria-label="확인서 종류 나누기">
+            <button
+              type="button"
+              className={`sc-group-btn${group === 'ship' ? ' on' : ''}`}
+              aria-pressed={group === 'ship'}
+              onClick={() => changeGroup('ship')}
+            >
+              <span>출고 준비 확인서</span>
+              <b className="sc-group-n">{groupCounts.ship}</b>
+            </button>
+            <button
+              type="button"
+              className={`sc-group-btn other${group === 'other' ? ' on' : ''}`}
+              aria-pressed={group === 'other'}
+              onClick={() => changeGroup('other')}
+              title="철수·이전·판매 확인서 — 출고 준비 대상이 아니라 따로 모아 보기만 해요"
+            >
+              <span>철수·이전·판매</span>
+              <b className="sc-group-n">{groupCounts.other}</b>
+            </button>
+          </div>
+          {isOtherGroup && (
+            <div className="ct-band muted sc-other-note" role="note">
+              <span>
+                철수·이전·판매 확인서는 출고 준비 대상이 아니라 여기에 따로 모아 보여 줘요(자산번호·시리얼·출력 칸 없음). 처리여부·처리자는 바꿀 수 있어요.
+              </span>
+            </div>
+          )}
+
           <div className="panel sc-filters">
             <div className="search-row">
               <input
@@ -504,6 +574,17 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                       {s}
                     </button>
                   ))}
+                  {(deletedCount > 0 || statusF === 'deleted') && (
+                    <button
+                      type="button"
+                      className={`chip sc-chip-deleted${statusF === 'deleted' ? ' active' : ''}`}
+                      aria-pressed={statusF === 'deleted'}
+                      onClick={() => setStatusF('deleted')}
+                      title="영업 웹앱에서 지운 확인서만 보기(기본 보기에선 IT가 준비 중인 것만 빨갛게 남아요)"
+                    >
+                      영업에서 지움 {deletedCount}
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="filter-row">
@@ -567,7 +648,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
 
           <div className="count-row sc-toolbar">
             <span>
-              <b>{visible.length}</b>건 보임{rows.length !== visible.length ? ` (가져온 ${rows.length}건 중)` : ''}
+              <b>{visible.length}</b>건 보임{groupRows.length !== visible.length ? ` (${groupLabel} ${groupRows.length}건 중)` : ''}
               {meta.rangeLabel ? <span className="sc-range"> · {meta.rangeLabel}</span> : null}
               {reloading ? <span className="sc-range"> · 새로 읽는 중…</span> : null}
             </span>
@@ -577,15 +658,17 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
               </button>
             )}
             <span className="sc-toolbar-right">
-              <button
-                type="button"
-                className={`chip sc-pc-only${compare ? ' active' : ''}`}
-                aria-pressed={compare}
-                onClick={toggleCompare}
-                title="예전 확인서리스트 시트와 같은지 나란히 봐요(읽기만 해요)"
-              >
-                📄 시트와 비교
-              </button>
+              {!isOtherGroup && (
+                <button
+                  type="button"
+                  className={`chip sc-pc-only${compare ? ' active' : ''}`}
+                  aria-pressed={compare}
+                  onClick={toggleCompare}
+                  title="예전 확인서리스트 시트와 같은지 나란히 봐요(읽기만 해요)"
+                >
+                  📄 시트와 비교
+                </button>
+              )}
               {showSheet && (
                 <button type="button" className="chip sc-pc-only" disabled={sheet.state === 'loading'} onClick={() => void doCompare()}>
                   🔁 다시 비교
@@ -612,6 +695,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 rows={visible}
                 people={meta.people}
                 today={today}
+                other={isOtherGroup}
                 showSheet={showSheet}
                 sheet={sheet}
                 busyIds={busyIds}
@@ -620,14 +704,21 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 onProcessors={(r, list) => void onProcessors(r, list)}
               />
             )}
-            {rows.length === 0 && (
+            {groupRows.length === 0 && isOtherGroup && (
+              <div className="empty-state">
+                <div>📭</div>
+                <div>철수·이전·판매 확인서는 영업 웹앱에서 아직 보내지 않아요.</div>
+                <div className="sc-empty-sub">영업 웹앱이 보내기 시작하면 여기에 따로 모여요(출고 준비 확인서 목록에는 안 섞여요).</div>
+              </div>
+            )}
+            {groupRows.length === 0 && !isOtherGroup && (
               <div className="empty-state">
                 <div>📭</div>
                 <div>{meta.hasKey ? '아직 가져온 영업 확인서가 없어요.' : '영업 웹앱과 아직 연결되지 않아 가져온 확인서가 없어요.'}</div>
                 {meta.hasKey && <div className="sc-empty-sub">영업 웹앱에서 IT 확인서를 저장하면 여기에 나와요. 위의 [🔄 새로고침]을 눌러 보세요.</div>}
               </div>
             )}
-            {rows.length > 0 && visible.length === 0 && (
+            {groupRows.length > 0 && visible.length === 0 && (
               <div className="empty-state">
                 <div>🔍</div>
                 <div>조건에 맞는 확인서가 없어요. 필터를 바꿔 보세요.</div>

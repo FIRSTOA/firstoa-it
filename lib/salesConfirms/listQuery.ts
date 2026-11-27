@@ -19,11 +19,14 @@ import { regionWithGuess } from './prepMatch';
 import { buildSlotLines, recheckSlotCount, slotItems, slotProgress, toSalesItems, unitRowFromDb } from './slots';
 import {
   SALES_CONFIRM_DONE_STATUSES,
+  SALES_STATE_DELETED,
   contactLine,
   importStateFromRow,
+  isOtherSalesType,
   isSalesConfirmStatus,
   safeDocUrl,
   salesChangedSince,
+  salesTimeToIso,
   type SalesConfirmContacts,
   type SalesConfirmListResult,
   type SalesConfirmListRow,
@@ -180,12 +183,30 @@ interface ReadFlags {
   printedReady: boolean;
 }
 
-function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: SalesUnitRow[], flags: ReadFlags): SalesConfirmListRow {
+/** 영업에서 지운 건의 지운 시각·사람(① payload 의 그 두 칸만 — 목록은 payload 통째로 안 읽음) */
+interface DeletedInfo {
+  at: string | null;
+  by: string;
+}
+
+function buildRow(
+  c: ConfirmDbRow,
+  work: WorkDbRow | undefined,
+  units: SalesUnitRow[],
+  flags: ReadFlags,
+  deleted?: DeletedInfo,
+): SalesConfirmListRow {
+  const other = isOtherSalesType(c.type);
+  const isDeleted = c.sales_state === SALES_STATE_DELETED;
+  // 따로 보는 종류(판매·철수·이전)는 기기 칸·진행·출력 값을 안 만듦
   // 칸 계산은 slots.ts 한 곳(교체 건에 items 가 비면 after 를 1칸으로)
-  const items = slotItems({
-    items: toSalesItems(c.items),
-    replaceInfo: c.replace_info && typeof c.replace_info === 'object' ? (asObj(c.replace_info) as { before: unknown; after: unknown }) : null,
-  });
+  const items = other
+    ? []
+    : slotItems({
+        items: toSalesItems(c.items),
+        replaceInfo: c.replace_info && typeof c.replace_info === 'object' ? (asObj(c.replace_info) as { before: unknown; after: unknown }) : null,
+      });
+  if (other) units = [];
   const { lines, orphans } = buildSlotLines(items, units);
 
   // 품목 요약: 같은 품목구분끼리 합침(영업 수량 그대로)
@@ -270,7 +291,7 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: SalesUnit
     suppliesSummary: supplies.join(' · '),
     special: c.special ?? '',
     note: work?.note ?? '',
-    isNew: !work || !work.first_opened_at,
+    isNew: !isDeleted && (!work || !work.first_opened_at),
     salesChanged,
     salesState: c.sales_state ?? '',
     docUrl: safeDocUrl(c.doc_url),
@@ -281,6 +302,9 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: SalesUnit
     recheckCount: flags.unitsReady ? recheckSlotCount(lines) : 0,
     printedVer,
     printStale,
+    salesDeletedAt: isDeleted ? (deleted?.at ?? null) : null,
+    salesDeletedBy: isDeleted ? (deleted?.by ?? '') : '',
+    other,
   };
 }
 
@@ -351,11 +375,31 @@ async function readUnits(supabase: Supa, ids: string[]): Promise<{ map: Map<stri
   }
 }
 
+/** 지운 건의 지운 시각·사람 — payload 통째로 안 읽고 PostgREST 로 그 두 칸만. 못 읽어도 목록은 보여 줌(시각·사람만 빈 값) */
+async function readDeletedInfo(supabase: Supa, ids: string[]): Promise<Map<string, DeletedInfo>> {
+  const out = new Map<string, DeletedInfo>();
+  for (const part of chunks(ids, CHUNK)) {
+    const { data, error } = await supabase
+      .from(SALES_CONFIRMS_TABLE)
+      .select('id,deleted_at:payload->>deletedAt,deleted_by:payload->>deletedBy')
+      .in('id', part);
+    if (error) {
+      console.warn('[sales-confirms] 지운 정보 읽기 실패', (error as { code?: string }).code ?? 'unknown');
+      return out;
+    }
+    for (const r of (data ?? []) as unknown as { id: string; deleted_at: unknown; deleted_by: unknown }[]) {
+      out.set(r.id, { at: salesTimeToIso(r.deleted_at), by: asStr(r.deleted_by) });
+    }
+  }
+  return out;
+}
+
 async function rowsFor(supabase: Supa, confirms: ConfirmDbRow[]): Promise<SalesConfirmListRow[]> {
   const ids = confirms.map((c) => c.id);
-  const [work, units] = await Promise.all([readWork(supabase, ids), readUnits(supabase, ids)]);
+  const deletedIds = confirms.filter((c) => c.sales_state === SALES_STATE_DELETED).map((c) => c.id);
+  const [work, units, deleted] = await Promise.all([readWork(supabase, ids), readUnits(supabase, ids), readDeletedInfo(supabase, deletedIds)]);
   const flags: ReadFlags = { unitsReady: units.unitsReady, printedReady: work.printedReady };
-  return confirms.map((c) => buildRow(c, work.map.get(c.id), units.map.get(c.id) ?? [], flags));
+  return confirms.map((c) => buildRow(c, work.map.get(c.id), units.map.get(c.id) ?? [], flags, deleted.get(c.id)));
 }
 
 /** 시트 비교용: 고른 id 의 목록 줄(payload 없음) */

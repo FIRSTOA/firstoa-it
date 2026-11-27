@@ -1820,3 +1820,46 @@ a.chip{text-decoration:none; display:inline-flex; align-items:center;}
   .sc-print-area{flex:1 1 auto; min-height:0; padding:10px 4px;}
   .sc-before-grid{grid-template-columns:1fr 1fr;}
 }
+
+/* ── 영업 확인서 2차(2026-11-27) — 목록 위 두 항목(출고 준비 / 철수·이전·판매)·영업에서 지운 확인서 표시 ── */
+.sc-groupbar{display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 8px;}
+.sc-group-btn{
+  display:inline-flex; align-items:center; gap:8px; border:1px solid var(--ink-200); background:#fff; color:var(--ink-700);
+  border-radius:10px; padding:8px 14px; font:inherit; font-size:13.5px; font-weight:700; cursor:pointer; transition:.12s all;
+}
+.sc-group-btn:hover{background:var(--ink-100);}
+.sc-group-btn:focus-visible{outline:2px solid var(--indigo-600); outline-offset:2px;}
+.sc-group-n{display:inline-block; min-width:22px; padding:1px 7px; border-radius:999px; background:var(--ink-100); color:var(--ink-500); font-size:12px; text-align:center;}
+.sc-group-btn.on{background:var(--indigo-600); border-color:var(--indigo-600); color:#fff;}
+.sc-group-btn.on .sc-group-n{background:rgba(255,255,255,.22); color:#fff;}
+.sc-group-btn.other.on{background:var(--ink-700); border-color:var(--ink-700);}
+.sc-other-note{margin:0 0 10px;}
+/* 칩 "영업에서 지움 n" — 빨강(고르면 진한 빨강) */
+.chip.sc-chip-deleted{border-color:var(--red-100); color:var(--red-600);}
+.chip.sc-chip-deleted:hover{background:var(--red-50);}
+.chip.sc-chip-deleted.active{background:var(--red-600); border-color:var(--red-600); color:#fff;}
+/* 따로 보기 표 — 자산번호·시리얼 칸이 없어 좁음(SalesConfirmTable OTHER_COL_WIDTHS 합계) */
+.sc-table.sc-table-other{min-width:1594px;}
+/* 지운 줄 — 왼쪽 빨간 줄 + 빨간 배지 옆에 지운 시각·사람 작게 */
+.sc-row.sc-deleted td:first-child{box-shadow:inset 3px 0 0 var(--red-600);}
+.sc-del-flag{display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap;}
+.sc-del-meta{font-size:11px; font-weight:600; color:var(--red-600); white-space:nowrap;}
+/* 상세 지움 띠 */
+.sc-del-band b{font-weight:800;}
+.ct-band > span.sc-del-done{flex:0 0 auto; font-weight:800; padding:4px 10px; border-radius:8px; background:#fff; border:1px solid var(--red-100);}
+.ct-band .sc-del-btn{border-color:var(--red-100); color:var(--red-600); font-weight:800;}
+.ct-band .sc-del-btn:hover:not(:disabled){background:var(--red-50);}
+/* 출력 창 "영업에서 지운 걸 알고 뽑아요" */
+.sc-del-ack{margin-top:8px; color:var(--red-600); font-weight:800;}
+.sc-del-ack input{accent-color:var(--red-600);}
+@media (max-width:640px){
+  .sc-groupbar{margin:6px 0 8px;}
+  .sc-group-btn{flex:1 1 0; justify-content:center; min-height:44px; padding:8px 10px; font-size:14px;}
+  .sc-row.sc-deleted{border-color:var(--red-100); box-shadow:inset 3px 0 0 var(--red-600);}
+  .sc-row.sc-deleted td:first-child{box-shadow:none;}
+  .sc-del-meta{font-size:12px;}
+  .ct-band > span.sc-del-done{flex:1 1 100%; text-align:center;}
+  .ct-band .sc-del-btn{flex:1 1 100%; justify-content:center; min-height:44px;}
+  .sc-del-ack{font-size:14px; padding:4px 0;}
+  .sc-del-ack input{width:20px; height:20px;}
+}

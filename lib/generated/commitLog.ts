@@ -3,6 +3,18 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "d9c7f6b99b",
+    "date": "2026-11-27",
+    "time": "12:36",
+    "subject": "확인서/출고및반출준비 · 출력을 영업 웹앱 지금 양식 그대로 + 영업 변경 실시간(1차) — 사용자 요구(\"전략영업 확인서처럼 안 됨\", \"바뀐 건 실시간 동기화\")·영업 커밋 b33a4c3(export 칸 확장·새 양식) 반영, 설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md E1~E25 · 출력: 출력 창이 열 때 한 건 다시 받고 POST /api/sales-confirms/form-html(서버가 헤더 키로 영업 html=1 을 받아 JSON 으로만 감쌈 — text/html 안 냄, 2MB·4초) → DOMParser → IT 칸 표시(data-it) 확인 → itFill.applyFillPlan 이 textContent·createElement 로만 값 → sandbox iframe(allow-same-origin 없음), 표시가 없거나 영업이 안 되면 영업 양식 사본 b33a4c3(렌더러가 끄는 14개 파일, blob 그대로 + [IT 표시] 속성 자리만 — marks 없으면 원본과 글자까지 같음)으로 같은 길, 위에 \"영업 최신/받아 둔 양식 — 이유\" · 채울 값 printFill.buildFillPlan: 납품 = 새 양식 '출고시 기재사항' 대마다 5칸(요청과 다른 칸·토막 굵게 밑줄, 비워 둔 기기는 요청 값·\"요청과 같음\"), 교체 = 교체 후 열(\"출고 ○○\"), 유지보수·소프트웨어 = 'IT 기재 명세' 장, 2면 기본 끔, 금액 그대로, 원본 모드(영업 원본 보기) · 내용 동기화: 상세 열 때·보이는 동안 60초·탭 복귀·출력 때 그 한 건만 import {id}(⑤ 'one' 3초), 입력 중이면 [새로 보기], 목록 60초(겹침 55초)·since 어제(그날 첫 번 90일) · normalize: renderer·formDoc(svc 매입가 뺌)·salesDeleted·createdAt 등, 영업 시각을 한국 시각으로(9시간 늦던 것), svc 품목은 doc 에서 · 교체 건 교체 전 상자·\"교체 후 기기\"·교체 요청자 · 소프트웨어·교체·유지보수 출력 열림 · 설명서 confirm-form 출력·동기화 꼭지, releases, CLAUDE.md 출력 1차 절",
+    "crew": [
+      "feature-planner",
+      "developer",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "fb7b76b355",
     "date": "2026-11-27",
     "time": "12:36",

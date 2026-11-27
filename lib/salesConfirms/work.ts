@@ -38,6 +38,7 @@ import {
   unitRowFromDb,
 } from './slots';
 import {
+  isOtherSalesType,
   isSalesConfirmStatus,
   safeDocUrl,
   salesChangedSince,
@@ -572,6 +573,8 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
   if (!rec) return { ok: false, notFound: true, error: '확인서를 못 찾았어요 — 영업에서 지웠거나 주소가 틀렸을 수 있어요.' };
   const { row: c, confirm, ver, payloadHash: hash } = rec;
 
+  // 따로 보는 종류(판매·철수·이전): 기기 칸·출고 준비 후보·체크리스트·처리자 명단을 안 만듦(영업 값 보기만)
+  const other = isOtherSalesType(confirm.type);
   const notices: string[] = [];
   const soft = async <T,>(p: Promise<T>, fallback: T, where: string, notice: string): Promise<T> => {
     try {
@@ -584,11 +587,11 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
   };
 
   const [unitsRes, workRes, versionsRes, people, checklist] = await Promise.all([
-    readUnitsFor(supabase, id),
+    other ? Promise.resolve({ units: [] as SalesUnitRow[], schemaReady: true }) : readUnitsFor(supabase, id),
     readWorkRow(supabase, id),
     supabase.from(SALES_CONFIRM_VERSIONS_TABLE).select('id', { count: 'exact', head: true }).eq('confirm_id', id),
-    soft(readPeople(supabase), [] as string[], '처리자 명단 읽기', '처리자 명단을 못 읽었어요 — 이름은 직접 적어 주세요.'),
-    soft(readChecklist(supabase), [] as { label: string; grp: string }[], '체크리스트 읽기', '출고 체크리스트 항목을 못 읽었어요 — 잠시 뒤 새로고침해 주세요.'),
+    other ? Promise.resolve([] as string[]) : soft(readPeople(supabase), [] as string[], '처리자 명단 읽기', '처리자 명단을 못 읽었어요 — 이름은 직접 적어 주세요.'),
+    other ? Promise.resolve([] as { label: string; grp: string }[]) : soft(readChecklist(supabase), [] as { label: string; grp: string }[], '체크리스트 읽기', '출고 체크리스트 항목을 못 읽었어요 — 잠시 뒤 새로고침해 주세요.'),
   ]);
   // count head 는 오류 본문이 비어 판정에 안 씀 — 못 세면 0
   const versionCount = versionsRes.error ? 0 : (versionsRes.count ?? 0);
@@ -633,7 +636,7 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
     logSalesFail('③ 열람 표시', err);
   }
 
-  const items = slotItems(confirm);
+  const items = other ? [] : slotItems(confirm);
   const { lines, orphans } = buildSlotLines(items, unitsRes.units);
   const { region: effRegion, guessed } = regionWithGuess(confirm.region, confirm.address);
 
@@ -643,11 +646,13 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
 
   const assetIds = unitsRes.units.map((u) => u.assetId).filter(Boolean);
   const [prepHints, changes, assetElsewhere] = await Promise.all([
-    soft(loadPrepHints(supabase, confirm, effRegion), [], '출고 준비 후보 읽기', '같은 건으로 보이는 출고 준비 일정을 못 읽었어요 — 잠시 뒤 새로고침해 주세요.'),
+    other ? Promise.resolve([] as SalesConfirmDetailData['prepHints']) : soft(loadPrepHints(supabase, confirm, effRegion), [], '출고 준비 후보 읽기', '같은 건으로 보이는 출고 준비 일정을 못 읽었어요 — 잠시 뒤 새로고침해 주세요.'),
     salesChanged && seenVer !== null
       ? soft(loadSalesChanges(supabase, id, seenVer, seenHash, confirm), [] as string[], '판 비교 읽기', '영업에서 무엇이 바뀌었는지 못 읽었어요 — 영업 원본을 열어 확인해 주세요.')
       : Promise.resolve([] as string[]),
-    soft(findAssetElsewhere(supabase, id, assetIds), {} as Record<string, SalesAssetUse[]>, '같은 자산번호 읽기', '다른 확인서에 같은 자산번호가 있는지 못 읽었어요.'),
+    other
+      ? Promise.resolve({} as Record<string, SalesAssetUse[]>)
+      : soft(findAssetElsewhere(supabase, id, assetIds), {} as Record<string, SalesAssetUse[]>, '같은 자산번호 읽기', '다른 확인서에 같은 자산번호가 있는지 못 읽었어요.'),
   ]);
 
   const status: SalesConfirmStatus = work && isSalesConfirmStatus(work.status) ? work.status : '접수';

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { markSalesConfirmPrinted } from '@/app/confirm-form/salesDetailActions';
 import { getSalesPrintKeys } from '@/app/confirm-form/salesLicenseActions';
+import { isOtherSalesType } from '@/lib/salesConfirms/types';
 import type {
   ConfirmLicenseState,
   SalesConfirmDetailData,
@@ -16,6 +17,7 @@ import type {
   SalesPrintNote,
   SalesRenderer,
 } from '@/lib/salesConfirms/types';
+import { fmtDateTime } from './format';
 
 /*
  * 출력 창(설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md §3-H·E1·E4~E8·E14~E22).
@@ -273,6 +275,24 @@ function buildPrint(a: BuildArgs): SalesPrintBuild {
   return { html: it.serializeFilled(doc), source: 'copy', sourceReason: reason, missing: r.missing, notes, blocked: null };
 }
 
+/** 따로 보는 종류(철수·이전·판매)가 영업 실시간 HTML 을 못 받았을 때 — 받아 둔 사본이 없어 대신 그릴 수 없음 */
+const OTHER_NO_LIVE = '영업 웹앱에 연결이 안 돼 원본을 못 보여 줘요(이 종류는 받아 둔 양식이 없어요) — 잠시 뒤 다시 열어 주세요.';
+
+/**
+ * 따로 보는 종류 — 영업 원본(실시간 HTML)만. buildFillPlan·renderCopy 를 부르지 않음(renderer null, 우리 사본 없음).
+ * applyFillPlan 은 빈 채움 목록으로 한 번 — 값은 안 넣고 우리 인쇄·높이 신호 스크립트만 붙임(빈 목록이면 renderer 는 안 씀).
+ */
+function buildOtherPrint(it: ItFillMod, acq: Acquired): SalesPrintBuild {
+  if (!acq.liveHtml) {
+    const why = acq.liveFail ? ` (${acq.liveFail})` : '';
+    return { html: '', source: 'live', sourceReason: '', missing: [], notes: [], blocked: `${OTHER_NO_LIVE}${why}` };
+  }
+  const empty: SalesFillPlan = { cells: {}, back: null, stamp: '', svcSheet: null, regionFill: null, notes: [], blocked: null };
+  const doc = parseHtml(acq.liveHtml);
+  it.applyFillPlan(doc, empty, 'confirm');
+  return { html: it.serializeFilled(doc), source: 'live', sourceReason: '', missing: [], notes: [], blocked: null };
+}
+
 function readWithBack(): boolean {
   try {
     return localStorage.getItem(BACK_KEY) === '1';
@@ -324,12 +344,18 @@ export default function SalesPrintDialog({
   onSalesChanged,
 }: Props) {
   const confirmId = detail.confirm.id;
+  /** 따로 보는 종류(철수·이전·판매) — 영업 원본 보기만(모드 칩·2면·키 고르기 없음, 출력 기록 없음) */
+  const isOther = isOtherSalesType(detail.confirm.type) || !!detail.confirm.otherRenderer;
+  /** 영업에서 지운 확인서 — IT 기재 모드 인쇄는 "알고 뽑아요" 체크 뒤에만(E27) */
+  const salesDeleted = detail.confirm.salesDeleted === true;
   const detailRef = useRef(detail);
   detailRef.current = detail;
   const onSalesChangedRef = useRef(onSalesChanged);
   onSalesChangedRef.current = onSalesChanged;
 
-  const [mode, setMode] = useState<SalesPrintMode>(initialMode);
+  const [mode, setModeState] = useState<SalesPrintMode>(isOther ? 'original' : initialMode);
+  const setMode = (m: SalesPrintMode) => setModeState(isOther ? 'original' : m);
+  const [deletedAck, setDeletedAck] = useState(false);
   const [withBack, setWithBack] = useState(false);
   const [keyChoice, setKeyChoice] = useState<KeyChoice>(null);
   const [licenseKeys, setLicenseKeys] = useState<Record<string, string>>({});
@@ -482,6 +508,7 @@ export default function SalesPrintDialog({
     if (modsError) return { state: 'error', error: '출력 화면을 불러오지 못했어요. 새로고침(F5) 뒤 다시 열어 주세요.' };
     if (!mods || !acq) return { state: 'loading' };
     try {
+      if (isOther) return { state: 'ok', b: buildOtherPrint(mods.it, acq) };
       const b = buildPrint({
         mods,
         acq,
@@ -500,7 +527,7 @@ export default function SalesPrintDialog({
     } catch (e) {
       return { state: 'error', error: `출력 화면을 만들지 못했어요 — ${e instanceof Error ? e.message : '알 수 없는 오류'}` };
     }
-  }, [modsError, mods, acq, detail, mode, withBack, keyChoice, licenseKeys, nowIso, actor, liveChoice, choiceMissing]);
+  }, [modsError, mods, acq, isOther, detail, mode, withBack, keyChoice, licenseKeys, nowIso, actor, liveChoice, choiceMissing]);
 
   const b = built.state === 'ok' ? built.b : null;
   const html = b?.html ?? '';
@@ -555,7 +582,14 @@ export default function SalesPrintDialog({
 
   const keyGate = needKeyChoice && keyChoice === null;
   const needLiveChoice = mode === 'fill' && !!b && b.source === 'live' && b.missing.length > 0 && liveChoice === 'ask';
-  const canPrint = !!b && !b.blocked && !!html && !keyGate && !needLiveChoice && !keysBusy && !printing;
+  // 지운 확인서 — IT 기재 넣음(출력 기록이 남는 쪽)은 체크해야 인쇄. 원본 모드는 지금처럼
+  const deletedGate = mode === 'fill' && salesDeleted && !deletedAck;
+  const canPrint = !!b && !b.blocked && !!html && !keyGate && !needLiveChoice && !deletedGate && !keysBusy && !printing;
+  const deletedMeta = salesDeleted
+    ? [detail.confirm.deletedAt ? fmtDateTime(detail.confirm.deletedAt) : '', (detail.confirm.deletedBy ?? '').trim()]
+        .filter((v) => v && v !== '-')
+        .join(' · ')
+    : '';
 
   async function print() {
     if (!canPrint || !mods) return;
@@ -614,9 +648,11 @@ export default function SalesPrintDialog({
         <div className="sc-print-head">
           <h2>{mode === 'original' ? '📄 영업 원본 보기' : '🖨 확인서 출력'}</h2>
           <span className="sc-muted">
-            {mode === 'original'
-              ? '영업 웹앱이 뽑는 종이 그대로예요. IT 값은 안 들어가고 출력 기록도 안 남아요.'
-              : '영업 웹앱 확인서 그대로, IT 칸(출고시 기재)에 우리가 적은 값을 넣어요.'}
+            {isOther
+              ? '철수·이전·판매 확인서는 영업 웹앱 원본만 보여 줘요(IT 기재 없음, 출력 기록도 안 남아요).'
+              : mode === 'original'
+                ? '영업 웹앱이 뽑는 종이 그대로예요. IT 값은 안 들어가고 출력 기록도 안 남아요.'
+                : '영업 웹앱 확인서 그대로, IT 칸(출고시 기재)에 우리가 적은 값을 넣어요.'}
           </span>
           <span className="sc-print-head-btns">
             <span className="sc-phone-only sc-muted sc-print-phone-note">인쇄는 PC에서 해 주세요.</span>
@@ -636,22 +672,42 @@ export default function SalesPrintDialog({
 
         <div className="sc-print-body">
           <div className="sc-print-side">
-            <div className="sc-print-modes sc-pc-only">
-              <div className="sc-sec-title">보기</div>
-              <div className="chip-group" role="group" aria-label="보기 모드">
-                <button type="button" className={`chip${mode === 'fill' ? ' active' : ''}`} aria-pressed={mode === 'fill'} onClick={() => setMode('fill')}>
-                  IT 기재 넣음
-                </button>
-                <button
-                  type="button"
-                  className={`chip${mode === 'original' ? ' active' : ''}`}
-                  aria-pressed={mode === 'original'}
-                  onClick={() => setMode('original')}
-                >
-                  영업 원본 그대로
-                </button>
+            {salesDeleted && (
+              <div className="ct-band bad sc-key-box" role="alert">
+                <div>
+                  <b>영업에서 이 확인서를 지웠어요</b>
+                  {deletedMeta ? `(${deletedMeta})` : ''}
+                  <div className="sc-key-box-sub">출고를 멈출지 영업에 먼저 확인하세요.</div>
+                  {mode === 'fill' && (
+                    <>
+                      <label className="toggle sc-del-ack">
+                        <input type="checkbox" checked={deletedAck} onChange={(e) => setDeletedAck(e.target.checked)} />
+                        영업에서 지운 걸 알고 뽑아요
+                      </label>
+                      {!deletedAck && <div className="sc-key-box-sub">체크해야 [인쇄]가 켜져요.</div>}
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
+            {!isOther && (
+              <div className="sc-print-modes sc-pc-only">
+                <div className="sc-sec-title">보기</div>
+                <div className="chip-group" role="group" aria-label="보기 모드">
+                  <button type="button" className={`chip${mode === 'fill' ? ' active' : ''}`} aria-pressed={mode === 'fill'} onClick={() => setMode('fill')}>
+                    IT 기재 넣음
+                  </button>
+                  <button
+                    type="button"
+                    className={`chip${mode === 'original' ? ' active' : ''}`}
+                    aria-pressed={mode === 'original'}
+                    onClick={() => setMode('original')}
+                  >
+                    영업 원본 그대로
+                  </button>
+                </div>
+              </div>
+            )}
 
             {needLiveChoice && b && (
               <div className="ct-band warn sc-key-box" role="alert">
@@ -721,7 +777,7 @@ export default function SalesPrintDialog({
               </div>
             )}
 
-            {renderer === 'confirm' && (
+            {!isOther && renderer === 'confirm' && (
               <div className="sc-print-opts sc-pc-only">
                 <div className="sc-sec-title">인쇄 설정</div>
                 <label className="toggle">

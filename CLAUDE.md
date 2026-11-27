@@ -149,7 +149,16 @@
     상태 띠·홈이 읽는 곳은 늘 'main' 만. 바뀐 건은 ②(판 원문) 먼저 → ①(그래야 실패해도 다음에 저절로 맞춰짐).
   - export 새 칸(영업 b33a4c3): status('deleted')·deletedAt/By·createdAt/By·renderer('confirm'|'swap'|'svc')·doc(영업 출력 함수에 그대로 넣는 확인서 전체).
     normalize → `renderer`·`formDoc`(svc 는 items[].cost 매입가 뺌 — 브라우저로 감)·`salesDeleted`(deleted 이고 savedAt ≤ deletedAt — 영업 납품·교체 저장이 지움 표시를 안 지움).
-    svc(유지보수·소프트웨어) items 는 doc.items 에서(이름 빈 줄 빼고, '3대'→3). 지운 확인서 화면 표시는 2차(설계 E26~E28).
+    svc(유지보수·소프트웨어) items 는 doc.items 에서(이름 빈 줄 빼고, '3대'→3).
+  - **영업에서 지움(2차, E26~E29)**: ① `sales_state = '지움'`(SALES_STATE_DELETED) ↔ ''(되살아남). 목록 기본 숨김은 `isHiddenByDefault`(types.ts) 한 곳 —
+    지운 건은 숨기되 IT가 손댄 건(준비중·준비완료·출고·보류)은 빨갛게 남김, 끝난 건(출고·취소)은 납품일 7일 안이거나 "영업에서 수정됨"이면 남김. ③ 처리여부는 **자동으로 안 바꿈**(상세 [처리여부를 '취소'로]).
+    홈은 지운 건·따로 보는 종류를 숫자에서 빼고 "영업에서 지웠는데 준비 중 n"(bad). 지운 건 출력은 확인 체크해야.
+    `first_saved_at = createdAt ?? savedAt`. **칸 다시 맞추기**: 그날 첫 90일 또는 날짜 골라 받기 때만, hash 가 같아도 ① first_saved_at·saved_at·sales_state·type·items 가
+    지금 normalize 와 다르면 그 칸만 고침(② 안 씀, ⑤ counts.repaired) — 옛 9시간 어긋난 줄을 SQL 없이 바로잡는 길. 원문 싣는 묶음 50.
+  - **판매·철수·이전 = "따로 보기"(2026-11-27 사용자: 받되 출고 준비가 아니니 별도 항목으로만)**: `isOtherSalesType(type)`(출고 준비 종류 SALES_SHIP_TYPES 밖이면 전부)
+    → 목록 별도 칩, 기기 칸·IT 출력·홈 숫자 없음, 상세는 영업 값 + `영업 원본 보기`(영업 실시간 HTML 만 — 사본 없음). normalize 는 renderer null·`otherRenderer`(sale·pull·move)·
+    formDoc null(판매 doc 의 items[].cost 매입가가 브라우저로 안 가게 — ①② payload 원문엔 남으니 payload 를 화면에 보내는 코드를 만들면 거를 것).
+    영업 export 에 아직 없음 — 영업에 추가 요청(설계 §11 7번).
   - ver 0~2147483647 밖·`\u0000` 든 건은 그 건만 건너뜀(묶음 실패 방지). 일부만 모양이 다르면 나머지 반영 + 'bad_shape' 주황 띠.
 - **표**(`supabase/sales_confirms_schema.sql`, 칸 이름은 `lib/salesConfirms/types.ts` 맨 위 주석이 기준): ①② 영업 원본 = **importer.ts 만 씀**,
   ③ work·④ units = IT 값 = 화면 액션만 씀. **가져오기 코드(normalize·source·importer·route)는 ③④ 표 이름을 import 도 하지 말 것**(IT 값 덮어쓰기를 구조로 막음).

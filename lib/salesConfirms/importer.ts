@@ -1,10 +1,11 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
 import { createAdminClient, SALES_CONFIRMS_TABLE, SALES_CONFIRM_VERSIONS_TABLE, SALES_IMPORT_STATE_TABLE } from '@/lib/supabase/server';
-import { describeShape, extractRecords, normalizeSalesConfirm, stableStringify } from './normalize';
+import { describeShape, extractRecords, normalizeSalesConfirm, repairPatch, stableStringify, type StoredCompareRow } from './normalize';
 import { fetchSalesConfirmOne, fetchSalesConfirms, SALES_ID_PATTERN } from './source';
 import {
   importStateFromRow,
+  SALES_STATE_DELETED,
   type NormalizedSalesConfirm,
   type SalesImportCounts,
   type SalesImportErrorCode,
@@ -28,6 +29,8 @@ const CLAIM_GAP_ONE_MS = 3_000;
 // ⑤ 의 'one'(한 건 받기 간격)·'html'(양식 중계 간격) 줄 — 'main'(목록 상태 띠)과 섞이지 않게, 상태를 읽는 곳은 늘 'main' 만
 export type ClaimRowId = 'one' | 'html';
 const CHUNK = 200;
+// 원문(payload)을 싣는 묶음은 작게(요청 크기·시간 제한)
+const PAYLOAD_CHUNK = 50;
 
 type DbError = { code?: string | null; message?: string | null } | null | undefined;
 
@@ -99,6 +102,8 @@ function salesColumns(p: Prepared) {
     type: n.type,
     term: n.term,
     saved_at: n.savedAt,
+    first_saved_at: n.createdAt ?? n.savedAt,
+    sales_state: n.salesDeleted ? SALES_STATE_DELETED : '',
     saved_by: n.savedBy,
     sales_rep: n.salesRep,
     company: n.company,
@@ -205,30 +210,41 @@ async function applyPrepared(
   byId: Map<string, Prepared>,
   counts: SalesImportCounts,
   nowIso: string,
+  repair = false,
 ): Promise<ApplyFail | null> {
   // 이미 가진 (id, ver, hash) 읽기
   const ids = [...byId.keys()];
-  const have = new Map<string, { ver: number; hash: string }>();
+  const have = new Map<string, { ver: number; hash: string; row: StoredCompareRow }>();
   for (let i = 0; i < ids.length; i += CHUNK) {
     const { data, error } = await sb
       .from(SALES_CONFIRMS_TABLE)
-      .select('id, ver, payload_hash')
+      .select(repair ? 'id, ver, payload_hash, first_saved_at, saved_at, sales_state, type, items' : 'id, ver, payload_hash')
       .in('id', ids.slice(i, i + CHUNK));
     if (error) return { stage: 'read', error };
-    for (const row of (data ?? []) as { id: string; ver: number; payload_hash: string | null }[]) {
-      have.set(row.id, { ver: Number(row.ver), hash: row.payload_hash ?? '' });
+    for (const row of (data ?? []) as unknown as ({ id: string; ver: number; payload_hash: string | null } & StoredCompareRow)[]) {
+      have.set(row.id, { ver: Number(row.ver), hash: row.payload_hash ?? '', row });
     }
   }
 
   // 분류(§3-6 규칙 2~5)
   const toInsert: Prepared[] = [];
   const toUpdate: Prepared[] = [];
+  const toRepair: { id: string; patch: Record<string, unknown> }[] = [];
   for (const p of byId.values()) {
     const h = have.get(p.n.id);
     if (!h) toInsert.push(p);
     else if (p.n.ver < h.ver) counts.older += 1;
-    else if (p.n.ver > h.ver || p.hash !== h.hash) toUpdate.push(p);
-    else counts.unchanged += 1;
+    else if (p.n.ver > h.ver || p.hash !== h.hash) {
+      if (p.n.ver === h.ver) counts.sameVer = (counts.sameVer ?? 0) + 1;
+      toUpdate.push(p);
+    } else {
+      counts.unchanged += 1;
+      // E29: hash 가 같아도 옛 규칙으로 저장된 칸(시각 9시간·지움 표시 등)을 지금 normalize 결과로 — ① 만, ② 는 안 씀
+      if (repair) {
+        const patch = repairPatch(h.row, p.n, SALES_STATE_DELETED);
+        if (patch) toRepair.push({ id: p.n.id, patch });
+      }
+    }
   }
 
   const versionRow = (p: Prepared) => ({
@@ -239,10 +255,10 @@ async function applyPrepared(
     fetched_at: nowIso,
   });
   const upsertVersions = async (list: Prepared[]): Promise<DbError> => {
-    for (let i = 0; i < list.length; i += CHUNK) {
+    for (let i = 0; i < list.length; i += PAYLOAD_CHUNK) {
       const { error } = await sb
         .from(SALES_CONFIRM_VERSIONS_TABLE)
-        .upsert(list.slice(i, i + CHUNK).map(versionRow), { onConflict: 'confirm_id,ver,payload_hash', ignoreDuplicates: true });
+        .upsert(list.slice(i, i + PAYLOAD_CHUNK).map(versionRow), { onConflict: 'confirm_id,ver,payload_hash', ignoreDuplicates: true });
       if (error) return error;
     }
     return null;
@@ -251,13 +267,12 @@ async function applyPrepared(
   const updVerErr = await upsertVersions(toUpdate);
   if (updVerErr) return { stage: 'write', error: updVerErr };
 
-  for (let i = 0; i < toInsert.length; i += CHUNK) {
-    const part = toInsert.slice(i, i + CHUNK);
+  for (let i = 0; i < toInsert.length; i += PAYLOAD_CHUNK) {
+    const part = toInsert.slice(i, i + PAYLOAD_CHUNK);
     const { error } = await sb.from(SALES_CONFIRMS_TABLE).insert(
       part.map((p) => ({
         id: p.n.id,
         ...salesColumns(p),
-        first_saved_at: p.n.savedAt,
         first_seen_at: nowIso,
         changed_at: nowIso,
         fetched_at: nowIso,
@@ -274,6 +289,12 @@ async function applyPrepared(
       .eq('id', p.n.id);
     if (error) return { stage: 'write', error };
     counts.updated += 1;
+  }
+
+  for (const r of toRepair) {
+    const { error } = await sb.from(SALES_CONFIRMS_TABLE).update(r.patch).eq('id', r.id);
+    if (error) return { stage: 'write', error };
+    counts.repaired = (counts.repaired ?? 0) + 1;
   }
 
   const insVerErr = await upsertVersions(toInsert);
@@ -347,6 +368,41 @@ async function runOne(opts: { id: string; trigger: SalesImportTrigger }): Promis
     },
     await readSalesImportState(),
   );
+}
+
+function bodyBytes(body: unknown): number | undefined {
+  try {
+    return JSON.stringify(body).length;
+  } catch {
+    return undefined;
+  }
+}
+
+/** since(한국 날짜) 이후 저장된 ① 중 이번에 안 온 것(지움 제외). 실패하면 undefined(로그엔 code 만) */
+async function countMissing(
+  sb: ReturnType<typeof createAdminClient>,
+  since: string,
+  receivedIds: Set<string>,
+): Promise<number | undefined> {
+  const sinceIso = new Date(`${since}T00:00:00+09:00`).toISOString();
+  let missing = 0;
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from(SALES_CONFIRMS_TABLE)
+      .select('id')
+      .neq('sales_state', SALES_STATE_DELETED)
+      .or(`saved_at.gte."${sinceIso}",first_saved_at.gte."${sinceIso}"`)
+      .order('id')
+      .range(from, from + 999);
+    if (error) {
+      console.warn(`[sales-import] 빠진 건 세기 실패(${error.code ?? '?'})`);
+      return undefined;
+    }
+    const rows = (data ?? []) as { id: string }[];
+    for (const r of rows) if (!receivedIds.has(r.id)) missing += 1;
+    if (rows.length < 1000) break;
+  }
+  return missing;
 }
 
 export async function runSalesConfirmImport(opts: {
@@ -448,7 +504,7 @@ export async function runSalesConfirmImport(opts: {
   }
 
   // 5~7) 이미 가진 건 읽기 → 분류 → 쓰기(①② 만, 판 원문 먼저 — applyPrepared)
-  const failed = await applyPrepared(sb, byId, counts, nowIso);
+  const failed = await applyPrepared(sb, byId, counts, nowIso, autoDeep || opts.since !== undefined);
   if (failed) {
     if (failed.stage === 'read') {
       if (isMissingTable(failed.error)) return finishError('no_table', '영업 확인서 표가 아직 없어요 — SQL을 먼저 실행해 주세요', counts);
@@ -458,6 +514,11 @@ export async function runSalesConfirmImport(opts: {
     console.warn(`[sales-import] 저장 실패(${failed.error?.code ?? '?'}) 새 ${counts.new} 바뀜 ${counts.updated}`);
     return finishError('db_error', dbMessage(failed.error), counts);
   }
+
+  // E30: 진단 숫자 — 받은 기간 안인데 이번 응답에 없고 지움도 아닌 건수(읽기 실패해도 가져오기는 성공으로 둠, 숫자만 빠짐)
+  counts.missing = await countMissing(sb, since, new Set(byId.keys()));
+  counts.bytes = bodyBytes(got.body);
+  counts.ms = Date.now() - nowMs;
 
   // 8) 성공 기록
   const partialBad = skipped > 0;

@@ -11,7 +11,14 @@ import { summarizeReview } from '@/lib/billingAllocation';
 import { buildContractsOverview } from '@/lib/contracts/clients';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
-import { importStateFromRow, salesChangedSince, type SalesImportState, type SalesImportStateRow } from '@/lib/salesConfirms/types';
+import {
+  SALES_STATE_DELETED,
+  importStateFromRow,
+  isOtherSalesType,
+  salesChangedSince,
+  type SalesImportState,
+  type SalesImportStateRow,
+} from '@/lib/salesConfirms/types';
 import { isPrepDone, isPrepInProgress, shortDateLabel } from '@/lib/shipmentPrep';
 import {
   BILLING_LINES_TABLE,
@@ -425,14 +432,39 @@ export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
     const supabase = createAdminClient();
     const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
     const weekAgo = fmtYmd(new Date(parseYmd(today).getTime() - 7 * 24 * 3600_000));
-    const confirms = await readAllPages<{ id: string; ver: number | null; payload_hash: string | null; delivery_date: string | null }>((from, to) =>
+    const confirmsAll = await readAllPages<{
+      id: string;
+      ver: number | null;
+      payload_hash: string | null;
+      delivery_date: string | null;
+      sales_state: string | null;
+      type: string | null;
+    }>((from, to) =>
       supabase
         .from(SALES_CONFIRMS_TABLE)
-        .select('id,ver,payload_hash,delivery_date')
+        .select('id,ver,payload_hash,delivery_date,sales_state,type')
         .or(`first_seen_at.gte.${since},delivery_date.gte.${weekAgo}`)
         .order('id')
         .range(from, to),
     );
+    // 숫자에서 뺌: 따로 보는 종류(판매·철수·이전)와 영업에서 지운 건
+    const confirms = confirmsAll.filter((c) => !isOtherSalesType(c.type) && c.sales_state !== SALES_STATE_DELETED);
+    // 영업에서 지웠는데 IT가 손댄 건 — 범위(최근 30일)와 상관없이 전부(옛 건도 놓치지 않게)
+    const deletedRows = await readAllPages<{ id: string; type: string | null }>((from, to) =>
+      supabase.from(SALES_CONFIRMS_TABLE).select('id,type').eq('sales_state', SALES_STATE_DELETED).order('id').range(from, to),
+    );
+    const deletedIds = deletedRows.filter((c) => !isOtherSalesType(c.type)).map((c) => c.id);
+    let deletedBusy = 0;
+    for (let i = 0; i < deletedIds.length; i += 200) {
+      const { data, error } = await supabase
+        .from(SALES_CONFIRM_WORK_TABLE)
+        .select('confirm_id,status')
+        .in('confirm_id', deletedIds.slice(i, i + 200));
+      if (error) throw error;
+      for (const w of (data ?? []) as { confirm_id: string; status: string | null }[]) {
+        if (w.status === '준비중' || w.status === '준비완료' || w.status === '보류') deletedBusy++;
+      }
+    }
     type W = { confirm_id: string; status: string | null; first_opened_at: string | null; seen_ver: number | null; seen_hash: string | null };
     const work = new Map<string, W>();
     for (let i = 0; i < confirms.length; i += 200) {
@@ -463,18 +495,21 @@ export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
       icon,
       href,
       metrics: [
+        ...(deletedBusy ? [{ label: '영업에서 지웠는데 준비 중', value: deletedBusy, tone: 'bad' as const }] : []),
         { label: '새로 들어옴', value: isNew, tone: isNew ? 'warn' : 'good' },
         { label: `${shortDateLabel(target)}까지 준비 안 끝남`, value: urgent, tone: urgent ? 'bad' : 'good' },
         { label: '영업에서 수정됨', value: changed, tone: changed ? 'warn' : 'good' },
       ],
-      alert: urgent
+      alert: deletedBusy
+        ? `영업에서 지웠는데 IT가 준비 중인 확인서 ${deletedBusy}건 — 확인 필요`
+        : urgent
         ? `${shortDateLabel(target)}까지 납품인데 준비 안 끝난 영업 확인서 ${urgent}건`
         : changed
           ? `영업에서 수정된 확인서 ${changed}건 — 바뀐 내용 확인`
           : isNew
             ? `새로 들어온 영업 확인서 ${isNew}건`
             : null,
-      tone: urgent ? 'bad' : isNew || changed ? 'warn' : 'good',
+      tone: deletedBusy || urgent ? 'bad' : isNew || changed ? 'warn' : 'good',
     };
   } catch (err) {
     const e = err as { code?: string; message?: string } | null;

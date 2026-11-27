@@ -153,8 +153,10 @@ export interface NormalizedSalesConfirm {
 
   // ── 영업 b33a4c3(2026-11-27) export 새 칸 — 설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md E24·E25 ──
   // normalize 는 늘 채움. 선택(?)인 건 저장 칸으로 만드는 confirmFromStored(원문이 이상할 때만)가 안 채워도 되게.
-  /** 영업 출력 함수 종류 — 옛 원문(b33a4c3 전)이면 null → 출력 막음("다시 가져오기") */
+  /** 영업 출력 함수 종류 — 옛 원문(b33a4c3 전)이면 null → 출력 막음("다시 가져오기"). 따로 보는 종류(판매·철수·이전)는 null + otherRenderer */
   renderer?: SalesRenderer | null;
+  /** 따로 보는 종류의 출력 함수(sale·pull·move) — 원본 보기(영업 실시간 HTML)만 씀. 그 밖이면 null */
+  otherRenderer?: SalesOtherRenderer | null;
   /**
    * 영업 출력 함수(renderConfirm·renderSwap·renderSvc)에 그대로 넣는 확인서 전체 = export `doc` 얕은 복사.
    * svc 면 items[].cost(매입가)를 뺀 사본 — 이 값은 상세 데이터로 **브라우저까지 감**. 옛 원문이면 null.
@@ -174,6 +176,64 @@ export interface NormalizedSalesConfirm {
 
 /** 영업 출력 함수 종류(export renderer) — confirm = 납품, swap = 교체, svc = 유지보수·소프트웨어 */
 export type SalesRenderer = 'confirm' | 'swap' | 'svc';
+
+// ───────── 따로 보는 종류(2026-11-27 사용자: 판매·철수·이전도 받되 "출고 준비가 아니니 별도 항목으로만 우선 보이게") ─────────
+// 영업 export 에 아직 없음 — 영업에 추가 요청(type '판매'|'철수'|'이전', renderer 'sale'|'pull'|'move'). 오면 목록의 따로 보기 칩에만 나옴.
+// 기기 칸·IT 기재 출력·홈 숫자 없음, 상세는 영업 값 보기 + `영업 원본 보기`(영업 실시간 HTML — 사본 없음)만.
+
+/** 출고 준비(기기 칸·출력)를 하는 종류. 빈 값('')은 옛 원문 = 납품으로 봄 */
+export const SALES_SHIP_TYPES = ['납품', '교체', '유지보수', '소프트웨어'] as const;
+
+/** 따로 보는 종류의 출력 함수(영업 pullDoc·moveDoc·saleDoc — 우리 사본 없음) */
+export type SalesOtherRenderer = 'sale' | 'pull' | 'move';
+
+/** 출고 준비 종류가 아니면 true(판매·철수·이전과 앞으로 생길 모르는 종류 전부) — 목록·홈·상세가 이 함수 하나로 가름 */
+export function isOtherSalesType(type: string | null | undefined): boolean {
+  const t = String(type ?? '').trim();
+  if (!t) return false;
+  return !(SALES_SHIP_TYPES as readonly string[]).includes(t);
+}
+
+// ───────── 영업에서 지운 확인서(2차 — 설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md E26~E28) ─────────
+
+/** ① sales_state 값 — 영업에서 지움(진짜 지움 = normalize salesDeleted). 되살아나면 '' */
+export const SALES_STATE_DELETED = '지움';
+
+/**
+ * 영업 시각 글자 → ISO(normalize.ts toIso 와 같은 규칙 — 바꾸면 같이). 영업 값은 시간대 없는 한국 시각 'YYYY-MM-DD HH:mm(:ss)'(E24)
+ * → +09:00 으로 읽음. 시간대가 붙은 값은 그대로. 이상하면 null. (목록처럼 payload 를 normalize 하지 않고 칸 하나만 읽을 때)
+ */
+export function salesTimeToIso(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : '';
+  if (!s) return null;
+  const kst = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(:\d{2})?(\.\d+)?$/);
+  const t = kst ? Date.parse(`${kst[1]}T${kst[2]}${kst[3] ?? ':00'}${kst[4] ?? ''}+09:00`) : Date.parse(s);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+/** IT가 손댄 처리여부(지웠어도 목록에 빨갛게 남김 — E27) */
+const TOUCHED_STATUSES: readonly string[] = ['준비중', '준비완료', '출고', '보류'];
+
+/**
+ * 목록 기본 보기에서 숨길지(E27·E28) — 목록 화면이 이 함수 하나로(칩 '전체'·처리여부 칩을 고르면 안 씀).
+ *  - 영업에서 지움: 숨김. 단 IT가 손댄 건(준비중·준비완료·출고·보류)은 남김(빨간 "영업에서 지움").
+ *  - 지우지 않음: 끝난 건(출고·취소)은 숨김. 단 납품일이 지난 7일 안(앞으로 올 것 포함)이거나 "영업에서 수정됨"이면 남김
+ *    (1단계부터 쓰던 "끝난 건 중 납품일 7일 안은 보임" 그대로).
+ * today = 한국 날짜 'YYYY-MM-DD'.
+ */
+export function isHiddenByDefault(
+  row: { status: string; salesState: string; salesChanged: { fromVer: number; toVer: number } | null; deliveryDate: string | null },
+  today: string,
+): boolean {
+  if (row.salesState === SALES_STATE_DELETED) return !TOUCHED_STATUSES.includes(row.status);
+  if (row.status === '출고' || row.status === '취소') {
+    if (row.salesChanged) return false;
+    const t = Date.parse(`${today}T00:00:00Z`);
+    const weekAgo = Number.isFinite(t) ? new Date(t - 7 * 86_400_000).toISOString().slice(0, 10) : today;
+    return !(row.deliveryDate && row.deliveryDate >= weekAgo);
+  }
+  return false;
+}
 
 /** 목록 "연락처" 칸 — 대표번호가 없으면 IT담당 → 계약담당 → 현장상주(이름과 같이 적힌 값 그대로) */
 export function contactLine(c: Partial<SalesConfirmContacts> | null | undefined): string {
@@ -336,6 +396,12 @@ export function importStateFromRow(row: SalesImportStateRow | null | undefined):
           unchanged: Number(c.unchanged) || 0,
           older: Number(c.older) || 0,
           skipped: Number(c.skipped) || 0,
+          // 2차 선택 칸 — 저장된 것만 옮김(없으면 안 셈)
+          ...(['repaired', 'sameVer', 'missing', 'bytes', 'ms'] as const).reduce<Partial<SalesImportCounts>>((acc, k) => {
+            const v = Number(c[k]);
+            if (c[k] !== undefined && c[k] !== null && Number.isFinite(v)) acc[k] = v;
+            return acc;
+          }, {}),
         }
       : null,
   };
@@ -456,6 +522,12 @@ export interface SalesConfirmListRow {
   printedVer?: number | null;
   /** 출력 뒤 영업이 고쳤거나(ver > printedVer) IT 값이 바뀜 → "다시 뽑기" */
   printStale?: boolean;
+  // ── 2차(2026-11-27) — salesState 가 SALES_STATE_DELETED 일 때만 뜻 있음 ──
+  /** 영업에서 지운 시각(ISO)·지운 사람(① payload 의 deletedAt·deletedBy, normalize 로) */
+  salesDeletedAt?: string | null;
+  salesDeletedBy?: string;
+  /** 따로 보는 종류(판매·철수·이전 — isOtherSalesType(type)) — 목록이 칩으로 나눔 */
+  other?: boolean;
 }
 
 export interface SalesConfirmListData {

@@ -23,12 +23,14 @@ import {
   SALES_CONFIRM_STATUSES,
   SALES_SPEC_KEYS,
   confirmFormViewHref,
+  isOtherSalesType,
   type ConfirmLicenseState,
   type DiffItem,
   type LedgerClientCandidate,
   type LedgerClientChoice,
   type LicenseActionResult,
   type SalesConfirmDetailData,
+  type SalesConfirmItem,
   type SalesConfirmStatus,
   type SalesPrintMode,
   type SalesSlot,
@@ -141,8 +143,15 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
   const [salesPending, setSalesPending] = useState(false);
 
   const c = data.confirm;
-  const isSwap = c.renderer === 'swap' || c.type === '교체';
-  const hasSoftware = data.lines.some((l) => l.kind === 'software');
+  /**
+   * 따로 보는 종류(철수·이전·판매 — 2026-11-27 사용자 "별도의 항목으로만 우선 보이게"): 출고 준비 대상이 아님 →
+   * 기기 칸 카드·체크리스트·출고 준비 후보·🖨 확인서 출력 없음. 영업 값 보기 + 영업 원본 보기(영업 실시간 HTML)만. 1분 동기화는 그대로.
+   */
+  const isOther = isOtherSalesType(c.type) || !!c.otherRenderer;
+  /** 영업에서 지운 확인서(normalize salesDeleted — 설계 E26·E27). 입력·저장은 막지 않음 */
+  const salesDeleted = c.salesDeleted === true;
+  const isSwap = !isOther && (c.renderer === 'swap' || c.type === '교체');
+  const hasSoftware = !isOther && data.lines.some((l) => l.kind === 'software');
   const schemaOk = data.schemaReady && !sqlNeeded;
   const unitsDisabled = !schemaOk;
 
@@ -679,6 +688,23 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
     if (s === status) return;
     await saveWork({ status: s }, { refresh: true });
   }
+
+  // 영업에서 지운 확인서 띠의 [처리여부를 '취소'로] — 처리여부 저장(saveWork: 동시 수정 검사·workUpdatedAt 갱신)과 같은 길. 자동으로는 안 바꿈(E27)
+  const [cancelBusy, setCancelBusy] = useState(false);
+  async function cancelDeleted() {
+    if (cancelBusy || status === '취소') return;
+    setCancelBusy(true);
+    try {
+      const ok = await saveWork({ status: '취소' }, { refresh: true });
+      if (ok) toast.show("처리여부를 '취소'로 바꿨어요.");
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+  const deletedMeta = salesDeleted
+    ? [c.deletedAt ? fmtDateTime(c.deletedAt) : '', (c.deletedBy ?? '').trim()].filter((v) => v && v !== '-').join(' · ')
+    : '';
+  const dateLabel = !isOther ? '납품/교체일' : ['판매', '철수', '이전'].includes(c.type.trim()) ? `${c.type.trim()}일` : '날짜';
   async function stamp(which: 'startedAt' | 'finishedAt') {
     const now = new Date().toISOString();
     const patch: WorkPatch = which === 'startedAt' ? { startedAt: now } : { finishedAt: now };
@@ -835,10 +861,14 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
             <button type="button" className="btn btn-ghost sc-btn" onClick={() => setPrintMode('original')}>
               영업 원본 보기
             </button>
-            <button type="button" className="btn btn-primary sc-pc-only" onClick={() => setPrintMode('fill')}>
-              🖨 확인서 출력
-            </button>
-            <span className="sc-phone-only sc-muted">출력은 PC에서 해 주세요.</span>
+            {!isOther && (
+              <>
+                <button type="button" className="btn btn-primary sc-pc-only" onClick={() => setPrintMode('fill')}>
+                  🖨 확인서 출력
+                </button>
+                <span className="sc-phone-only sc-muted">출력은 PC에서 해 주세요.</span>
+              </>
+            )}
           </span>
         </div>
 
@@ -859,8 +889,12 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         </div>
 
         <div className="sc-dh-badges">
-          <span className="sc-pill sc-pill-indigo">납품/교체일 {fmtDate(c.deliveryDate)}</span>
-          {total > 0 && (
+          <span className="sc-pill sc-pill-indigo">
+            {dateLabel} {fmtDate(c.deliveryDate)}
+          </span>
+          {salesDeleted && <span className="sc-pill sc-pill-red">영업에서 지움</span>}
+          {isOther && <span className="sc-pill sc-pill-gray">출고 준비 대상 아님</span>}
+          {!isOther && total > 0 && (
             <span className={`sc-prog${filled >= total ? ' done' : filled > 0 ? ' part' : ''}`}>
               자산 {filled}/{total}
             </span>
@@ -870,7 +904,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
               키 {keyStat.have}/{keyStat.slots}
             </span>
           )}
-          {printedVer !== null && printedVer !== undefined && (
+          {!isOther && printedVer !== null && printedVer !== undefined && (
             <span className={`sc-pill ${printStale ? 'sc-pill-amber' : 'sc-pill-indigo'}`}>
               {printStale
                 ? `v${printedVer} 출력 뒤 바뀌었어요 — 다시 뽑기`
@@ -902,19 +936,39 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
       </section>
 
       {/* ── 띠들 ── */}
+      {salesDeleted && (
+        <div className="ct-band bad sc-del-band" role="alert">
+          <span>
+            <b>영업에서 이 확인서를 지웠어요</b>
+            {deletedMeta ? `(${deletedMeta})` : ''} — 출고를 멈출지 영업에 확인하세요.
+          </span>
+          {status === '취소' ? (
+            <span className="sc-del-done">취소로 바꿔 두었어요</span>
+          ) : (
+            <button type="button" className="btn btn-ghost sc-btn sc-del-btn" disabled={cancelBusy} onClick={() => void cancelDeleted()}>
+              {cancelBusy ? '바꾸는 중…' : "처리여부를 '취소'로"}
+            </button>
+          )}
+        </div>
+      )}
+      {isOther && (
+        <div className="ct-band muted" role="note">
+          <span>철수·이전·판매 확인서는 지금은 보기만 해요(출고 준비 대상이 아니에요).</span>
+        </div>
+      )}
       {(data.notices ?? []).map((n, i) => (
         <div key={i} className="ct-band warn" role="alert">
           <span>{n}</span>
         </div>
       ))}
-      {!data.schemaReady && (
+      {!isOther && !data.schemaReady && (
         <div className="ct-band warn" role="alert">
           <span>
             <b>SQL 실행 필요</b> — 기기 칸 저장에 쓰는 표 칸이 아직 없어요. 영업 확인서 SQL(supabase/sales_confirms_schema.sql 맨 끝 블록)을 실행하기 전에는 아래 칸을 고칠 수 없어요(보기만 돼요).
           </span>
         </div>
       )}
-      {data.schemaReady && sqlNeeded && (
+      {!isOther && data.schemaReady && sqlNeeded && (
         <div className="ct-band warn" role="alert">
           <span>
             <b>SQL 실행 필요</b> — 저장하려고 했더니 표 칸이 아직 없다고 해요. SQL 실행 뒤 이 화면을 새로고침해 주세요.
@@ -956,7 +1010,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
           <span>영업 웹앱에서 새 내용을 받지 못하고 있어요({syncProblem.replace(/[.。]\s*$/, '')}). 1분마다 다시 해 볼게요.</span>
         </div>
       )}
-      {recheckSlots > 0 && (
+      {!isOther && recheckSlots > 0 && (
         <div className="ct-band warn" role="status">
           <span>영업 요청이 바뀌어 다시 확인할 칸이 {recheckSlots}개 있어요. 칸의 [확인]을 눌러 주세요(값은 안 바뀌어요).</span>
           <button type="button" className="btn btn-ghost sc-btn" onClick={goRecheck}>
@@ -975,29 +1029,37 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
             </button>
           ))}
         </div>
-        <div className="sc-work-row">
-          <span className="filter-label">처리자</span>
-          <div className="chip-group">
-            {processorOptions.length === 0 ? (
-              <span className="sc-muted">명단이 비어 있어요. 출고 준비의 [담당자 관리]에서 먼저 넣어 주세요.</span>
-            ) : (
-              processorOptions.map((p) => (
-                <button key={p} type="button" className={`chip${data.work.processors.includes(p) ? ' active' : ''}`} aria-pressed={data.work.processors.includes(p)} onClick={() => toggleProcessor(p)}>
-                  {p}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-        <div className="sc-times">
-          <TimeField label="시작" iso={data.work.startedAt} onNow={() => void stamp('startedAt')} onEdit={(v) => void editTime('startedAt', v)} />
-          <TimeField label="끝" iso={data.work.finishedAt} onNow={() => void stamp('finishedAt')} onEdit={(v) => void editTime('finishedAt', v)} />
-          <TimeField label="출고" iso={data.work.shippedAt} onEdit={(v) => void editTime('shippedAt', v)} />
-        </div>
+        {/* 따로 보는 종류: 처리자 명단을 안 읽고(work.ts) 출고 준비 시각도 없음 — 처리자는 목록에서 바꿈 */}
+        {!isOther && (
+          <>
+            <div className="sc-work-row">
+              <span className="filter-label">처리자</span>
+              <div className="chip-group">
+                {processorOptions.length === 0 ? (
+                  <span className="sc-muted">명단이 비어 있어요. 출고 준비의 [담당자 관리]에서 먼저 넣어 주세요.</span>
+                ) : (
+                  processorOptions.map((p) => (
+                    <button key={p} type="button" className={`chip${data.work.processors.includes(p) ? ' active' : ''}`} aria-pressed={data.work.processors.includes(p)} onClick={() => toggleProcessor(p)}>
+                      {p}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="sc-times">
+              <TimeField label="시작" iso={data.work.startedAt} onNow={() => void stamp('startedAt')} onEdit={(v) => void editTime('startedAt', v)} />
+              <TimeField label="끝" iso={data.work.finishedAt} onNow={() => void stamp('finishedAt')} onEdit={(v) => void editTime('finishedAt', v)} />
+              <TimeField label="출고" iso={data.work.shippedAt} onEdit={(v) => void editTime('shippedAt', v)} />
+            </div>
+          </>
+        )}
+        {isOther && data.work.processors.length > 0 && <div className="sc-muted">처리자: {data.work.processors.join(', ')} (목록에서 바꿔요)</div>}
       </section>
 
-      {/* ── 품목별 카드 ── */}
-      {data.lines.length === 0 ? (
+      {/* ── 품목별 카드(따로 보는 종류는 영업 품목 보기만) ── */}
+      {isOther ? (
+        <OtherItemsPanel items={c.items} />
+      ) : data.lines.length === 0 ? (
         <div className="panel">
           <div className="empty-state">
             <div>📦</div>
@@ -1119,13 +1181,13 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         })
       )}
 
-      <OrphanPanel orphans={data.orphans} targets={orphanTargets} disabled={unitsDisabled} onMove={moveOrphan} onDelete={removeOrphan} />
+      {!isOther && <OrphanPanel orphans={data.orphans} targets={orphanTargets} disabled={unitsDisabled} onMove={moveOrphan} onDelete={removeOrphan} />}
 
       {/* ── 건 단위 ── */}
       <section className="panel sc-whole">
-        <div className="sc-sec-title">소모품</div>
+        {!(isOther && c.supplies.length === 0) && <div className="sc-sec-title">소모품</div>}
         {c.supplies.length === 0 ? (
-          <div className="detail-empty">소모품이 없어요.</div>
+          isOther ? null : <div className="detail-empty">소모품이 없어요.</div>
         ) : (
           <div className="sc-scroll">
             <table className="m-cards sc-mini">
@@ -1175,7 +1237,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
           </>
         )}
 
-        {confirmChecks.length > 0 && (
+        {!isOther && confirmChecks.length > 0 && (
           <>
             <div className="sc-sec-title">기타 출고 체크 (건 전체)</div>
             <ChecklistPanel
@@ -1202,7 +1264,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         />
       </section>
 
-      <PrepHintBox hints={data.prepHints} />
+      {!isOther && <PrepHintBox hints={data.prepHints} />}
 
       {/* ── 핸드폰 아래 고정 막대 ── */}
       <div className="sc-fixbar">
@@ -1213,9 +1275,11 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
             </option>
           ))}
         </select>
-        <button type="button" className="btn btn-primary" onClick={goNextEmpty}>
-          다음 빈 칸 ↓
-        </button>
+        {!isOther && (
+          <button type="button" className="btn btn-primary" onClick={goNextEmpty}>
+            다음 빈 칸 ↓
+          </button>
+        )}
       </div>
 
       {/* ── 창들 ── */}
@@ -1284,6 +1348,59 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
 }
 
 // ───────────────────────── 작은 부품 ─────────────────────────
+
+/** 따로 보는 종류(철수·이전·판매)의 영업 품목 — 보기만(기기 칸·출고 값 없음) */
+function OtherItemsPanel({ items }: { items: SalesConfirmItem[] }) {
+  return (
+    <section className="panel sc-whole">
+      <div className="sc-sec-title">품목 (영업이 적은 것 — 보기만)</div>
+      {items.length === 0 ? (
+        <div className="detail-empty">영업이 적은 품목이 없어요.</div>
+      ) : (
+        <div className="sc-scroll">
+          <table className="m-cards sc-mini">
+            <thead>
+              <tr>
+                <th data-m="title">품목</th>
+                <th data-m="badge">수량</th>
+                <th data-m="inline" data-label="제조사·모델">
+                  제조사·모델
+                </th>
+                <th data-m="inline" data-label="상태">
+                  상태
+                </th>
+                <th data-m="sub" data-label="사양">
+                  사양
+                </th>
+                <th data-m="full" data-label="설치장소·요청">
+                  설치장소·요청
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((it, i) => {
+                const spec = [
+                  ...SALES_SPEC_KEYS.filter((k) => (it.spec[k] ?? '').trim()).map((k) => `${k} ${it.spec[k] ?? ''}`),
+                  ...Object.entries(it.specExtra ?? {}).map(([k, v]) => `${k} ${v}`),
+                ].join(' · ');
+                return (
+                  <tr key={i}>
+                    <td>{it.cat || '기타'}</td>
+                    <td>{it.qty}</td>
+                    <td>{[it.maker, it.model].filter(Boolean).join(' ') || '-'}</td>
+                    <td>{it.state || '-'}</td>
+                    <td>{spec || '-'}</td>
+                    <td>{it.place || '-'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function Info({ label, value, wide, tel }: { label: string; value: string; wide?: boolean; tel?: boolean }) {
   const v = (value ?? '').trim();
