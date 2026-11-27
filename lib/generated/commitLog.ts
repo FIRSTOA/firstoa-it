@@ -3,6 +3,18 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "8bd0c268cb",
+    "date": "2026-11-27",
+    "time": "17:46",
+    "subject": "확인서 상세 · 입력 빠르게 — 영업 요청과 다른 칸 확인은 인쇄 때 한 번에 · ＋ 줄 추가 · 처리 상태 시각 칸 숨김 — 사용자 결정(2026-11-27: \"예전 방식이 더 간결·빠름\" → 화면 모양은 지금 카드 그대로, 확인은 인쇄 누를 때 한 번에, 줄 추가는 종이 뒤 '추가 출고 기기' 장 + 완료 보고·카톡·IT재고에도, 시작·끝·출고 날짜 칸 없애도 됨) · saveSalesUnit·applyLineValues 가 차이 있어도 저장(노란 표시만, 예전 D27 저장 때 needAck 없앰), [인쇄](IT 기재) → PrintDiffConfirmDialog \"영업 요청과 다른 칸 n개\" → ackDiffsForPrint(①④ 다시 읽어 종이에 나가는 차이가 전부 확인에 있을 때만 diff_ack, 칸마다 조건부, 성공해야 인쇄 신호) · ＋ 줄 추가(addSalesUnit — 납품 장비·모니터·기타만 slots.addLineAllowed, ④ extra.added, 번호 겹침 없음·30줄 한도)·✕ 줄 빼기(removeAddedSalesUnit — 추가 줄만, 동시 수정 검사), slots 는 added 행을 영업 칸 뒤 정상 칸으로(표시 없는 넘는 칸은 그대로 빠진 칸), printFill.extraSheet → itFill.appendExtraSheet '추가 출고 기기' 장(DOM 으로만, missing 안 셈), prepLink 가 ④ extra 를 읽어 추가 줄도 완료 보고 units 로(4-2 연동 규칙 그대로 — integration-rules 통과, 4-2 시험 23개 통과) · 처리 상태 시작·끝·출고 칸 숨김(서버 자동 기록 그대로) · 설명서·releases·CLAUDE.md",
+    "crew": [
+      "developer",
+      "qa-checker",
+      "integration-rules",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "1e9f35ea93",
     "date": "2026-11-27",
     "time": "17:05",

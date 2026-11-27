@@ -13,8 +13,9 @@ const SIDEBAR_SECTIONS = [
       { label: 'IT 재고 리스트', href: '/' },
       { label: '입고', href: '/receiving' },
       { label: '출고', href: '/dispatch' },
-      { label: '출고 준비 리스트', href: '/shipment-prep' },
+      // 일하는 순서: 확인서(기기 적기·출력) → 출고 준비 리스트(준비·완료 보고) — 2026-11-27 사용자 요청
       { label: '확인서/출고및반출준비', href: '/confirm-form' },
+      { label: '출고 준비 리스트', href: '/shipment-prep' },
       { label: '판매리스트', href: '/sales' },
       { label: '자산 이력', href: '/asset-history' },
       { label: '실재고 조사', href: '/stocktake' },
