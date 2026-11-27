@@ -176,15 +176,34 @@ export default function DeviceSlotCard({
     }
   }
 
+  /** IT재고에서 채울 빈 칸(시리얼·보이는 출고사양 칸)이 남아 있는지 */
+  function hasStockBlanks(d: Draft): boolean {
+    return !d.serial.trim() || keys.some((k) => !(d.spec[k] ?? '').trim());
+  }
+
   async function onAssetBlur() {
     const d = draftRef.current;
     const asset = d.asset.trim();
-    if (!asset || asset === base.current.asset.trim() || !has('model')) {
-      // 자산번호가 그대로이거나 비었거나 우리 장비 조회가 필요 없는 칸 → 그냥 저장
+    if (!asset || !has('model')) {
+      // 자산번호가 비었거나 우리 장비 조회가 필요 없는 칸 → 그냥 저장
       if (!asset) setHint(null);
       await commit();
       return;
     }
+    // 자산번호가 그대로여도 빈 칸(출고사양·시리얼)이 있으면 IT재고에서 채움 — 2026-11-27 사용자 신고:
+    // 자동 채우기가 나오기 전에 저장해 둔 자산번호는 다시 안 찾아 출고사양이 비어 있었음
+    // 이 화면에서 같은 자산번호로 이미 찾아봤으면(IT재고에 그 칸이 원래 없는 기기) 칸을 나갈 때마다 다시 읽지 않음 — 단추로만 다시
+    const alreadyLooked = looked?.asset === asset.toUpperCase();
+    if (asset === base.current.asset.trim() && (!hasStockBlanks(d) || alreadyLooked)) {
+      await commit();
+      return;
+    }
+    await fillFromStock(asset);
+  }
+
+  /** 자산번호로 IT재고를 찾아 **빈 칸만** 채우고 저장(사람이 적은 값은 안 덮음) — 칸 나갈 때·`↻ IT재고에서 빈 칸 채우기` 단추 */
+  async function fillFromStock(asset: string) {
+    const d = draftRef.current;
     setStatus('saving');
     setHint({ text: 'IT재고에서 찾는 중…', warn: false });
     let found = false;
@@ -325,6 +344,18 @@ export default function DeviceSlotCard({
         </Field>
       </div>
       {hint && <div className={`sc-hint${hint.warn ? ' warn' : ''}`}>{hint.text}</div>}
+      {has('model') && draft.asset.trim() && !disabled && (
+        <div className="sc-hint">
+          <button
+            type="button"
+            className="sc-link"
+            onClick={() => void fillFromStock(draft.asset.trim())}
+            title="이 자산번호로 IT재고를 다시 찾아 비어 있는 칸(제조사·모델명·시리얼·출고사양)만 채워요. 적어 둔 값은 그대로예요."
+          >
+            ↻ IT재고에서 빈 칸 채우기
+          </button>
+        </div>
+      )}
 
       {showSpec && (
         <div className="sc-slot-spec">
