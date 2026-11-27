@@ -533,6 +533,9 @@ export interface SalesConfirmListRow {
   directShip?: boolean;
   /** 위탁사(매입처) 이름 — 직송·위탁 건만, 아니면 '' */
   consignName?: string;
+  // ── 4-1(출고 준비 짝짓기 — 이 파일 맨 아래 4-1 절) ──
+  /** 출고 준비 칸(목록 보이는 줄만 따로 읽음 — listConfirmPrepBadges). 안 읽었으면 없음 */
+  prepBadge?: PrepLinkState;
 }
 
 /** 목록 위 항목(F29) — 출고 준비 확인서 · 직송 · 철수·이전·판매 */
@@ -749,8 +752,13 @@ export interface SalesConfirmDetailData {
   people: string[];
   /** 출고 체크리스트 항목(it_prep_photo_items — 읽기만) */
   checklist: { label: string; grp: string }[];
-  /** 같은 건으로 보이는 출고 준비 일정(읽기만, prepMatch) */
+  /**
+   * @deprecated 4-1 부터 `prepLink` 를 쓸 것 — 화면(PrepHintBox)이 PrepLinkPanel 로 바뀌면 지움.
+   * 지금은 prepLink 의 연결·자동 일정 + 후보(최대 5)를 옛 모양으로 옮겨 담음(따로 보는 종류는 []).
+   */
   prepHints: { eventId: string; date: string; title: string; prepState: string; reportSent: boolean }[];
+  /** 4-1: 출고 준비 일정 연결 상태 + 후보(§4-C). null = 못 읽음(notices 에 쉬운 말). 연결 쓰기의 기준 시각은 work.updatedAt(늘 최신)을 쓸 것 */
+  prepLink: PrepLinkState | null;
   /** SQL 블록 A(④ extra·diff_ack, ③ printed_ver·printed_by) 실행 여부 — false 면 기기 칸 저장을 막고 "SQL 실행 필요" */
   schemaReady: boolean;
   /** 진행(장비·모니터·유지보수만 셈 — itemKind countsProgress) */
@@ -984,3 +992,191 @@ export interface SalesPrintBuild {
   notes: SalesPrintNote[];
   blocked: string | null;
 }
+
+// =====================================================================================
+// 4단계 4-1 — 영업 확인서 ↔ 출고 준비 일정 짝짓기·서로 보이기
+// 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md F1~F8 · §4-A~§4-C (사용자 답 Q4 = 제목·날짜가 다 같을 때만 자동).
+// 파일·담당:
+//   lib/salesConfirms/prepLinkRules.ts (순수 — developer A)  짝 등급·제목 열쇠·상호·구분·상태 판정(resolvePrepLinks) 한 곳
+//   lib/salesConfirms/prepLink.ts (server-only — developer A) 읽기(확인서 쪽·일정 쪽·목록 줄)·연결 쓰기(③ prep_event_id·link_source 만)
+//   app/confirm-form/prepLinkActions.ts ('use server' — developer B) 아래 액션 주석
+//   components/salesConfirms/PrepLinkPanel.tsx · components/shipmentPrep/PrepConfirmBadge.tsx (ui-designer)
+// 원칙: 화면 열기만으로는 아무것도 안 씀(F4) · 네이버·카톡·시트·it_prep_* 표엔 안 씀(읽기만) · 가져오기 코드는 prepLink 를 import 도 안 함.
+// =====================================================================================
+
+/**
+ * ③ link_source 값(F2·§4-A) — DB CHECK 없음(앱이 검사, status 처럼).
+ *   ''       아무도 안 정함(prep_event_id null) — 확실한 짝이 있으면 화면 계산으로 "자동 연결"
+ *   'auto'   확실한 짝을 저장함(사람이 그 건으로 무언가 할 때 — 4-2·4-3)
+ *   'manual' 사람이 고름
+ *   'none'   사람이 "출고 일정과 연결 안 함"(풀기·출고 일정 없음으로 두기 — prep_event_id null)
+ *   'auto'·'manual' 인데 prep_event_id 가 null = 연결했던 일정이 지워짐(FK set null — F8)
+ */
+export const PREP_LINK_SOURCES = ['', 'auto', 'manual', 'none'] as const;
+export type PrepLinkSource = (typeof PREP_LINK_SOURCES)[number];
+
+export function isPrepLinkSource(v: unknown): v is PrepLinkSource {
+  return typeof v === 'string' && (PREP_LINK_SOURCES as readonly string[]).includes(v);
+}
+
+/**
+ * 짝 등급(F3·§4-B):
+ *   sure   = 영업 확인서 제목(confTitle 로 만든 것)과 일정 제목의 `IT/` 뒤가 같고 날짜가 같음
+ *   strong = 상호(제목 '/' 칸 어디든) + 날짜 ±1일 + 구분 + 지역(둘 다 알 때)
+ *   weak   = 상호 + ±3일 + 구분(지역이 둘 다 있고 다르면 뺌)
+ */
+export const PREP_LINK_GRADES = ['sure', 'strong', 'weak'] as const;
+export type PrepLinkGrade = (typeof PREP_LINK_GRADES)[number];
+
+/** 확인서 쪽에서 본 일정 하나(연결된 일정·후보 둘 다 이 모양) — 연락처·주소 없음 */
+export interface PrepLinkCandidate {
+  eventId: string;
+  /** 'YYYY-MM-DD' */
+  date: string;
+  /** 'HH:MM' | ''(종일) */
+  time: string;
+  /** 네이버 일정 제목 그대로(출고 준비 리스트에 보이는 글자) */
+  title: string;
+  /** 일정 시각으로 본 지역(9시 A·12시 B·15시 C·18시 D·21시 E, 그 밖 null — regionSlot) */
+  regionOfEvent: string | null;
+  /** ★(네이버)·⭐(앱) 없음 → 출고 준비 리스트엔 안 보임(H10) — "영업에 별표 부탁" */
+  notPrepTarget: boolean;
+  /** 짝 등급. candidates 안에선 늘 있음. 저장된 연결 일정이 규칙에 안 맞으면(날짜를 옮김 등) null */
+  grade: PrepLinkGrade | null;
+  /** 납품일과 날짜 차(절댓값, 일). 납품일이 없거나 계산 못 하면 null */
+  dayDiff: number | null;
+  /** 상호가 제목 칸과 통째로 같음(false = '-' 앞 상호만 같음 또는 상호 안 맞음) */
+  exactCompany: boolean;
+  /** 준비 단추 기록이나 완료 보고가 있음 — 같은 제목 일정 여럿(복사본)일 때 이쪽을 위로. 상세에서만 채움(목록·배지는 false) */
+  hasPrepRecord: boolean;
+  /** "홍길동 준비완료 · 김철수 준비중" / "준비 전" — 상세에서만(목록·배지는 '') */
+  prepState: string;
+  /** 완료 보고 카톡 보냄 — 상세에서만(목록·배지는 false) */
+  reportSent: boolean;
+  /** 이 일정에 이미 저장 연결된 **다른** 확인서(일정 1 → 확인서 여럿 허용 — F2). 없으면 [] */
+  linkedConfirms: { confirmId: string; docNo: string }[];
+}
+
+/**
+ * 확인서 하나의 연결 상태(§4-C — 위에서부터 첫 번째):
+ *   linked     ① 저장됨('manual'·'auto') + 일정 있음 → "연결됨" / "연결됨(자동)"  [바꾸기] [풀기]
+ *   off        ② 'none' → 자동·"일정 없음" 알림 안 함, 후보는 접어서
+ *   broken     ③ 'manual'·'auto' 인데 일정이 지워짐(F8) → 주황 "연결했던 일정이 없어졌어요 — 다시 골라 주세요" + 후보
+ *   auto       ④ 화면 계산 자동 연결(아직 저장 안 함 — F4): sure 일정이 딱 하나 · 그 일정의 sure 확인서도 딱 하나 ·
+ *                그 일정에 다른 확인서의 저장 연결 없음 · 이 확인서 link_source '' · 지움·취소·직송·따로 보기 아님
+ *   candidates ⑤ 후보 있음 → [연결]
+ *   notTarget  ⑥ 직송(F28·F29)·따로 보는 종류(철수·이전·판매) — 출고 준비 대상 아님, 알림 없음, 후보 계산 안 함
+ *                (저장된 연결은 ①~③ 으로 그대로 보임 — 출고 준비 쪽 배지에서 연결할 수 있음 F7)
+ *   noEvent    ⑦ 납품일 있음 + 일정 없음 → "출고 일정 없음"(주황 — 알림은 alertNoEvent 로)
+ *   unknown    ⑦ 납품일 없음
+ */
+export type PrepLinkKind = 'linked' | 'off' | 'broken' | 'auto' | 'candidates' | 'notTarget' | 'noEvent' | 'unknown';
+
+export interface PrepLinkState {
+  kind: PrepLinkKind;
+  /** ③ 에 저장된 값 그대로(③ 줄이 없으면 '' · null) */
+  savedSource: PrepLinkSource;
+  savedEventId: string | null;
+  /** linked = 저장된 일정 · auto = 계산한 짝. 그 밖 null */
+  event: PrepLinkCandidate | null;
+  /** event 를 뺀 후보(sure → strong → weak, 그 안에서 기록 있음·상호 통째·날짜 가까움·시각 순). notTarget·unknown 은 [] */
+  candidates: PrepLinkCandidate[];
+  /** sure(제목·날짜 같음) 일정 수 — 2 이상이면 "같은 제목 일정 n개 — 복사본일 수 있어요" */
+  sureCount: number;
+  /**
+   * sure 일정이 있는데 자동이 안 된 이유(화면 안내용) — 없으면 null
+   *   copies   같은 제목 일정이 둘 이상(복사본)
+   *   shared   그 일정에 제목이 같은 다른 확인서도 있음
+   *   taken    그 일정에 다른 확인서가 이미 저장 연결됨
+   *   excluded 이 확인서가 영업에서 지움·처리여부 취소(후보로만)
+   */
+  autoBlocked: 'copies' | 'shared' | 'taken' | 'excluded' | null;
+  /** notTarget 일 때만 — 'direct' 직송 · 'other' 따로 보는 종류 */
+  notTargetReason: 'direct' | 'other' | null;
+  /**
+   * "출고 일정 없음" 알림에 셀지(목록 칩·홈 — F5·F18) = noEvent 이고 영업에서 지움·처리여부 취소가 아님.
+   * 날짜 거르기(내일 납품 등)는 부르는 쪽이. 직송·'none'·따로 보기는 kind 가 달라 처음부터 false
+   */
+  alertNoEvent: boolean;
+  /** 읽은 때의 ③ updated_at(DB 문자열 그대로, ③ 줄 없으면 null) — 목록·배지에서 연결할 때 expectedUpdatedAt. 상세는 work.updatedAt 을 쓸 것 */
+  workUpdatedAt: string | null;
+}
+
+/** 일정 쪽에서 본 확인서 하나(출고 준비 리스트 배지 — F6·F7·F30). 연락처·주소 없음 */
+export interface PrepConfirmBadgeItem {
+  confirmId: string;
+  docNo: string;
+  /** 영업 상호(상호-현장) */
+  company: string;
+  /** 영업 구분('납품'|'교체'|'유지보수'|'소프트웨어'|'철수'…) */
+  type: string;
+  deliveryDate: string | null;
+  status: SalesConfirmStatus;
+  /** 'manual'·'auto' = ③ 에 저장 · 'computed' = 화면 계산 자동(F4, 아직 저장 안 함) · null = 후보 */
+  link: 'manual' | 'auto' | 'computed' | null;
+  /** 이 일정과의 짝 등급(저장 연결인데 규칙에 안 맞으면 null) */
+  grade: PrepLinkGrade | null;
+  dayDiff: number | null;
+  exactCompany: boolean;
+  /** 확인서 지역(영업 값, 비면 주소 추정 — 없으면 '') */
+  region: string;
+  /** F30 "확인서는 직송" */
+  directShip: boolean;
+  salesDeleted: boolean;
+  /** 따로 보는 종류(철수·이전·판매 — F7 보기용 연결) */
+  other: boolean;
+  /** 후보인데 이 확인서가 이미 **다른** 일정에 저장 연결됨 → "같은 확인서가 다른 일정에 연결돼 있어요" — 그 일정 id, 아니면 null */
+  linkedElsewhere: string | null;
+  /** ③ updated_at(없으면 null) — 여기서 [연결]할 때 expectedUpdatedAt */
+  workUpdatedAt: string | null;
+}
+
+/** 출고 준비 일정 하나의 확인서 배지 — linked(저장 + 계산 자동) · candidates(등급 순) */
+export interface PrepConfirmBadge {
+  eventId: string;
+  /** 'linked' 연결된 확인서 있음 · 'candidates' 후보만 · 'none' 확인서 없음(흐리게 — F6) */
+  kind: 'linked' | 'candidates' | 'none';
+  linked: PrepConfirmBadgeItem[];
+  candidates: PrepConfirmBadgeItem[];
+}
+
+/** 연결 쓰기 결과 — ③ updated_at 이 바뀌므로 화면은 workUpdatedAt 으로 갱신(H16) */
+export type PrepLinkSaveResult =
+  | { ok: true; workUpdatedAt: string; prepEventId: string | null; linkSource: PrepLinkSource }
+  /** expectedUpdatedAt 이 DB 와 다름(그 사이 누가 ③ 을 고침) → 화면은 다시 읽음 */
+  | { ok: false; conflict: true; error: string }
+  | { ok: false; conflict?: false; error: string };
+
+/** 연결 읽기 결과 — 확인서 표가 없으면(42P01/PGRST205 — listQuery.isMissingSalesTable) missingTable(출고 준비 쪽은 배지 없이 그대로 — §4-G) */
+export type PrepLinkReadResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; missingTable: true; error: string }
+  | { ok: false; missingTable?: false; error: string };
+
+/*
+ * 서버 액션 — app/confirm-form/prepLinkActions.ts ('use server' — developer B, async 함수만 export). 전부 lib/salesConfirms/prepLink.ts 를 부르기만:
+ *   getConfirmPrepLink(input: { confirmId: string }): Promise<PrepLinkReadResult<PrepLinkState>>
+ *       → readPrepLinkForConfirm(confirmId, { withRecords: true }) — null 이면 { ok:false, error:'확인서를 못 찾았어요…' }. 연결·풀기 뒤 상자 다시 그리기용
+ *   linkConfirmPrepEvent(input: { confirmId: string; eventId: string; expectedUpdatedAt: string | null; actor: string }): Promise<PrepLinkSaveResult>
+ *       → writeConfirmLink({ confirmId, eventId, source: 'manual', expectedUpdatedAt, actor })   // [연결]·[바꾸기]·자동 짝 [이걸로 확정]
+ *   unlinkConfirmPrepEvent(input: { confirmId: string; expectedUpdatedAt: string | null; actor: string }): Promise<PrepLinkSaveResult>
+ *       → writeConfirmLink({ …, eventId: null, source: 'none' })                                  // [풀기]·[출고 일정 없음으로 두기]
+ *   resetConfirmPrepLink(input: { confirmId: string; expectedUpdatedAt: string | null; actor: string }): Promise<PrepLinkSaveResult>
+ *       → writeConfirmLink({ …, eventId: null, source: '' })                                      // 'none' 되돌리기 = 다시 자동으로 찾기
+ *   listConfirmPrepBadges(input: { confirmIds: string[] }): Promise<PrepLinkReadResult<Record<string, PrepLinkState>>>
+ *       → readConfirmPrepBadges(ids) — 목록 보이는 줄(최대 500). 목록 60초 가져오기 고리에 넣지 말 것(열 때·5분마다 — §9-11)
+ *   listEventConfirmBadges(input: { eventIds: string[] }): Promise<PrepLinkReadResult<Record<string, PrepConfirmBadge>>>
+ *       → readEventConfirmBadges(ids) — 출고 준비 리스트에 보이는 일정(최대 300). listPrepEvents 모양은 안 바꿈(H14)
+ *   ※ 표 없음 판정은 listQuery.isMissingSalesTable(err) → missingTable. 그 밖 오류는 로그 code 만(work.logSalesFail) + 쉬운 말.
+ *   ※ 자산 n/m·출력함 같은 목록 요약이 배지에 필요하면 listQuery.loadListRowsByIds(연결된 id) 로(H19) — prepLink 는 안 읽음.
+ *
+ * prepLink.ts 가 내보내는 것(server-only):
+ *   readPrepLinkForConfirm(confirmId: string, opts?: { withRecords?: boolean }): Promise<PrepLinkState | null>   // 확인서 없으면 null, DB 오류는 던짐
+ *   readConfirmPrepBadges(confirmIds: string[]): Promise<Record<string, PrepLinkState>>      // 없는 id 는 빠짐
+ *   readEventConfirmBadges(eventIds: string[]): Promise<Record<string, PrepConfirmBadge>>   // 없는 일정 id 는 빠짐
+ *   writeConfirmLink(input: { confirmId: string; eventId: string | null; source: 'manual' | 'none' | ''; expectedUpdatedAt: string | null; actor: string })
+ *       : Promise<PrepLinkSaveResult>        // ③ 줄 없으면(expectedUpdatedAt null) 만듦 — first_opened_at·seen_ver 는 안 채움("새로" 유지)
+ *   saveComputedAutoLink(confirmId: string, eventId: string, actor: string)
+ *       : Promise<{ saved: boolean; workUpdatedAt: string | null }>   // 4-2·4-3(보고 저장·발송·준비 단추)에서: 지금도 그 일정이 자동 짝이고
+ *                                                                      // ③ 이 prep_event_id null + link_source '' 일 때만 'auto' 로(사람이 정한 것 안 덮음)
+ */

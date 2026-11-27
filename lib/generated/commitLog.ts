@@ -3,6 +3,19 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "729bf3a6b3",
+    "date": "2026-11-27",
+    "time": "14:43",
+    "subject": "확인서/출고및반출준비 4-0 · 오늘 준비할 것 · 직송 따로 보기 — 사용자 요구(\"출고준비리스트처럼 그날 준비할 것 — 오늘(금)이면 11/30(월)\", \"직송은 별도로\"), 4단계 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md(F1~F30, 사용자 답 Q1~Q5 전부 추천안: 두 메뉴 이어 붙이기·기기/체크는 확인서·준비 단추는 출고 준비·네이버 일정 안 만듦·직송 상세는 그대로) 중 4-0 · 목록 맨 위 \"준비하는 날\" 줄(기본 오늘 → nextBusinessDay, 지역 A→E 순) + 숫자 카드(준비 남음·준비 완료·전체, 누르면 거름) + 날짜 밖 소식 한 줄, 목록 위 항목 출고 준비 확인서·직송·철수·이전·판매 · 새 lib/businessDay.ts(nextBusinessDay — 홈에서 옮김, 800일 결과 같음)·lib/salesConfirms/deliveryMode.ts(isDirectShip — 영업 statusDeliverer 와 같은 규칙: 위탁사 있고 shipType '직송', 비면 head) · 목록은 payload 세 칸만 읽음(readDeliveryModes), 홈 \"준비 안 끝남\"에서 직송 뺌, 상세 직송 띠 · 설명서 sales-today 꼭지, releases, CLAUDE.md 4단계 절 · SQL·외부 쓰기 없음",
+    "crew": [
+      "feature-planner",
+      "developer",
+      "ui-designer",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "14c5a7689e",
     "date": "2026-11-27",
     "time": "14:34",

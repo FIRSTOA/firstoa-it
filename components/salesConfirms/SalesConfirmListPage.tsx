@@ -9,6 +9,7 @@ import {
   setSalesConfirmProcessors,
   setSalesConfirmStatus,
 } from '@/app/confirm-form/salesActions';
+import { listConfirmPrepBadges } from '@/app/confirm-form/prepLinkActions';
 import {
   SALES_CONFIRM_ACTOR_KEY,
   SALES_CONFIRM_STATUSES,
@@ -16,6 +17,7 @@ import {
   isHiddenByDefault,
   isOtherSalesType,
   salesConfirmHref,
+  type PrepLinkState,
   type SalesConfirmListData,
   type SalesConfirmListResult,
   type SalesConfirmListRow,
@@ -198,6 +200,11 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   const [newsF, setNewsF] = useState<NewsFilter | null>(null);
   const [procF, setProcF] = useState('all'); // 'all' | 'none' | 이름
   const [q, setQ] = useState('');
+  // 준비하는 날 보기에서 "출고 일정 없음"인 건만 보기
+  const [noEventF, setNoEventF] = useState(false);
+  // 출고 일정 연결 표시 — 처음 읽을 때·새로고침 때만(1분 가져오기 고리엔 안 넣음)
+  const [prepBadges, setPrepBadges] = useState<Record<string, PrepLinkState>>({});
+  const [badgeFail, setBadgeFail] = useState('');
 
   // 가져오기
   const [importing, setImporting] = useState(false);
@@ -227,6 +234,36 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   const visibleIdsRef = useRef<string[]>([]);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   loadErrorRef.current = loadError;
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const badgeBusyRef = useRef(false);
+
+  // ───────── 출고 일정 연결 표시 읽기(읽기만 — 아무것도 안 씀) ─────────
+  const loadBadges = useCallback(async () => {
+    if (badgeBusyRef.current) return;
+    // 출고 준비 대상(직송·철수·이전·판매 아님) 줄만, 최대 500
+    const ids = rowsRef.current
+      .filter((r) => !(r.other ?? isOtherSalesType(r.type)) && !r.directShip)
+      .map((r) => r.id)
+      .slice(0, 500);
+    if (ids.length === 0) return;
+    badgeBusyRef.current = true;
+    try {
+      const res = await listConfirmPrepBadges({ confirmIds: ids });
+      if (res.ok) {
+        setPrepBadges(res.data);
+        setBadgeFail('');
+      } else if (res.missingTable) {
+        setBadgeFail('');
+      } else {
+        setBadgeFail(res.error);
+      }
+    } catch (e) {
+      setBadgeFail(e instanceof Error ? e.message : '알 수 없는 오류');
+    } finally {
+      badgeBusyRef.current = false;
+    }
+  }, []);
 
   // ───────── 알림 ─────────
   const showToast = useCallback((msg: string) => {
@@ -301,6 +338,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
         const st = json.state;
         if (st) setMeta((m) => ({ ...m, importState: st }));
         if (json.changed > 0 || loadErrorRef.current) await reload();
+        if (body.trigger === 'manual' || body.trigger === 'pick-date') window.setTimeout(() => void loadBadges(), 0); // 새로 읽은 줄이 그려진 뒤
         if ((body.trigger === 'manual' || body.trigger === 'pick-date') && json.ok && !json.errorCode && !json.skippedRecent) {
           showToast(json.changed > 0 ? `새로 가져왔어요 (${json.changed}건 새로·바뀜)` : '새로 가져왔어요. 바뀐 건 없어요.');
         }
@@ -311,7 +349,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
         setImporting(false);
       }
     },
-    [reload, showToast],
+    [reload, showToast, loadBadges],
   );
 
   // ───────── 시트와 비교(켰을 때만, 화면 열 때·켤 때 1번) ─────────
@@ -392,6 +430,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     setCompare(wantCompare);
     if (wantCompare && !phone) void doCompare();
 
+    void loadBadges();
     void runImport({ trigger: 'page' });
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void runImport({ trigger: 'interval' });
@@ -442,6 +481,8 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   );
   const prepLeft = useMemo(() => prepScope.filter((r) => LEFT_STATUSES.includes(r.status)).length, [prepScope]);
   const prepDone = useMemo(() => prepScope.filter((r) => DONE_STATUSES.includes(r.status)).length, [prepScope]);
+  // 그날 납품분 중 "출고 일정 없음"(영업에 네이버 일정을 부탁해야 하는 건)
+  const noEventCount = useMemo(() => prepScope.filter((r) => prepBadges[r.id]?.alertNoEvent).length, [prepScope, prepBadges]);
   // 그날 납품이지만 직송이라 여기서 빠진 건수(안내용)
   const directOnTarget = useMemo(
     () =>
@@ -481,6 +522,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
         if (!matchPrepStatus(r, statusF)) return false;
         if (cardF === 'left' && !LEFT_STATUSES.includes(r.status)) return false;
         if (cardF === 'done' && !DONE_STATUSES.includes(r.status)) return false;
+        if (noEventF && !prepBadges[r.id]?.alertNoEvent) return false;
       } else {
         if (!matchStatus(r, statusF, today)) return false;
         if (!matchDate(r, dateF, today)) return false;
@@ -494,7 +536,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     });
     // 준비하는 날 보기는 지역 순(수도권A→E, 그 밖·없음은 뒤) → 상호
     return prepMode ? [...list].sort(comparePrep) : list;
-  }, [groupRows, prepMode, target, statusF, cardF, newsF, typeF, regionF, dateF, procF, q, today]);
+  }, [groupRows, prepMode, target, statusF, cardF, newsF, noEventF, prepBadges, typeF, regionF, dateF, procF, q, today]);
 
   // 화면을 그릴 때마다 맞춰 둠 — 열 때 비교(effect)가 첫 줄 목록을 바로 쓰게
   visibleIdsRef.current = visible.map((r) => r.id);
@@ -504,7 +546,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     typeF !== 'all' ||
     regionF !== 'all' ||
     (!prepMode && dateF !== 'all') ||
-    (prepMode && cardF !== 'all') ||
+    (prepMode && (cardF !== 'all' || noEventF)) ||
     (!prepMode && newsF !== null) ||
     procF !== 'all' ||
     q.trim() !== '';
@@ -516,6 +558,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     setTypeF('all');
     setRegionF('all');
     setCardF('all');
+    setNoEventF(false);
     setNewsF(null);
   }
 
@@ -525,6 +568,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     setRegionF('all');
     setDateF('all');
     setCardF('all');
+    setNoEventF(false);
     setNewsF(null);
     setProcF('all');
     setQ('');
@@ -534,6 +578,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   function pickPrepDate(v: string) {
     setPrepDate(v);
     setCardF('all');
+    setNoEventF(false);
     setNewsF(null);
   }
 
@@ -834,6 +879,17 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                       영업에서 지움 {deletedCount}
                     </button>
                   )}
+                  {prepMode && (noEventCount > 0 || noEventF) && (
+                    <button
+                      type="button"
+                      className={`chip sc-chip-noevent${noEventF ? ' active' : ''}`}
+                      aria-pressed={noEventF}
+                      onClick={() => setNoEventF((v) => !v)}
+                      title="납품일은 있는데 출고 준비 리스트에 일정이 아직 없는 건 — 영업에 네이버 일정을 부탁하세요"
+                    >
+                      출고 일정 없음 {noEventCount}
+                    </button>
+                  )}
                   {!prepMode &&
                     isShipGroup &&
                     (
@@ -962,6 +1018,12 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
             </span>
           </div>
 
+          {badgeFail && isShipGroup && (
+            <div className="ct-band warn" role="status">
+              <span>출고 일정과 이어진 표시를 못 읽었어요 — 목록은 그대로 보여요. [🔄 새로고침]을 눌러 다시 읽어 보세요.</span>
+            </div>
+          )}
+
           {showSheet && sheet.state === 'fail' && (
             <div className="ct-band warn sc-pc-only" role="alert">
               <span>시트를 못 읽었어요 — {sheet.error} (잠시 뒤 [다시 비교]를 눌러 보세요. 시트에는 아무것도 쓰지 않았어요.)</span>
@@ -976,6 +1038,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 today={today}
                 other={isOtherGroup}
                 direct={isDirectGroup}
+                prepBadges={prepBadges}
                 showSheet={showSheet}
                 sheet={sheet}
                 busyIds={busyIds}

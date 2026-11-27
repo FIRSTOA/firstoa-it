@@ -12,20 +12,19 @@ import 'server-only';
  * developer E(lib/contracts/salesConfirmLink.ts)가 import: ensureUnitRow · readUnit · updateUnitExtra (types.ts 주석 그대로).
  */
 import {
-  CALENDAR_TABLE,
   SALES_CONFIRMS_TABLE,
   SALES_CONFIRM_UNITS_TABLE,
   SALES_CONFIRM_VERSIONS_TABLE,
   SALES_CONFIRM_WORK_TABLE,
   createAdminClient,
 } from '@/lib/supabase/server';
-import { guessCompany, isItPrepTarget, isPrepDone, isPrepInProgress, isPrepOverhaul, parseEventTitle, type PrepChecks } from '@/lib/shipmentPrep';
 import { deliveryModeFromPayload } from './deliveryMode';
 import { salesChangeLines } from './diff';
 import type { ItemKind } from './itemKind';
 import { isMissingSalesColumn } from './listQuery';
 import { normalizeSalesConfirm } from './normalize';
-import { matchPrepEvents, regionWithGuess, type PrepEventCandidate } from './prepMatch';
+import { readPrepLinkForConfirm } from './prepLink';
+import { regionWithGuess } from './prepMatch';
 import {
   buildSlotLines,
   findSlotLine,
@@ -47,6 +46,7 @@ import {
   type SalesConfirmDetailData,
   type SalesConfirmItem,
   type SalesConfirmStatus,
+  type PrepLinkState,
   type SalesConfirmSupply,
   type SalesUnitExtra,
   type SalesUnitRow,
@@ -57,8 +57,6 @@ type Json = Record<string, unknown>;
 
 const PREP_PEOPLE_TABLE = 'it_prep_people'; // app/shipment-prep/actions.ts 와 같은 표(읽기만)
 const PHOTO_ITEMS_TABLE = 'it_prep_photo_items'; // 출고 체크리스트(읽기만 — D11)
-const PREP_EVENTS_TABLE = 'it_prep_events'; // 출고 준비 상태(읽기만)
-const PREP_REPORTS_TABLE = 'it_prep_reports'; // 완료 보고(읽기만)
 const CHUNK = 200;
 
 // ───────────────────────── 칸 이름 ─────────────────────────
@@ -124,11 +122,6 @@ async function readAllPages<T>(page: (from: number, to: number) => PromiseLike<{
     out.push(...(data ?? []));
     if (!data || data.length < 1000) return out;
   }
-}
-
-function shiftYmd(ymd: string, days: number): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
 // ───────────────────────── ① 읽기 ─────────────────────────
@@ -468,56 +461,16 @@ export async function findAssetElsewhere(supabase: Supa, confirmId: string, asse
   return out;
 }
 
-/** 출고 준비 상태 한 줄 — "홍길동 준비완료 · 김철수 준비중" / "준비 전" */
-function prepStateText(checks: PrepChecks | null | undefined): string {
-  const parts: string[] = [];
-  for (const [person, e] of Object.entries(checks ?? {})) {
-    if (isPrepDone(e)) parts.push(`${person} 준비완료`);
-    else if (isPrepInProgress(e)) parts.push(`${person} 준비중`);
-    else if (isPrepOverhaul(e)) parts.push(`${person} 오버홀`);
-  }
-  return parts.join(' · ') || '준비 전';
-}
-
-/** 같은 건으로 보이는 출고 준비 일정(읽기만) — 납품일 ±3일 IT 일정 중 prepMatch 규칙(상호·구분·지역), 최대 5건 */
-async function loadPrepHints(supabase: Supa, confirm: NormalizedSalesConfirm, region: string): Promise<SalesConfirmDetailData['prepHints']> {
-  const d = confirm.deliveryDate;
-  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return [];
-  const { data, error } = await supabase
-    .from(CALENDAR_TABLE)
-    .select('id,date,time,title')
-    .gte('date', shiftYmd(d, -3))
-    .lte('date', shiftYmd(d, 3))
-    .order('date')
-    .limit(1000);
-  if (error) throw error;
-  const candidates: PrepEventCandidate[] = ((data ?? []) as { id: string; date: string; time: string | null; title: string | null }[])
-    .filter((e) => isItPrepTarget(e.title ?? '', ''))
-    .map((e) => {
-      const title = e.title ?? '';
-      return { id: e.id, date: e.date, time: e.time ?? '', title, company: parseEventTitle(title).company || guessCompany(title) };
-    });
-  const matches = matchPrepEvents(
-    { company: confirm.company, deliveryDate: d, type: confirm.type, region: region || null },
-    candidates,
-  ).slice(0, 5);
-  if (!matches.length) return [];
-  const ids = matches.map((m) => m.event.id);
-  const [ev, rep] = await Promise.all([
-    supabase.from(PREP_EVENTS_TABLE).select('event_id,prep_checks').in('event_id', ids),
-    supabase.from(PREP_REPORTS_TABLE).select('event_id,sent_at').in('event_id', ids),
-  ]);
-  if (ev.error) throw ev.error;
-  if (rep.error) throw rep.error;
-  const checks = new Map(((ev.data ?? []) as { event_id: string; prep_checks: PrepChecks | null }[]).map((r) => [r.event_id, r.prep_checks]));
-  const sent = new Map(((rep.data ?? []) as { event_id: string; sent_at: string | null }[]).map((r) => [r.event_id, !!r.sent_at]));
-  return matches.map((m) => ({
-    eventId: m.event.id,
-    date: m.event.date,
-    title: m.event.title,
-    prepState: prepStateText(checks.get(m.event.id)),
-    reportSent: sent.get(m.event.id) ?? false,
-  }));
+/**
+ * 4-1: 옛 prepHints 모양(화면 PrepHintBox 가 PrepLinkPanel 로 바뀔 때까지) — 연결·자동 일정 + 후보, 최대 5.
+ * 직송·따로 보기는 후보를 계산하지 않음(F29) → 저장된 연결만.
+ */
+function hintsFromPrepLink(link: PrepLinkState | null): SalesConfirmDetailData['prepHints'] {
+  if (!link) return [];
+  return [link.event, ...link.candidates]
+    .filter((c): c is NonNullable<typeof c> => !!c)
+    .slice(0, 5)
+    .map((c) => ({ eventId: c.eventId, date: c.date, title: c.title, prepState: c.prepState || '준비 전', reportSent: c.reportSent }));
 }
 
 /** 마지막 확인 판(② seen_ver·seen_hash) ↔ 지금 — 쉬운 말 목록(diff.ts). 판을 못 찾으면 [] */
@@ -646,8 +599,14 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
   const salesChanged = salesChangedSince(seenVer, ver);
 
   const assetIds = unitsRes.units.map((u) => u.assetId).filter(Boolean);
-  const [prepHints, changes, assetElsewhere] = await Promise.all([
-    other ? Promise.resolve([] as SalesConfirmDetailData['prepHints']) : soft(loadPrepHints(supabase, confirm, effRegion), [], '출고 준비 후보 읽기', '같은 건으로 보이는 출고 준비 일정을 못 읽었어요 — 잠시 뒤 새로고침해 주세요.'),
+  // 4-1: 출고 준비 일정 연결 상태 + 후보(읽기만 — 화면 열기로는 안 씀, F4). 따로 보는 종류·직송은 저장된 연결만(F29)
+  const [prepLink, changes, assetElsewhere] = await Promise.all([
+    soft(
+      readPrepLinkForConfirm(id, { withRecords: true, supabase }),
+      null as PrepLinkState | null,
+      '출고 준비 연결 읽기',
+      '출고 준비 일정 연결을 못 읽었어요 — 잠시 뒤 새로고침해 주세요.',
+    ),
     salesChanged && seenVer !== null
       ? soft(loadSalesChanges(supabase, id, seenVer, seenHash, confirm), [] as string[], '판 비교 읽기', '영업에서 무엇이 바뀌었는지 못 읽었어요 — 영업 원본을 열어 확인해 주세요.')
       : Promise.resolve([] as string[]),
@@ -688,7 +647,8 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
       fetchedAt: asStr(c.fetched_at),
       people,
       checklist,
-      prepHints,
+      prepHints: other ? [] : hintsFromPrepLink(prepLink),
+      prepLink,
       schemaReady: unitsRes.schemaReady && workRes.printedReady,
       progress: slotProgress(lines),
       assetElsewhere,

@@ -9,6 +9,9 @@ import {
   type PrepPerson,
   type TitleTagResult,
 } from '@/app/shipment-prep/actions';
+import { linkConfirmPrepEvent, listEventConfirmBadges } from '@/app/confirm-form/prepLinkActions';
+import { useSalesToast } from '@/components/salesConfirms/salesUi';
+import { SALES_CONFIRM_ACTOR_KEY, type PrepConfirmBadge as PrepConfirmBadgeData, type PrepConfirmBadgeItem } from '@/lib/salesConfirms/types';
 import { applyPrepStage, isPrepDone, isPrepInProgress, isPrepOverhaul, shortDateLabel, type PrepStage } from '@/lib/shipmentPrep';
 
 async function postJson<T>(url: string, body?: unknown): Promise<T> {
@@ -16,8 +19,23 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 const requestTitleTag = (eventId: string) => postJson<TitleTagResult>('/api/shipment-prep/title-tag', { eventId }).catch((e) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+import PrepConfirmBadge from './PrepConfirmBadge';
 import PrepPeopleModal from './PrepPeopleModal';
 import PrepReportModal from './PrepReportModal';
+
+/** 확인서 배지(4-1): 한 번에 읽는 일정 수(서버 MAX_EVENT_BADGES 와 같음) · 다시 읽는 간격(목록 60초 고리와 따로 — §9-11) */
+const BADGE_MAX_EVENTS = 300;
+const BADGE_REFRESH_MS = 5 * 60_000;
+type BadgeLoad = 'idle' | 'loading' | 'ok' | 'error' | 'missing';
+
+/** 연결한 사람 이름 = 확인서 화면에서 브라우저에 기억해 둔 이름(없으면 빈 이름 — 이 화면엔 이름 칸이 없고, 이름 창은 고르기 팝업 아래에 깔림) */
+function savedActor(): string {
+  try {
+    return (localStorage.getItem(SALES_CONFIRM_ACTOR_KEY) ?? '').trim();
+  } catch {
+    return '';
+  }
+}
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -29,6 +47,15 @@ function nextBusinessDayOf(iso: string): string {
   while (dt.getDay() === 0 || dt.getDay() === 6);
   return ymd(dt);
 }
+/** 바로 전 평일(월 → 금) — ?event= 로 온 일정을 "출고분"으로 보는 준비하는 날 */
+function prevBusinessDayOf(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  do dt.setDate(dt.getDate() - 1);
+  while (dt.getDay() === 0 || dt.getDay() === 6);
+  return ymd(dt);
+}
+const isPreparedRow = (r: PrepEventRow) => Object.values(r.prepChecks).some(isPrepDone);
 function fmtDuration(s?: string | null, e?: string | null): string {
   if (!s || !e) return '';
   const min = Math.max(1, Math.round((new Date(e).getTime() - new Date(s).getTime()) / 60000));
@@ -44,7 +71,7 @@ const KIND_STYLE: Record<string, { bg: string; fg: string }> = {
 
 type Banner = { state: 'busy' | 'ok' | 'error'; eventId: string; text: string } | null;
 
-export default function ShipmentPrepPage() {
+export default function ShipmentPrepPage({ focusEventId = null }: { focusEventId?: string | null } = {}) {
   const [events, setEvents] = useState<PrepEventRow[]>([]);
   const [people, setPeople] = useState<PrepPerson[]>([]);
   const [error, setError] = useState('');
@@ -59,6 +86,18 @@ export default function ShipmentPrepPage() {
   const [detailEvent, setDetailEvent] = useState<PrepEventRow | null>(null);
   const tagSeq = useRef(0);
   const [isMobile, setIsMobile] = useState(false);
+  // 확인서 배지(4-1) — 보이는 일정만 한 번에 읽음. listPrepEvents 모양은 그대로(H14 — 홈도 씀)
+  const [badges, setBadges] = useState<Record<string, PrepConfirmBadgeData>>({});
+  const [badgeLoad, setBadgeLoad] = useState<BadgeLoad>('idle');
+  const [badgeError, setBadgeError] = useState('');
+  const badgeSeq = useRef(0);
+  const badgeIdsRef = useRef<string[]>([]);
+  const { show: showToast, node: toastNode } = useSalesToast();
+  // ?event=<id>(확인서 상세에서 넘어옴) — 그 일정으로 스크롤·강조
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const [focusNote, setFocusNote] = useState('');
+  const [firstSyncDone, setFirstSyncDone] = useState(false);
+  const focusDoneFor = useRef<string | null>(null);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 900);
@@ -86,6 +125,7 @@ export default function ShipmentPrepPage() {
       if (alive) {
         setSyncing(false);
         await reload();
+        setFirstSyncDone(true);
       }
     };
     void reload();
@@ -104,6 +144,127 @@ export default function ShipmentPrepPage() {
   const scoped = useMemo(() => (target ? events.filter((e) => e.date === target) : events), [events, target]);
   const visible = useMemo(() => (showCompleted ? scoped : scoped.filter((e) => !isPrepared(e))), [scoped, showCompleted]);
   const doneCnt = scoped.filter(isPrepared).length;
+
+  // ── 확인서 배지(4-1) ──
+  // 보이는 일정 id 묶음이 바뀔 때만 다시 읽음(60초 동기화로 events 가 새로 와도 같은 묶음이면 안 읽음) + 5분마다 + 연결 뒤.
+  const badgeKey = useMemo(
+    () =>
+      visible
+        .map((e) => e.id)
+        .slice(0, BADGE_MAX_EVENTS)
+        .sort()
+        .join(','),
+    [visible],
+  );
+
+  const loadBadges = useCallback(async (ids: string[]) => {
+    const seq = ++badgeSeq.current;
+    if (!ids.length) {
+      setBadgeLoad((s) => (s === 'missing' ? s : 'ok'));
+      return;
+    }
+    setBadgeLoad((s) => (s === 'missing' ? s : 'loading'));
+    let res: Awaited<ReturnType<typeof listEventConfirmBadges>>;
+    try {
+      res = await listEventConfirmBadges({ eventIds: ids });
+    } catch {
+      res = { ok: false, error: '확인서 정보를 못 읽었어요 — 인터넷 연결을 확인하고 다시 해 주세요.' };
+    }
+    if (seq !== badgeSeq.current) return; // 그 사이 다시 읽기 시작함 — 마지막 결과만
+    if (res.ok) {
+      const data = res.data;
+      setBadges((prev) => {
+        const next = { ...prev };
+        for (const id of ids) {
+          if (data[id]) next[id] = data[id];
+          else delete next[id]; // 일정이 지워짐
+        }
+        return next;
+      });
+      setBadgeLoad('ok');
+      setBadgeError('');
+    } else if (res.missingTable) {
+      setBadgeLoad('missing'); // 확인서 표 없음 — 배지 없이 예전 그대로(§4-G, 안내 없음)
+    } else {
+      setBadgeLoad('error');
+      setBadgeError(res.error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const ids = badgeKey ? badgeKey.split(',') : [];
+    badgeIdsRef.current = ids;
+    void loadBadges(ids);
+  }, [badgeKey, loading, loadBadges]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => void loadBadges(badgeIdsRef.current), BADGE_REFRESH_MS);
+    return () => window.clearInterval(t);
+  }, [loadBadges]);
+
+  /** 배지 고르기 팝업의 [연결] — 결과를 팝업에 돌려줌(실패면 팝업이 빨간 띠로 보여 줌), 성공·충돌이면 배지를 다시 읽음 */
+  const linkFromBadge = useCallback(
+    async (eventId: string, item: PrepConfirmBadgeItem): Promise<{ ok: true } | { ok: false; error: string }> => {
+      let res: Awaited<ReturnType<typeof linkConfirmPrepEvent>>;
+      try {
+        res = await linkConfirmPrepEvent({ confirmId: item.confirmId, eventId, expectedUpdatedAt: item.workUpdatedAt, actor: savedActor() });
+      } catch {
+        return { ok: false, error: '연결하지 못했어요 — 인터넷 연결을 확인하고 다시 해 주세요.' };
+      }
+      if (res.ok) {
+        showToast(`확인서 ${item.docNo || ''}를 이 일정에 연결했어요`);
+        void loadBadges(badgeIdsRef.current);
+        return { ok: true };
+      }
+      if (res.conflict) void loadBadges(badgeIdsRef.current); // 그 사이 바뀐 값으로 팝업 목록을 새로
+      return { ok: false, error: res.error };
+    },
+    [loadBadges, showToast],
+  );
+
+  const badgeFor = (ev: PrepEventRow) =>
+    badgeLoad === 'missing' ? null : (
+      <PrepConfirmBadge
+        badge={badges[ev.id]}
+        loading={badgeLoad === 'loading' || badgeLoad === 'idle'}
+        onLink={(item) => linkFromBadge(ev.id, item)}
+      />
+    );
+
+  // ── ?event=<id> 로 들어오면 그 일정이 보이게(날짜·완료 포함을 맞춤) → 스크롤·강조 ──
+  useEffect(() => {
+    if (!focusEventId || focusDoneFor.current === focusEventId || loading) return;
+    const ev = events.find((e) => e.id === focusEventId);
+    if (!ev) {
+      if (!firstSyncDone) return; // 네이버 동기화 뒤 한 번 더 찾아봄
+      focusDoneFor.current = focusEventId;
+      setFocusId(null);
+      setFocusNote(
+        '찾는 출고 일정이 지금 출고 준비 리스트에 없어요 — 네이버 일정에 ★(별표)가 없거나, 기간(지난 14일 ~ 앞으로 60일) 밖이거나, 지워졌을 수 있어요.',
+      );
+      return;
+    }
+    focusDoneFor.current = focusEventId;
+    setFocusNote('');
+    const today = ymd(new Date());
+    const shown = !prepDate || nextBusinessDayOf(prepDate) === ev.date;
+    if (!shown) {
+      // 그 날짜를 "출고분"으로 보는 준비하는 날: 오늘 → 바로 전 평일(월 일정이면 금) → 없으면(토·일 출고) 전체 일정
+      const prev = prevBusinessDayOf(ev.date);
+      setPrepDate(nextBusinessDayOf(today) === ev.date ? today : nextBusinessDayOf(prev) === ev.date ? prev : '');
+    }
+    if (isPreparedRow(ev)) setShowCompleted(true);
+    setFocusId(ev.id);
+  }, [focusEventId, loading, events, firstSyncDone, prepDate]);
+
+  useEffect(() => {
+    if (!focusId) return;
+    const t = window.setTimeout(() => {
+      document.getElementById(`prep-ev-${focusId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [focusId, isMobile]);
 
   function showTag(eventId: string, tag: TitleTagResult) {
     if (tag.ok) {
@@ -279,6 +440,23 @@ export default function ShipmentPrepPage() {
       </div>
 
       {error && <div style={{ color: 'var(--red-600)', marginBottom: 10 }}>{error}</div>}
+      {focusNote && (
+        <div className="panel" style={{ marginBottom: 12, fontSize: 13, display: 'flex', gap: 8, alignItems: 'center', background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412' }}>
+          <span style={{ flex: 1 }}>{focusNote}</span>
+          <button type="button" className="icon-btn" onClick={() => setFocusNote('')} aria-label="닫기">
+            ×
+          </button>
+        </div>
+      )}
+      {badgeLoad === 'error' && (
+        // 확인서 쪽 문제여도 출고 준비는 그대로 쓸 수 있게(F23) — 배지 자리 대신 한 줄
+        <div className="panel" style={{ marginBottom: 12, fontSize: 13, display: 'flex', gap: 8, alignItems: 'center', background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412' }}>
+          <span style={{ flex: 1 }}>📋 {badgeError || '확인서 정보를 못 읽었어요 — 잠시 뒤 다시 해 주세요.'} (출고 준비는 그대로 쓸 수 있어요)</span>
+          <button type="button" className="btn btn-ghost" onClick={() => void loadBadges(badgeIdsRef.current)}>
+            다시 읽기
+          </button>
+        </div>
+      )}
       {activePeople.length === 0 && !loading && (
         <div className="panel" style={{ marginBottom: 12, fontSize: 13 }}>
           준비 담당자가 아직 없어요 — <b>👥 담당자 관리</b>에서 이름을 추가해주세요.
@@ -294,7 +472,16 @@ export default function ShipmentPrepPage() {
       ) : isMobile ? (
         <div className="panel" style={{ padding: 0 }}>
           {visible.map((ev) => (
-            <div key={ev.id} style={{ padding: 12, borderTop: '1px solid var(--ink-100)', background: isPrepared(ev) ? '#f0fdf4' : '#fff' }}>
+            <div
+              key={ev.id}
+              id={`prep-ev-${ev.id}`}
+              style={{
+                padding: 12,
+                borderTop: '1px solid var(--ink-100)',
+                background: focusId === ev.id ? '#eef2ff' : isPrepared(ev) ? '#f0fdf4' : '#fff',
+                boxShadow: focusId === ev.id ? 'inset 4px 0 0 var(--indigo-600, #4f46e5)' : undefined,
+              }}
+            >
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                 {kindBadge(ev.kind)}
                 <span style={{ flex: 1, fontSize: 15, fontWeight: 700, wordBreak: 'keep-all', color: 'var(--indigo-600)' }} onClick={() => setDetailEvent(ev)}>
@@ -305,6 +492,7 @@ export default function ShipmentPrepPage() {
                 </span>
               </div>
               <div style={{ fontSize: 12, color: 'var(--ink-400)', marginTop: 3, wordBreak: 'break-all' }}>{ev.title}</div>
+              {badgeFor(ev)}
               {ev.items.length > 0 && (
                 <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5 }}>
                   {ev.items.map((it, i) => (
@@ -347,7 +535,15 @@ export default function ShipmentPrepPage() {
             </thead>
             <tbody>
               {visible.map((ev) => (
-                <tr key={ev.id} style={{ background: isPrepared(ev) ? '#f0fdf4' : undefined }}>
+                <tr
+                  key={ev.id}
+                  id={`prep-ev-${ev.id}`}
+                  style={{
+                    background: focusId === ev.id ? '#eef2ff' : isPrepared(ev) ? '#f0fdf4' : undefined,
+                    outline: focusId === ev.id ? '2px solid var(--indigo-600, #4f46e5)' : undefined,
+                    outlineOffset: -2,
+                  }}
+                >
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <div style={{ fontWeight: 700 }}>{shortDateLabel(ev.date)}</div>
                     <div style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>{ev.time || '종일'}</div>
@@ -356,6 +552,8 @@ export default function ShipmentPrepPage() {
                   <td style={{ wordBreak: 'break-all', cursor: 'pointer' }} onClick={() => setDetailEvent(ev)} title="캘린더 내용 보기">
                     <div style={{ fontWeight: 700, color: 'var(--indigo-600)' }}>{ev.company} ›</div>
                     <div style={{ fontSize: 11.5, color: 'var(--ink-400)' }}>{ev.title}</div>
+                    {/* 배지 안을 눌러도 캘린더 내용 창이 안 열림(배지가 클릭 전파를 막음) */}
+                    {badgeFor(ev)}
                   </td>
                   <td style={{ wordBreak: 'break-all', fontSize: 12.5 }}>
                     {ev.items.length ? ev.items.map((it, i) => <div key={i}>· {it}</div>) : <span style={{ color: 'var(--ink-400)' }}>-</span>}
@@ -434,6 +632,7 @@ export default function ShipmentPrepPage() {
           }}
         />
       )}
+      {toastNode}
     </div>
   );
 }

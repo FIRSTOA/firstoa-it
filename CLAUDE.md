@@ -165,6 +165,11 @@
     그날 납품분 지역 A→E 순 + 숫자 카드 3개, 목록 위 항목 `출고 준비 확인서`·`직송`·`철수·이전·판매`. **직송 판정 = `deliveryMode.ts` `isDirectShip`**(영업 statusDeliverer 와 같음 —
     위탁사 consign 이 있고 shipType '직송', 비면 head 에 '직송') — 목록은 payload 의 세 칸만(`readDeliveryModes`), 직송은 오늘 준비할 것·숫자 카드·홈 "준비 안 끝남"에서 빠짐, 상세는 그대로(띠만).
     출고 준비 리스트의 제목 키워드 직송 거르기(`DIRECT_DELIVERY_KEYWORDS`)는 안 바꿈(F30).
+    **4-1 짝짓기**: 규칙 `prepLinkRules.ts`(순수 — 확실 = 영업 제목 줄(confTitle)과 일정 제목 `IT/` 뒤가 같고 날짜 같음 → 자동, 후보 = 상호+±1일+구분+지역, 약한 후보 ±3일),
+    상태·읽기·쓰기 `prepLink.ts`(server-only — ③ prep_event_id·link_source 만 씀: ''·auto·manual·none), 액션 `app/confirm-form/prepLinkActions.ts`.
+    **화면 열기만으론 안 씀**(자동은 보여 주기만 — 저장은 4-2·4-3 에서 사람이 무언가 할 때 'auto'). 일정 하나에 확인서 여럿 허용(그래서 "다른 확인서가 이미 연결 → 자동 아님(taken)"은 뺌).
+    확인서 상세 "출고 준비" 상자(PrepLinkPanel), 출고 준비 카드 📋 배지(PrepConfirmBadge — 60초 동기화 때 같은 일정 묶음이면 안 다시 읽음), `/shipment-prep?event=<id>`,
+    홈 "다음 영업일 출고 일정 없음 n". 복제본 정리(duplicateActions)는 ③ 연결도 "기록"으로 셈 — 연결된 앱 줄을 안 지움.
   - ver 0~2147483647 밖·`\u0000` 든 건은 그 건만 건너뜀(묶음 실패 방지). 일부만 모양이 다르면 나머지 반영 + 'bad_shape' 주황 띠.
 - **표**(`supabase/sales_confirms_schema.sql`, 칸 이름은 `lib/salesConfirms/types.ts` 맨 위 주석이 기준): ①② 영업 원본 = **importer.ts 만 씀**,
   ③ work·④ units = IT 값 = 화면 액션만 씀. **가져오기 코드(normalize·source·importer·route)는 ③④ 표 이름을 import 도 하지 말 것**(IT 값 덮어쓰기를 구조로 막음).
@@ -276,7 +281,14 @@
 - 구글시트(IT재고 5개 탭·소모품) 읽은 결과는 **보관(캐시)하지 않음** — 사람이 시트에서 직접 고친 게 바로 보여야 해서(사용자 결정). 대신:
   - 탭당 한 번에 읽음(`listAssetsFromSheet`가 머리줄+데이터 한 번, 읽은 김에 쓰기용 행 번호 색인도 갱신).
   - 시트가 본문인 화면(IT 재고 리스트·재고 현황판·소모품)은 `<Suspense fallback={<PageLoading/>}>`로 틀부터 띄움.
-  - 시트가 보조인 화면(입고·판매·실재고 조사의 위치 목록 등)은 Promise 그대로 넘기고 `useStreamedValue`로 도착하면 채움.
+  - 시트가 보조인 화면(입고·판매 등)은 Promise 그대로 넘기고 `useStreamedValue`로 도착하면 채움.
+  - **서버 액션에서 revalidatePath 를 부르는 화면의 page 에는 시트 읽기를 두지 말 것** — Next 15 는 액션 안 revalidate 때 page 를 통째로 다시 그려 시트 5탭을 또 읽음.
+    실재고 조사가 [확인]마다 5탭을 다시 읽어 분당 60회 한도를 넘기고, 못 읽은 탭이 조용히 빈 목록이 되어 조사 장비·남은 위치가 빠졌음(2026-11-27).
+    실재고 조사는 위치 목록을 `loadStocktakeLocations`(useStocktakeLocations)로 필요할 때만 읽고, 조사 시작은 탭 하나라도 못 읽으면 거절(`mergeTabReads`).
+  - **실재고 조사 = 선반 단위**(사용자 결정 2026-11-27): `lib/stocktake.ts` `shelfKeyOf` — B1 = B1수리중 = B1 (수리중)(꼬리말), B10·B1A·B1-2 는 다른 선반.
+    조사 기록 위치엔 선반 열쇠, 장비마다 원래 위치 이름은 results[].location. 같은 선반이면 시트 위치를 안 고쳐 씀(사람이 다른 이름을 고를 때만).
+    시트 읽기 **실패**(429 등)를 "IT재고에 없음"으로 보지 말 것(`lookupInventory` found/missing/error) — 신규등록·새 줄 만들기 직전에 5탭에서 다시 찾음(중복 줄 방지).
+    조사 표는 1000줄 넘음(하루 ~14건) → `readAllStocktakePages` 로 끝까지(실재고체크완료 배지·현황판 2차 검증·목록).
   - IT 재고 표는 앞 120줄 먼저 그리고 나머지는 이어서(`InventoryTable`).
 - 메뉴 누르면 `Shell`이 맨 위 진행 막대 + 누른 메뉴 빙글 표시.
 

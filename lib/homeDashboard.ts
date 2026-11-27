@@ -11,6 +11,7 @@ import { summarizeReview } from '@/lib/billingAllocation';
 import { buildContractsOverview } from '@/lib/contracts/clients';
 import { nextBusinessDay } from '@/lib/businessDay';
 import { readDeliveryModes } from '@/lib/salesConfirms/listQuery';
+import { readConfirmPrepBadges } from '@/lib/salesConfirms/prepLink';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import {
@@ -416,7 +417,8 @@ export async function loadSalesImportState(): Promise<SalesImportState | null> {
 }
 
 /**
- * 영업 확인서 — 새로 들어온 것 · 오늘·다음 영업일 납품인데 준비 안 끝난 것 · 영업에서 수정된 것(개인정보 없이 건수만).
+ * 영업 확인서 — 새로 들어온 것 · 오늘·다음 영업일 납품인데 준비 안 끝난 것 · 영업에서 수정된 것
+ * · 다음 영업일 납품인데 출고 일정 없음(4-1, 0이면 안 보임)(개인정보 없이 건수만).
  * 범위: 최근 30일에 받았거나 납품일이 일주일 전 이후인 건 중 끝나지 않은(출고·취소 아님) 건.
  */
 export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
@@ -477,12 +479,14 @@ export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
     let urgent = 0;
     let changed = 0;
     const urgentIds: string[] = [];
+    const targetIds: string[] = []; // 다음 영업일 납품(출고·취소 아님) — "출고 일정 없음" 알림 대상(4-1 F5·F18)
     for (const c of confirms) {
       const w = work.get(c.id);
       const status = w?.status || '접수';
       if (status === '출고' || status === '취소') continue;
       if (!w || !w.first_opened_at) isNew++;
       if (c.delivery_date && c.delivery_date >= today && c.delivery_date <= target && (status === '접수' || status === '준비중')) urgentIds.push(c.id);
+      if (c.delivery_date === target) targetIds.push(c.id);
       const ver = c.ver ?? 0;
       if (w && salesChangedSince(w.seen_ver, ver)) changed++;
     }
@@ -491,6 +495,21 @@ export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
       const modes = await readDeliveryModes(supabase, urgentIds);
       urgent = urgentIds.filter((id) => !modes.map.get(id)?.directShip).length;
     }
+    // 다음 영업일 납품인데 출고 일정 없음(4-1 F5·F18, 주황) = 연결 상태 alertNoEvent — 판정은 prepLink 한 곳
+    // (직송·'출고 일정 없음으로 두기'(none)·지움·취소는 거기서 빠짐, 따로 보는 종류·지움은 위 confirms 에서 이미 뺌).
+    // 못 읽으면 카드 전체를 죽이지 않고 이 숫자만 "못 읽음"(로그 code 만).
+    let noEvent = 0;
+    let noEventFailed = false;
+    if (targetIds.length) {
+      try {
+        const states = await readConfirmPrepBadges(targetIds);
+        noEvent = targetIds.filter((id) => states[id]?.alertNoEvent).length;
+      } catch (err) {
+        noEventFailed = true;
+        console.warn('[home] 영업 확인서 출고 일정 연결 읽기 실패', (err as { code?: string } | null)?.code ?? 'unknown');
+      }
+    }
+    const noEventLabel = `${shortDateLabel(target)} 출고 일정 없음`;
     return {
       key: 'salesConfirm',
       title,
@@ -501,17 +520,25 @@ export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
         { label: '새로 들어옴', value: isNew, tone: isNew ? 'warn' : 'good' },
         { label: `${shortDateLabel(target)}까지 준비 안 끝남`, value: urgent, tone: urgent ? 'bad' : 'good' },
         { label: '영업에서 수정됨', value: changed, tone: changed ? 'warn' : 'good' },
+        // 0이면 안 보임(F18), 못 읽으면 "못 읽음"(회색)
+        ...(noEventFailed
+          ? [{ label: noEventLabel, value: '못 읽음', tone: 'muted' as const }]
+          : noEvent
+            ? [{ label: noEventLabel, value: noEvent, tone: 'warn' as const }]
+            : []),
       ],
       alert: deletedBusy
         ? `영업에서 지웠는데 IT가 준비 중인 확인서 ${deletedBusy}건 — 확인 필요`
         : urgent
         ? `${shortDateLabel(target)}까지 납품인데 준비 안 끝난 영업 확인서 ${urgent}건`
-        : changed
-          ? `영업에서 수정된 확인서 ${changed}건 — 바뀐 내용 확인`
-          : isNew
-            ? `새로 들어온 영업 확인서 ${isNew}건`
-            : null,
-      tone: deletedBusy || urgent ? 'bad' : isNew || changed ? 'warn' : 'good',
+        : noEvent
+          ? `${shortDateLabel(target)} 납품인데 네이버 출고 일정이 없는 영업 확인서 ${noEvent}건 — 영업에 일정 부탁`
+          : changed
+            ? `영업에서 수정된 확인서 ${changed}건 — 바뀐 내용 확인`
+            : isNew
+              ? `새로 들어온 영업 확인서 ${isNew}건`
+              : null,
+      tone: deletedBusy || urgent ? 'bad' : isNew || changed || noEvent ? 'warn' : 'good',
     };
   } catch (err) {
     const e = err as { code?: string; message?: string } | null;

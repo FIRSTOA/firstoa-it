@@ -9,6 +9,7 @@ import {
   isSalesConfirmStatus,
   salesConfirmHref,
   type SalesConfirmListRow,
+  type PrepLinkState,
   type SalesConfirmStatus,
   type SheetCompareEntry,
 } from '@/lib/salesConfirms/types';
@@ -34,6 +35,8 @@ interface Props {
   other?: boolean;
   /** 직송 목록(참고용 — 줄에 매입처는 row.directShip 으로 그림) */
   direct?: boolean;
+  /** 출고 일정 연결 표시(확인서 id → 상태). 처음 읽을 때·새로고침 때만 채움. 없으면 표시 없음 */
+  prepBadges?: Record<string, PrepLinkState>;
   /** 📄 시트와 비교 를 켰는지(PC 만 — 핸드폰에선 칸이 숨음) */
   showSheet: boolean;
   sheet: SheetColumnState;
@@ -52,7 +55,28 @@ const COL_WIDTHS = [88, 92, 76, 92, 104, 72, 128, 64, 160, 116, 132, 150, 150, 1
 /** 따로 보는 종류 — 자산번호(12번째)·시리얼(13번째) 칸 없음(합계 1594px — globals.css .sc-table.sc-table-other) */
 const OTHER_COL_WIDTHS = COL_WIDTHS.filter((_, i) => i !== 12 && i !== 13);
 
-export default function SalesConfirmTable({ rows, people, today, other = false, showSheet, sheet, busyIds, onOpen, onStatus, onProcessors }: Props) {
+/** 줄의 "출고 일정" 표시 — 이어짐 초록 / 후보·일정 없음·끊김 주황. 그 밖(꺼 둠·직송·모름)은 표시 없음 */
+function prepChip(st: PrepLinkState | undefined) {
+  if (!st) return null;
+  const ev = st.event;
+  switch (st.kind) {
+    case 'linked':
+    case 'auto': {
+      const when = ev ? `${fmtDate(ev.date)}${ev.time ? ` ${ev.time}` : ''}${ev.regionOfEvent ? ` ${ev.regionOfEvent}` : ''}` : '';
+      return <span className="sc-pill sc-pill-green" title={st.kind === 'auto' ? '제목과 날짜가 같아 자동으로 이어졌어요' : '출고 준비 일정과 이어져 있어요'}>📋 출고 일정 {when}{st.kind === 'auto' ? ' (자동)' : ''}</span>;
+    }
+    case 'candidates':
+      return <span className="sc-pill sc-pill-amber" title="열어서 맞는 일정을 골라 주세요">📋 일정 후보 {st.candidates.length}</span>;
+    case 'broken':
+      return <span className="sc-pill sc-pill-amber" title="연결했던 일정이 지워졌어요. 열어서 다시 골라 주세요">📋 연결한 일정이 없어졌어요</span>;
+    case 'noEvent':
+      return st.alertNoEvent ? <span className="sc-pill sc-pill-amber" title="영업에 네이버 일정을 부탁하세요">📋 출고 일정 없음</span> : null;
+    default:
+      return null;
+  }
+}
+
+export default function SalesConfirmTable({ rows, people, today, other = false, prepBadges, showSheet, sheet, busyIds, onOpen, onStatus, onProcessors }: Props) {
   const tomorrow = addDays(today, 1);
   const widths = other ? OTHER_COL_WIDTHS : COL_WIDTHS;
   return (
@@ -103,6 +127,7 @@ export default function SalesConfirmTable({ rows, people, today, other = false, 
               today={today}
               tomorrow={tomorrow}
               other={other}
+              prep={other ? undefined : (prepBadges?.[row.id] ?? row.prepBadge)}
               showSheet={showSheet}
               sheet={sheet}
               busy={busyIds.has(row.id)}
@@ -123,6 +148,7 @@ function Row({
   today,
   tomorrow,
   other,
+  prep,
   showSheet,
   sheet,
   busy,
@@ -135,6 +161,7 @@ function Row({
   today: string;
   tomorrow: string;
   other: boolean;
+  prep: PrepLinkState | undefined;
   showSheet: boolean;
   sheet: SheetColumnState;
   busy: boolean;
@@ -214,8 +241,9 @@ function Row({
             직송 · 매입처 {row.consignName || '(이름 없음)'}
           </div>
         )}
-        {(isNew || row.salesChanged || row.salesState || printed || recheck > 0) && (
+        {(isNew || row.salesChanged || row.salesState || printed || recheck > 0 || prepChip(prep)) && (
           <div className="sc-flags">
+            {prepChip(prep)}
             {isNew && <span className="sc-pill sc-pill-new">새로</span>}
             {deleted && (
               <span className="sc-del-flag">

@@ -6,7 +6,7 @@ import { titleBody } from '@/lib/confirmSheet';
 import { isRecurringIcs, sameIcsText } from '@/lib/icsPatch';
 import { deleteEventByHref, eventHref, isNaverCalDavConfigured, parseEventBlock, readEventByHref, type ParsedEvent } from '@/lib/naverCaldav';
 import { FETCH_CONCURRENCY } from '@/lib/naverCalendarSync';
-import { CALENDAR_TABLE, createAdminClient, RECEIVING_TABLE } from '@/lib/supabase/server';
+import { CALENDAR_TABLE, createAdminClient, RECEIVING_TABLE, SALES_CONFIRM_WORK_TABLE } from '@/lib/supabase/server';
 import { naverFailReason } from '@/lib/syncFailure';
 
 /**
@@ -44,6 +44,7 @@ type EventRow = {
 };
 type StateRow = { href: string; etag: string; uid: string; calendar_id: string };
 
+/** confirmDocs = 확인서 연결 수 — 예전 시트 확인서(it_confirm_docs.prep_event_id) + 영업 확인서(③ it_sales_confirm_work.prep_event_id, 4-1 F21) */
 export type DupRecords = { prepChecks: boolean; report: boolean; photos: number; reportSent: boolean; receiving: number; confirmDocs: number };
 export type DupEventInfo = { id: string; title: string; date: string; time: string; status: string; records: DupRecords };
 export type DupNaverInfo = { href: string; title: string; date: string; time: string; completed: boolean };
@@ -120,22 +121,28 @@ async function readNaver(href: string): Promise<NaverRead> {
 const emptyRecords = (): DupRecords => ({ prepChecks: false, report: false, photos: 0, reportSent: false, receiving: 0, confirmDocs: 0 });
 const hasRecords = (r: DupRecords) => r.prepChecks || r.report || r.receiving > 0 || r.confirmDocs > 0;
 
-/** 앱 줄에 붙은 기록(출고 준비 체크·완료 보고·입고 연결·확인서 연결). 표가 없으면 0, 그 밖의 오류는 던짐(없다고 보면 지울 수 있어서). */
+/**
+ * 앱 줄에 붙은 기록(출고 준비 체크·완료 보고·입고 연결·확인서 연결 — 예전 시트 확인서 + 영업 확인서 ③ 연결).
+ * 표가 없으면 0, 그 밖의 오류는 던짐(없다고 보면 지울 수 있어서).
+ * 영업 확인서 ③ 연결(4-1 F21·H15): 앱 줄을 지우면 FK set null 로 연결이 풀리므로 '기록 있음'으로 셈 → 그 줄은 deleteY·keepY 로 안 지움.
+ */
 async function countRecords(ids: string[]): Promise<Map<string, DupRecords>> {
   const m = new Map(ids.map((id) => [id, emptyRecords()]));
   if (!ids.length) return m;
   const supabase = createAdminClient();
-  const [prep, rep, rec, conf] = await Promise.all([
+  const [prep, rep, rec, conf, sales] = await Promise.all([
     supabase.from(PREP_EVENTS_TABLE).select('event_id,prep_checks').in('event_id', ids),
     supabase.from(PREP_REPORTS_TABLE).select('event_id,photos,sent_at').in('event_id', ids),
     supabase.from(RECEIVING_TABLE).select('calendar_event_id').in('calendar_event_id', ids),
     supabase.from(CONFIRM_DOCS_TABLE).select('prep_event_id').in('prep_event_id', ids),
+    supabase.from(SALES_CONFIRM_WORK_TABLE).select('prep_event_id').in('prep_event_id', ids),
   ]);
   for (const [label, r] of [
     ['출고 준비', prep],
     ['완료 보고', rep],
     ['입고', rec],
     ['확인서', conf],
+    ['영업 확인서', sales],
   ] as const) {
     if (r.error && !isMissingTable(r.error)) throw new Error(`${label} 기록을 못 읽었어요(${r.error.message})`);
   }
@@ -156,6 +163,10 @@ async function countRecords(ids: string[]): Promise<Map<string, DupRecords>> {
   }
   for (const p of (conf.data ?? []) as { prep_event_id: string }[]) {
     const x = m.get(p.prep_event_id);
+    if (x) x.confirmDocs++;
+  }
+  for (const p of (sales.data ?? []) as { prep_event_id: string | null }[]) {
+    const x = p.prep_event_id ? m.get(p.prep_event_id) : undefined;
     if (x) x.confirmDocs++;
   }
   return m;

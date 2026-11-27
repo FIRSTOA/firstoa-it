@@ -58,7 +58,7 @@ import LedgerClientDialog from './LedgerClientDialog';
 import LicenseUnlockDialog from './LicenseUnlockDialog';
 import LineBulkDialog, { type LineBulkMode } from './LineBulkDialog';
 import OrphanPanel, { type OrphanTarget } from './OrphanPanel';
-import PrepHintBox from './PrepHintBox';
+import PrepLinkPanel from './PrepLinkPanel';
 import SalesChangeBanner from './SalesChangeBanner';
 import SalesPrintDialog, { syncSalesConfirmOne } from './SalesPrintDialog';
 import { useSalesActor, useSalesToast } from './salesUi';
@@ -1271,7 +1271,16 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         />
       </section>
 
-      {!isOther && <PrepHintBox hints={data.prepHints} />}
+      <PrepLinkPanel
+        confirmId={confirmId}
+        link={data.prepLink}
+        getWorkUpdatedAt={() => dataRef.current.work.updatedAt}
+        ensureActor={ensureActor}
+        onSaved={(at) => setData((d) => ({ ...d, work: { ...d.work, updatedAt: at } }))}
+        onReload={() => void reload(true)}
+        serial={serial}
+        toast={toast}
+      />
 
       {/* ── 핸드폰 아래 고정 막대 ── */}
       <div className="sc-fixbar">
