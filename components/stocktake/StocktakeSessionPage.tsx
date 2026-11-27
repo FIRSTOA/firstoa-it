@@ -2,7 +2,6 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { useStreamedValue } from '@/lib/useStreamedValue';
 import {
   applyStocktakeReviewBatch,
   bulkUpdateStocktakeItems,
@@ -15,8 +14,10 @@ import {
 import { addStaffNameIfNew } from '@/app/actions';
 import { resizeImageFile } from '@/lib/imageResize';
 import { scanLabelImage } from '@/lib/ocrClient';
-import { isLikelyAssetId, stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
+import { isLikelyAssetId, isSameShelf, remainingShelves, stocktakeSummary, type StocktakeSession } from '@/lib/stocktake';
 import { CATEGORIES } from '@/lib/types';
+import { LocationsNotice } from './LocationsNotice';
+import { useStocktakeLocations } from './useStocktakeLocations';
 
 const STARTED_BY_KEY = 'firstoa_stocktake_started_by';
 
@@ -26,7 +27,9 @@ const STATUS_LABEL: Record<string, string> = {
   목록외발견: '목록외 발견',
 };
 
-type ReviewStatus = '정상' | '위치변경' | '신규등록' | '인식실패';
+// 조회실패 = 자산번호는 읽었는데 그 순간 IT재고 시트를 못 읽음(구글 읽기 한도 등) — 있는지 없는지 몰라서
+// "신규등록"으로 보면 안 됨(예전엔 그렇게 분류돼 [재고 반영하기]가 시트에 중복 줄을 만들 수 있었음). 반영 대상 아님.
+type ReviewStatus = '정상' | '위치변경' | '신규등록' | '인식실패' | '조회실패';
 
 type ReviewItem = {
   key: string;
@@ -44,6 +47,7 @@ const REVIEW_LABEL: Record<ReviewStatus, string> = {
   위치변경: '위치변경 필요',
   신규등록: '신규등록 필요(ERP 미등록)',
   인식실패: '인식 실패',
+  조회실패: 'IT재고 못 읽음',
 };
 
 const REVIEW_BADGE: Record<ReviewStatus, string> = {
@@ -51,31 +55,26 @@ const REVIEW_BADGE: Record<ReviewStatus, string> = {
   위치변경: 'badge-임대중',
   신규등록: 'badge-악성',
   인식실패: 'badge-기타',
+  조회실패: 'badge-기타',
 };
-
-const EMPTY_LOCATIONS: string[] = [];
 
 type Props = {
   session: StocktakeSession;
-  /** IT재고 시트에서 뽑는 선반 위치 — 서버가 기다리지 않고 넘겨서 조금 뒤에 도착함 */
-  locations: Promise<string[]> | string[];
   staffNames: string[];
-  completedTodayLocations: string[];
+  /** 오늘 끝낸 위치 — null 이면 못 읽음(끝낸 위치도 다음 후보에 보일 수 있음) */
+  completedTodayLocations: string[] | null;
 };
 
-export default function StocktakeSessionPage({
-  session,
-  locations: locationsSource,
-  staffNames,
-  completedTodayLocations,
-}: Props) {
-  const locations = useStreamedValue(locationsSource, EMPTY_LOCATIONS);
+export default function StocktakeSessionPage({ session, staffNames, completedTodayLocations }: Props) {
   const router = useRouter();
   const [toast, setToast] = useState({ msg: '', show: false });
   const [nextLocation, setNextLocation] = useState('');
   const [nextStartedBy, setNextStartedBy] = useState(session.startedBy);
   const [startingNext, setStartingNext] = useState(false);
   const [justCompleted, setJustCompleted] = useState(false);
+  // 다음 위치 후보(IT재고 시트 5탭)는 [조사 종료] 뒤 안내를 띄울 때만 읽음 — page 에서 읽으면 [확인] 한 번마다
+  // 다시 읽혀 구글 읽기 한도를 다 써 버렸음(useStocktakeLocations 설명).
+  const locs = useStocktakeLocations(justCompleted);
   const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -164,6 +163,15 @@ export default function StocktakeSessionPage({
               model: lookup.info.model,
               brand: lookup.info.brand,
             });
+          } else if (lookup.readFailed) {
+            next.push({
+              key: assetId,
+              assetId,
+              status: '조회실패',
+              category: defaultCategory,
+              model: '',
+              errorNote: `${lookup.error} 사진을 다시 올리면 다시 찾아봐요.`,
+            });
           } else {
             next.push({
               key: assetId,
@@ -206,7 +214,10 @@ export default function StocktakeSessionPage({
   async function handleApplyReview() {
     setApplying(true);
     const applyItems: ReviewApplyInput[] = reviewItems
-      .filter((item): item is ReviewItem & { status: '정상' | '위치변경' | '신규등록' } => item.status !== '인식실패')
+      .filter(
+        (item): item is ReviewItem & { status: '정상' | '위치변경' | '신규등록' } =>
+          item.status !== '인식실패' && item.status !== '조회실패',
+      )
       .map((item) => ({ assetId: item.assetId, status: item.status, category: item.category, model: item.model }));
 
     const result = await applyStocktakeReviewBatch(session.id, applyItems, session.location);
@@ -261,10 +272,9 @@ export default function StocktakeSessionPage({
     });
   }
 
-  // 오늘 이미 끝낸 위치(방금 끝낸 이 위치 포함)는 다음 위치 후보에서 뺍니다.
-  const nextLocationOptions = locations.filter(
-    (loc) => loc !== session.location && !completedTodayLocations.includes(loc),
-  );
+  // 오늘 이미 끝낸 선반(방금 끝낸 이 선반 포함)은 다음 위치 후보에서 뺍니다 — 선반 단위(remainingShelves),
+  // 그래서 "B1"을 끝내면 "B1수리중"이 따로 남지 않음.
+  const nextLocationOptions = remainingShelves(locs.shelves, completedTodayLocations ?? [], session.location);
 
   function handleStartNext() {
     if (!nextLocation.trim()) {
@@ -292,11 +302,17 @@ export default function StocktakeSessionPage({
     });
   }
 
+  // 사진에서 찾은 장비가 전산상 이 선반의 다른 이름(예: "B1수리중")에 있으면 — 서버도 위치를 안 바꿈(isSameShelf).
+  function isSameShelfMove(item: ReviewItem): boolean {
+    return item.status === '위치변경' && Boolean(item.currentLocation) && isSameShelf(item.currentLocation ?? '', session.location);
+  }
+
   const reviewCounts = {
     정상: reviewItems.filter((i) => i.status === '정상').length,
     위치변경: reviewItems.filter((i) => i.status === '위치변경').length,
     신규등록: reviewItems.filter((i) => i.status === '신규등록').length,
     인식실패: reviewItems.filter((i) => i.status === '인식실패').length,
+    조회실패: reviewItems.filter((i) => i.status === '조회실패').length,
   };
 
   return (
@@ -376,6 +392,17 @@ export default function StocktakeSessionPage({
               닫기
             </button>
           </div>
+          <LocationsNotice state={locs} compact />
+          {locs.loaded && !locs.loading && !locs.notice && nextLocationOptions.length === 0 && (
+            <div style={{ fontSize: '12px', color: 'var(--ink-500)', marginTop: '6px' }}>
+              오늘 남은 선반 위치가 없어요 — 전부 끝냈어요.
+            </div>
+          )}
+          {completedTodayLocations === null && (
+            <div style={{ fontSize: '12px', color: 'var(--ink-500)', marginTop: '6px' }}>
+              오늘 끝낸 위치 기록을 못 읽어서, 이미 끝낸 위치도 목록에 보일 수 있어요.
+            </div>
+          )}
         </div>
       )}
 
@@ -386,6 +413,9 @@ export default function StocktakeSessionPage({
               차이 발견 — 전체 {reviewItems.length} · 정상 {reviewCounts.정상} · 위치변경 {reviewCounts.위치변경} · 신규등록{' '}
               {reviewCounts.신규등록}
               {reviewCounts.인식실패 > 0 && <span style={{ color: 'var(--ink-400)' }}> · 인식실패 {reviewCounts.인식실패}</span>}
+              {reviewCounts.조회실패 > 0 && (
+                <span style={{ color: 'var(--red-600)' }}> · IT재고 못 읽음 {reviewCounts.조회실패}(반영 안 함)</span>
+              )}
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button type="button" className="btn btn-ghost" disabled={applying} onClick={() => setReviewItems([])}>
@@ -416,10 +446,18 @@ export default function StocktakeSessionPage({
                     <span className="asset-id">{item.assetId}</span>
                   </td>
                   <td>
-                    <span className={`badge ${REVIEW_BADGE[item.status]}`}>{REVIEW_LABEL[item.status]}</span>
+                    <span className={`badge ${REVIEW_BADGE[item.status]}`}>
+                      {isSameShelfMove(item) ? '같은 선반(위치 그대로)' : REVIEW_LABEL[item.status]}
+                    </span>
                   </td>
                   <td style={{ fontSize: '12px', color: 'var(--ink-600)' }}>
-                    {item.status === '위치변경' && (
+                    {item.status === '위치변경' && isSameShelfMove(item) && (
+                      <>
+                        현재 위치: <b>{item.currentLocation}</b> — 이 선반과 같은 곳이라 위치 이름은 그대로 두고 찾은 것만 기록해요 ·{' '}
+                        {item.brand} {item.model}
+                      </>
+                    )}
+                    {item.status === '위치변경' && !isSameShelfMove(item) && (
                       <>
                         현재 위치: <b>{item.currentLocation || '위치 미상'}</b> → &quot;{session.location}&quot;(으)로 변경 ·{' '}
                         {item.brand} {item.model}
@@ -441,6 +479,7 @@ export default function StocktakeSessionPage({
                     )}
                     {item.status === '정상' && '이 세션 목록에 있던 자산이에요 — 확인됨으로 처리돼요.'}
                     {item.status === '인식실패' && (item.errorNote || '다시 찍어주세요.')}
+                    {item.status === '조회실패' && (item.errorNote || 'IT재고를 못 읽었어요 — 1분쯤 뒤 사진을 다시 올려 주세요.')}
                   </td>
                   <td>
                     <button type="button" className="icon-btn" title="목록에서 제외" onClick={() => removeReviewItem(item.key)}>
@@ -500,6 +539,10 @@ export default function StocktakeSessionPage({
                 </td>
                 <td>
                   <span className="asset-id">{r.assetId}</span>
+                  {/* 선반 단위 조사라 "B1" 조사에 "B1수리중" 장비도 들어옴 — 원래 위치 이름이 다르면 작게(옛 기록엔 없음) */}
+                  {r.location && r.location !== session.location && (
+                    <span style={{ fontSize: '11px', color: 'var(--ink-400)', marginLeft: '6px' }}>{r.location}</span>
+                  )}
                 </td>
                 <td>{r.category}</td>
                 <td className="hide-mobile">{r.brand}</td>
@@ -545,7 +588,8 @@ export default function StocktakeSessionPage({
             .filter((r) => r.status === '미확인')
             .map((r) => (
               <div key={r.assetId} style={{ fontSize: '12.5px', color: 'var(--ink-700)' }}>
-                {r.assetId} · {r.brand} {r.model}
+                {r.assetId}
+                {r.location && r.location !== session.location ? ` (${r.location})` : ''} · {r.brand} {r.model}
               </div>
             ))}
         </div>

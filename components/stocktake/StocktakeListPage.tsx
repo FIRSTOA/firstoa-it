@@ -5,29 +5,29 @@ import { useRouter } from 'next/navigation';
 import {
   formatDateTabLabel,
   formatKstDateTime,
-  stocktakeSummary,
+  remainingShelves,
+  shelfKeyOf,
   toKstDateKey,
-  type StocktakeSession,
+  type StocktakeListRow,
 } from '@/lib/stocktake';
 import { addStaffNameIfNew } from '@/app/actions';
 import { deleteStocktakeSession, relocateMissingAsset, startStocktake } from '@/app/stocktake/actions';
-import { useStreamedValue } from '@/lib/useStreamedValue';
+import { LocationsNotice } from './LocationsNotice';
+import { useStocktakeLocations } from './useStocktakeLocations';
 
 const STARTED_BY_KEY = 'firstoa_stocktake_started_by';
-const EMPTY_LOCATIONS: string[] = [];
 const CUSTOM_OPTION = '__custom__';
 
 export default function StocktakeListPage({
   sessions,
-  locations: locationsSource,
   staffNames,
 }: {
-  sessions: StocktakeSession[];
-  /** IT재고 시트에서 뽑는 선반 위치 — 서버가 기다리지 않고 넘겨서 조금 뒤에 도착함 */
-  locations: Promise<string[]> | string[];
+  /** 목록 줄(확인 현황·미확인 자산만) — 조사 결과 전체는 안 옴(lib/stocktake.ts buildStocktakeListRows) */
+  sessions: StocktakeListRow[];
   staffNames: string[];
 }) {
-  const locations = useStreamedValue(locationsSource, EMPTY_LOCATIONS);
+  // 선반 위치는 IT재고 시트에서 — page 가 아니라 화면이 한 번 읽음(useStocktakeLocations 설명)
+  const locs = useStocktakeLocations(true);
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [location, setLocation] = useState('');
@@ -51,18 +51,21 @@ export default function StocktakeListPage({
     return keys.sort((a, b) => b.localeCompare(a));
   }, [sessions]);
 
-  // 오늘 이미 "완료"된 위치는 새 조사 시작 드롭다운에서 빼서, 끝난 곳을 또 찾아 헤매지
+  // 오늘 이미 "완료"된 선반은 새 조사 시작 드롭다운에서 빼서, 끝난 곳을 또 찾아 헤매지
   // 않게 합니다(같은 위치를 또 조사하고 싶으면 목록에서 그 세션을 열어 계속 쓰면 됨).
+  // 선반 단위 — 옛 기록 "B1수리중"을 끝냈어도 B1 선반은 끝난 것으로(remainingShelves).
   const completedTodayLocations = useMemo(
     () =>
-      new Set(
-        sessions.filter((s) => s.status === '완료' && toKstDateKey(s.startedAt) === todayKey).map((s) => s.location),
-      ),
+      sessions.filter((s) => s.status === '완료' && toKstDateKey(s.startedAt) === todayKey).map((s) => s.location),
     [sessions, todayKey],
   );
+  const completedTodayShelfCount = useMemo(
+    () => new Set(completedTodayLocations.map(shelfKeyOf)).size,
+    [completedTodayLocations],
+  );
   const availableLocations = useMemo(
-    () => locations.filter((loc) => !completedTodayLocations.has(loc)),
-    [locations, completedTodayLocations],
+    () => remainingShelves(locs.shelves, completedTodayLocations),
+    [locs.shelves, completedTodayLocations],
   );
 
   const visibleSessions = dateFilter ? sessions.filter((s) => toKstDateKey(s.startedAt) === dateFilter) : sessions;
@@ -72,9 +75,7 @@ export default function StocktakeListPage({
   const missingItems = useMemo(
     () =>
       visibleSessions.flatMap((s) =>
-        s.results
-          .filter((r) => r.status === '미확인')
-          .map((r) => ({ ...r, sessionId: s.id, location: s.location })),
+        s.missing.map((r) => ({ ...r, sessionId: s.id, location: s.location, originalLocation: r.location })),
       ),
     [visibleSessions],
   );
@@ -161,6 +162,8 @@ export default function StocktakeListPage({
         </div>
       )}
 
+      <LocationsNotice state={locs} />
+
       {availableLocations.length > 0 && (
         <div className="panel" style={{ marginBottom: '12px' }}>
           <div style={{ fontWeight: 700, marginBottom: '8px' }}>
@@ -189,7 +192,7 @@ export default function StocktakeListPage({
               <MissingAssetRow
                 key={`${item.sessionId}-${item.assetId}`}
                 item={item}
-                locations={locations}
+                locations={locs.names}
                 onOpenSession={() => router.push(`/stocktake/${item.sessionId}`)}
                 onToast={showToast}
               />
@@ -213,7 +216,7 @@ export default function StocktakeListPage({
           </thead>
           <tbody>
             {visibleSessions.map((s) => {
-              const sum = stocktakeSummary(s.results);
+              const sum = s.summary;
               return (
                 <tr key={s.id}>
                   <td className="hide-mobile">{s.seq}</td>
@@ -277,11 +280,12 @@ export default function StocktakeListPage({
                   </option>
                 ))}
               </select>
-              {completedTodayLocations.size > 0 && (
+              {completedTodayShelfCount > 0 && (
                 <div style={{ fontSize: '11px', color: 'var(--ink-400)', marginTop: '4px' }}>
-                  오늘 완료된 위치 {completedTodayLocations.size}곳은 목록에서 뺐어요.
+                  오늘 완료된 위치 {completedTodayShelfCount}곳은 목록에서 뺐어요.
                 </div>
               )}
+              <LocationsNotice state={locs} compact />
             </div>
             <div className="form-field full">
               <label>담당자</label>
@@ -351,7 +355,10 @@ type MissingItem = {
   model: string;
   brand: string;
   sessionId: string;
+  /** 조사한 선반(조사 기록의 위치) */
   location: string;
+  /** 전산상 원래 위치 이름(2026-11-27 이후 시작한 조사만) — 선반과 다르면 같이 보여 줌 */
+  originalLocation?: string;
 };
 
 function MissingAssetRow({
@@ -361,6 +368,7 @@ function MissingAssetRow({
   onToast,
 }: {
   item: MissingItem;
+  /** 시트에 있는 위치 이름 그대로 — 사람이 고른 이름으로만 시트에 씀 */
   locations: string[];
   onOpenSession: () => void;
   onToast: (msg: string) => void;
@@ -381,7 +389,11 @@ function MissingAssetRow({
       onToast(result.error);
       return;
     }
-    onToast(`${item.assetId} 위치를 "${newLocation}"(으)로 수정했어요.`);
+    onToast(
+      result.moved === false
+        ? `${item.assetId} — 제자리에서 찾은 것으로 기록했어요(위치 "${newLocation}" 그대로, 시트는 안 바꿈).`
+        : `${item.assetId} 위치를 "${newLocation}"(으)로 수정했어요.`,
+    );
     setEditing(false);
   }
 
@@ -402,8 +414,11 @@ function MissingAssetRow({
         onClick={onOpenSession}
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-700)', textAlign: 'left', flex: 1 }}
       >
-        <b>{item.location}</b> · <span className="asset-id">{item.assetId}</span> · {item.category} {item.brand}{' '}
-        {item.model}
+        <b>{item.location}</b>
+        {item.originalLocation && item.originalLocation !== item.location && (
+          <span style={{ color: 'var(--ink-400)' }}> (위치 이름 {item.originalLocation})</span>
+        )}{' '}
+        · <span className="asset-id">{item.assetId}</span> · {item.category} {item.brand} {item.model}
       </button>
       {editing ? (
         <>
@@ -412,6 +427,7 @@ function MissingAssetRow({
             {locations.map((l) => (
               <option key={l} value={l}>
                 {l}
+                {l === item.originalLocation ? ' (조사 때 위치)' : ''}
               </option>
             ))}
           </select>

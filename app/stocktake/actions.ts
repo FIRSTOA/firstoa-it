@@ -3,17 +3,23 @@
 import { revalidatePath } from 'next/cache';
 import { createAsset, updateAsset } from '@/app/actions';
 import { DATA_SOURCE } from '@/lib/dataSource';
-import { getAssetFromSheets, listAllAssets } from '@/lib/inventory/sheets';
+import { getAssetFromSheets, listAllAssets, listAssetsFromSheet } from '@/lib/inventory/sheets';
 import {
   buildInitialResults,
+  describeSheetReadError,
+  isSameShelf,
+  mergeTabReads,
   rowToStocktakeSession,
+  shelfKeyOf,
+  shelfLocationsFrom,
   type StocktakeItem,
   type StocktakeItemStatus,
   type StocktakeSession,
   type StocktakeSessionRow,
 } from '@/lib/stocktake';
-import { rowToAsset, type Asset, type AssetRow } from '@/lib/types';
+import { CATEGORIES, rowToAsset, type Asset, type AssetRow } from '@/lib/types';
 import { ASSETS_TABLE, createAdminClient, STOCKTAKE_TABLE } from '@/lib/supabase/server';
+import { looksLikeShelfLocation } from '@/lib/zoneStatus';
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -32,6 +38,96 @@ export async function listAllAssetsUnified(): Promise<Asset[]> {
   return ((data ?? []) as AssetRow[]).map(rowToAsset);
 }
 
+/**
+ * 실재고 조사용 IT재고 읽기 — listAllAssetsUnified 와 같은 곳을 읽되, 못 읽은 탭을 숨기지 않고 돌려줍니다
+ * (listAllAssets 는 못 읽은 탭을 빈 목록으로 바꿈 → 조사 목록·위치 목록이 조용히 빠졌음. mergeTabReads 설명).
+ * Supabase 모드는 listAllAssetsUnified 그대로(오류면 throw).
+ */
+async function readInventoryForStocktake(): Promise<{ assets: Asset[]; failedTabs: string[]; quota: boolean }> {
+  if (DATA_SOURCE !== 'sheets') return { assets: await listAllAssetsUnified(), failedTabs: [], quota: false };
+  const settled = await Promise.allSettled(CATEGORIES.map((category) => listAssetsFromSheet(category)));
+  const { items, failed } = mergeTabReads<Asset>(CATEGORIES, settled);
+  for (const f of failed) console.error(`[stocktake] IT재고 "${f.tab}" 탭 읽기 실패:`, f.status ?? '-', f.message);
+  return { assets: items, failedTabs: failed.map((f) => f.tab), quota: failed.some((f) => f.status === 429) };
+}
+
+function inventoryReadError(failedTabs: string[], quota: boolean, consequence: string): string {
+  return (
+    `IT재고 시트의 ${failedTabs.join('·')} 탭을 못 읽어서 ${consequence}. ` +
+    (quota
+      ? '구글시트 읽기 한도(1분에 60번, 앱 전체가 같이 씀)에 걸린 것 같아요 — 1분쯤 뒤에 다시 해 주세요.'
+      : '잠시 뒤에 다시 해 주세요.')
+  );
+}
+
+export type StocktakeLocationsResult =
+  | {
+      ok: true;
+      /** 선반 열쇠(shelfKeyOf) — 조사 시작·남은 위치·다음 후보 */
+      shelves: string[];
+      /** 시트에 있는 위치 이름 그대로 — "✎ 위치 수정"에서 사람이 고르는 목록 */
+      names: string[];
+      /** 일부 탭을 못 읽었을 때 보여 줄 문구('' = 전부 읽음) */
+      warning: string;
+    }
+  | { ok: false; error: string };
+
+/**
+ * 조사 대상 선반 위치 목록(IT재고 위치 값 중 선반 코드처럼 생긴 것). 화면이 필요할 때만 부릅니다 —
+ * page 에서 읽으면 조사 화면의 [확인] 한 번마다(서버 액션의 revalidatePath 가 page 를 다시 그림) 시트 5탭을
+ * 또 읽어 읽기 한도를 금방 다 써 버림(components/stocktake/useStocktakeLocations.ts).
+ */
+export async function loadStocktakeLocations(): Promise<StocktakeLocationsResult> {
+  let read: Awaited<ReturnType<typeof readInventoryForStocktake>>;
+  try {
+    read = await readInventoryForStocktake();
+  } catch (err) {
+    console.error('[stocktake] 위치 목록용 자산 조회 실패:', err instanceof Error ? err.message : err);
+    return { ok: false, error: '전산 재고를 불러오지 못해 위치 목록을 못 만들었어요. 잠시 뒤에 [다시 읽기]를 눌러 주세요.' };
+  }
+  if (read.failedTabs.length >= CATEGORIES.length) {
+    return { ok: false, error: inventoryReadError(read.failedTabs, read.quota, '위치 목록을 못 만들었어요') };
+  }
+  const { shelves, names } = shelfLocationsFrom(
+    read.assets.map((a) => a.location),
+    looksLikeShelfLocation,
+  );
+  const warning = read.failedTabs.length
+    ? inventoryReadError(read.failedTabs, read.quota, '그 탭에만 있는 위치는 목록에서 빠졌을 수 있어요')
+    : '';
+  return { ok: true, shelves, names, warning };
+}
+
+type InventoryLookup = { kind: 'found'; asset: Asset } | { kind: 'missing' } | { kind: 'error'; message: string };
+
+/**
+ * 자산번호로 IT재고 5탭에서 찾기 — "없음"과 "못 읽음"을 나눔.
+ * 예전엔 getAssetFromSheets(...).catch(() => null) 이라 읽기 실패(구글 읽기 한도 429 등)도 "없음"이 되어, 사진 스캔이
+ * 다른 위치·다른 탭에 있는 장비를 "신규등록(ERP 미등록)"으로 분류하고 [재고 반영하기]가 시트에 중복 줄을 만들 수 있었음.
+ * 시트 모드가 아니면 예전처럼 "없음"(Supabase 모드엔 이 조회가 없었음).
+ */
+async function lookupInventory(assetId: string): Promise<InventoryLookup> {
+  if (DATA_SOURCE !== 'sheets') return { kind: 'missing' };
+  try {
+    const asset = await getAssetFromSheets(assetId);
+    return asset ? { kind: 'found', asset } : { kind: 'missing' };
+  } catch (err) {
+    const { status, message } = describeSheetReadError(err);
+    console.error('[stocktake] IT재고 자산번호 조회 실패:', status ?? '-', message);
+    return {
+      kind: 'error',
+      message:
+        'IT재고 시트를 못 읽었어요' +
+        (status === 429 ? '(구글시트 읽기 한도 — 1분에 60번, 앱 전체가 같이 씀)' : '') +
+        ' — 1분쯤 뒤에 다시 해 주세요.',
+    };
+  }
+}
+
+function alreadyInInventoryMessage(found: Asset): string {
+  return `이미 IT재고(${found.category} · 위치 ${found.location || '없음'})에 있는 자산번호라 새 줄을 만들지 않았어요 — 사진을 다시 올리면 위치변경으로 나와요.`;
+}
+
 export async function startStocktake(
   location: string,
   startedBy: string,
@@ -39,20 +135,31 @@ export async function startStocktake(
   const loc = location.trim();
   if (!loc) return { ok: false, error: '위치를 입력해주세요.' };
 
-  let assets: Asset[];
+  let read: Awaited<ReturnType<typeof readInventoryForStocktake>>;
   try {
-    assets = await listAllAssetsUnified();
+    read = await readInventoryForStocktake();
   } catch (err) {
     console.error('[stocktake] 자산 목록 조회 실패:', err);
     return { ok: false, error: '전산 재고를 불러오지 못했어요.' };
   }
+  // 한 탭이라도 못 읽었으면 시작하지 않음 — 조사 목록(results)은 시작할 때 한 번 만들어 저장되므로,
+  // 그대로 만들면 그 탭 장비가 영영 빠진 조사가 됨("재고가 안 나타남").
+  if (read.failedTabs.length > 0) {
+    return {
+      ok: false,
+      error: inventoryReadError(read.failedTabs, read.quota, '조사를 시작하지 않았어요(그 탭 장비가 조사 목록에서 빠지니까요)'),
+    };
+  }
 
-  const atLocation = assets.filter((a) => a.location.trim() === loc);
+  // 선반 단위(사용자 결정 2026-11-27) — "B1" 조사에 "B1수리중"·"b1"·전각 "Ｂ１" 장비도 같이(shelfKeyOf).
+  // 장비마다 원래 위치 이름은 results[].location 에 남겨 화면이 구분해 보여 줌. 조사 기록의 위치는 선반 열쇠로 저장.
+  const shelf = shelfKeyOf(loc);
+  const atLocation = read.assets.filter((a) => shelfKeyOf(a.location) === shelf);
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from(STOCKTAKE_TABLE)
     .insert({
-      location: loc,
+      location: shelf,
       started_by: startedBy.trim(),
       results: buildInitialResults(atLocation),
     })
@@ -140,11 +247,17 @@ export type UnexpectedAssetInfo = {
  */
 export async function lookupUnexpectedAsset(
   assetId: string,
-): Promise<{ ok: true; info: UnexpectedAssetInfo } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; info: UnexpectedAssetInfo }
+  /** readFailed = 시트를 못 읽음(있는지 없는지 모름) — "신규등록"으로 분류하면 안 됨 */
+  | { ok: false; error: string; readFailed?: true }
+> {
   const trimmed = assetId.trim();
   if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };
-  const found = DATA_SOURCE === 'sheets' ? await getAssetFromSheets(trimmed).catch(() => null) : null;
-  if (!found) return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
+  const look = await lookupInventory(trimmed);
+  if (look.kind === 'error') return { ok: false, error: look.message, readFailed: true };
+  if (look.kind === 'missing') return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
+  const found = look.asset;
   return {
     ok: true,
     info: { assetId: found.assetId, category: found.category, model: found.model, brand: found.brand, location: found.location },
@@ -171,12 +284,16 @@ export async function addUnexpectedAssetToSession(
     return updateStocktakeItem(sessionId, trimmed, '확인됨');
   }
 
-  const found = DATA_SOURCE === 'sheets' ? await getAssetFromSheets(trimmed).catch(() => null) : null;
-  if (!found) {
+  const look = await lookupInventory(trimmed);
+  if (look.kind === 'error') return { ok: false, error: look.message };
+  if (look.kind === 'missing') {
     return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
   }
+  const found = look.asset;
 
-  if (relocateTo && relocateTo.trim() && relocateTo.trim() !== found.location.trim()) {
+  // 같은 선반이면 위치 이름을 안 바꿈 — "B1수리중" 장비를 B1 조사에서 찾았다고 "B1"로 고쳐 쓰면 꼬리말(상태)이 사라짐.
+  const relocating = Boolean(relocateTo && relocateTo.trim() && !isSameShelf(relocateTo, found.location));
+  if (relocating && relocateTo) {
     const relocateResult = await updateAsset(found.assetId, { ...found, location: relocateTo.trim() });
     if (!relocateResult.ok) {
       return { ok: false, error: `위치 강제변경에 실패했어요: ${relocateResult.error}` };
@@ -190,7 +307,10 @@ export async function addUnexpectedAssetToSession(
     brand: found.brand,
     status: '목록외발견',
     scannedAt: new Date().toISOString(),
-    note: relocateTo ? `원래 위치: ${found.location || '-'} → ${relocateTo}로 강제변경함` : `원래 위치: ${found.location || '-'}`,
+    note: relocating
+      ? `원래 위치: ${found.location || '-'} → ${relocateTo}로 강제변경함`
+      : `원래 위치: ${found.location || '-'}`,
+    location: found.location.trim(),
   };
 
   const supabase = createAdminClient();
@@ -222,6 +342,11 @@ export async function createAssetFromScan(
 ): Promise<ActionResult> {
   const trimmed = assetId.trim();
   if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };
+
+  // 새 줄을 만들기 직전에 5탭 전체에서 다시 확인 — 못 읽었거나 이미 있으면 만들지 않음(중복 줄 방지).
+  const look = await lookupInventory(trimmed);
+  if (look.kind === 'error') return { ok: false, error: `새 줄을 만들지 않았어요. ${look.message}` };
+  if (look.kind === 'found') return { ok: false, error: alreadyInInventoryMessage(look.asset) };
 
   const asset: Asset = {
     assetId: trimmed,
@@ -298,13 +423,20 @@ export async function applyStocktakeReviewBatch(
   const slowItems = items.filter((i) => i.status !== '정상');
   await runWithConcurrency(slowItems, 3, async (item) => {
     if (item.status === '위치변경') {
-      const found = DATA_SOURCE === 'sheets' ? await getAssetFromSheets(item.assetId).catch(() => null) : null;
-      if (!found) {
+      const look = await lookupInventory(item.assetId);
+      if (look.kind === 'error') {
+        failures.push(`${item.assetId}: ${look.message}`);
+        return;
+      }
+      if (look.kind === 'missing') {
         failures.push(`${item.assetId}: 전산 재고에서 못 찾았어요.`);
         return;
       }
+      const found = look.asset;
       const trimmedLocation = location.trim();
-      if (trimmedLocation && trimmedLocation !== found.location.trim()) {
+      // 같은 선반("B1" 조사에서 찾은 "B1수리중" 장비 등)이면 위치 이름을 안 바꿈 — 확인만 기록(꼬리말 = 상태가 사라지지 않게).
+      const relocating = Boolean(trimmedLocation) && !isSameShelf(trimmedLocation, found.location);
+      if (relocating) {
         const relocateResult = await updateAsset(found.assetId, { ...found, location: trimmedLocation });
         if (!relocateResult.ok) {
           failures.push(`${item.assetId}: 위치 변경 실패 - ${relocateResult.error}`);
@@ -318,12 +450,26 @@ export async function applyStocktakeReviewBatch(
         brand: found.brand,
         status: '목록외발견',
         scannedAt: new Date().toISOString(),
-        note: trimmedLocation
+        note: relocating
           ? `원래 위치: ${found.location || '-'} → ${trimmedLocation}로 강제변경함`
-          : `원래 위치: ${found.location || '-'}`,
+          : trimmedLocation
+            ? `원래 위치: ${found.location || '-'} (같은 선반 — 위치 그대로)`
+            : `원래 위치: ${found.location || '-'}`,
+        location: found.location.trim(),
       });
     } else if (item.status === '신규등록') {
       const trimmed = item.assetId.trim();
+      // 새 줄을 만들기 직전에 5탭 전체에서 다시 확인 — 못 읽었거나(한도 등) 이미 있으면 만들지 않음.
+      // 화면 분류가 틀렸어도(예전 화면·조회 실패) 시트에 중복 줄이 생기지 않게 서버가 한 번 더 막음.
+      const look = await lookupInventory(trimmed);
+      if (look.kind === 'error') {
+        failures.push(`${item.assetId}: 새 줄을 만들지 않았어요. ${look.message}`);
+        return;
+      }
+      if (look.kind === 'found') {
+        failures.push(`${item.assetId}: ${alreadyInInventoryMessage(look.asset)}`);
+        return;
+      }
       const asset: Asset = {
         assetId: trimmed,
         category: item.category ?? '',
@@ -358,6 +504,7 @@ export async function applyStocktakeReviewBatch(
         status: '목록외발견',
         scannedAt: new Date().toISOString(),
         note: '신규 등록(실재고 조사 사진 스캔)',
+        location: asset.location,
       });
     }
   });
@@ -392,17 +539,23 @@ export async function relocateMissingAsset(
   sessionId: string,
   assetId: string,
   newLocation: string,
-): Promise<ActionResult> {
+): Promise<ActionResult & { moved?: boolean }> {
   const trimmed = assetId.trim();
   if (!trimmed) return { ok: false, error: '자산번호가 비어있어요.' };
   const trimmedLocation = newLocation.trim();
   if (!trimmedLocation) return { ok: false, error: '위치를 입력해주세요.' };
 
-  const found = DATA_SOURCE === 'sheets' ? await getAssetFromSheets(trimmed).catch(() => null) : null;
-  if (!found) return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
+  const look = await lookupInventory(trimmed);
+  if (look.kind === 'error') return { ok: false, error: look.message };
+  if (look.kind === 'missing') return { ok: false, error: `자산번호 ${trimmed}를 전산 재고에서 찾지 못했어요.` };
+  const found = look.asset;
 
+  // 사람이 목록(시트에 있는 위치 이름 그대로)에서 고른 이름이라, 글자가 다를 때만 그 이름으로 씀(예전 그대로).
+  // 같은 선반이어도 사람이 다른 이름을 골랐으면 씀(꼬리말을 붙이거나 떼는 것도 사람이 정함). 지금 위치 이름을 그대로
+  // 고르면 "제자리에서 찾음" = 시트 안 씀(화면이 조사 때 위치 이름에 "(조사 때 위치)"를 붙여 보여 줌).
   const originalLocation = found.location || '-';
-  if (trimmedLocation !== found.location.trim()) {
+  const moved = trimmedLocation !== found.location.trim();
+  if (moved) {
     const relocateResult = await updateAsset(found.assetId, { ...found, location: trimmedLocation });
     if (!relocateResult.ok) {
       return { ok: false, error: `위치 변경에 실패했어요: ${relocateResult.error}` };
@@ -415,7 +568,14 @@ export async function relocateMissingAsset(
   const now = new Date().toISOString();
   const results = session.results.map((r) =>
     r.assetId === trimmed
-      ? { ...r, status: '확인됨' as const, scannedAt: now, note: `위치 수정: ${originalLocation} → ${trimmedLocation}` }
+      ? {
+          ...r,
+          status: '확인됨' as const,
+          scannedAt: now,
+          note: moved
+            ? `위치 수정: ${originalLocation} → ${trimmedLocation}`
+            : `제자리에서 찾음(위치 그대로: ${originalLocation})`,
+        }
       : r,
   );
   const supabase = createAdminClient();
@@ -427,7 +587,7 @@ export async function relocateMissingAsset(
 
   revalidatePath(`/stocktake/${sessionId}`);
   revalidatePath('/stocktake');
-  return { ok: true };
+  return { ok: true, moved };
 }
 
 export async function deleteStocktakeSession(id: string): Promise<ActionResult> {
