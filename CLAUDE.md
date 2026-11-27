@@ -148,11 +148,14 @@
   ③ work·④ units = IT 값 = 화면 액션만 씀. **가져오기 코드(normalize·source·importer·route)는 ③④ 표 이름을 import 도 하지 말 것**(IT 값 덮어쓰기를 구조로 막음).
   ③④ FK restrict(① 지우는 코드 없음). ③ `prep_event_id` 는 4단계용 — 그 전엔 쓰지 말 것.
   ③ 문자열 칸은 not null default '' — null 보내면 23502. 동시 수정은 DB 가 준 `updated_at` 문자열 그대로 `.eq`(JS Date 로 바꾸면 µs 잘려 늘 충돌).
-- "새로" = ③ first_opened_at 없음(미리보기를 열면 채움), "영업에서 수정됨" = seen_ver 있음 && (ver↑ 또는 같은 ver hash 다름) → [확인함].
+- "새로" = ③ first_opened_at 없음(미리보기를 열면 채움), "영업에서 수정됨" = `salesChangedSince`(types.ts, 네 곳이 이것만) = seen_ver 있음 && **ver↑ 만** → [확인함].
+  (2026-11-27 고침: 예전엔 "같은 ver hash 다름"도 셌는데, 영업이 export 칸을 넓힌 날 9건 전부 "v1→v1"로 잘못 뜸. 영업은 저장마다 ver = 판 개수+1 이라 내용이 바뀌면 ver 가 꼭 오름.
+  hash 는 ② 판 구분·원문 저장·"무엇이 바뀌었나" 기준 판 찾기에만.)
   미리보기 열기·확인함은 ③ updated_at 을 바꾸므로 화면이 그 줄 `workUpdatedAt` 을 갱신해야 가짜 충돌이 안 남.
 - 시트와 비교(`sheetCompare.ts`): 켰을 때만 IT확인서리스트 batchGet 1회, **연락처 N칸은 읽지 않음**, 쓰기 0. 처리여부 대응은 `sheetMatch.ts` `statusSame` 한 곳.
 - 상세 주소(2단계) = `salesConfirmHref(id)` 로만(encodeURIComponent). `app/confirm-form/` 아래 정적 하위 폴더 만들지 말 것(id 를 가림).
-- docUrl 은 `safeDocUrl`(https + 영업 웹앱 호스트만). 로그·오류 문구·⑤·라우트 응답에 payload·연락처 금지.
+- docUrl 은 `safeDocUrl`(https + 영업 웹앱 호스트만, `/api/export/`·`key=` 주소는 숨김 — 2026-11-27부터 영업 docUrl 이 키가 있어야 열리는 export 주소라 누르면 401.
+  **키를 주소에 붙이지 말 것**). 로그·오류 문구·⑤·라우트 응답에 payload·연락처 금지.
   Supabase 오류의 `details`("Failing row contains (…)")에는 행 값이 통째로 들어가므로 **로그·응답엔 code 만**.
 
 ### 2+3단계 — 상세(/confirm-form/[id]) + 영업 양식 그대로 출력 (2026-11-26, 결정 D15~D30)

@@ -40,6 +40,7 @@ import {
 import {
   isSalesConfirmStatus,
   safeDocUrl,
+  salesChangedSince,
   type NormalizedSalesConfirm,
   type SalesConfirmDetailData,
   type SalesConfirmItem,
@@ -638,8 +639,7 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
 
   const seenVer = work?.seen_ver ?? null;
   const seenHash = work?.seen_hash ?? '';
-  const salesChanged =
-    seenVer !== null && (ver > seenVer || (ver === seenVer && !!seenHash && seenHash !== hash)) ? { fromVer: seenVer, toVer: ver } : null;
+  const salesChanged = salesChangedSince(seenVer, ver);
 
   const assetIds = unitsRes.units.map((u) => u.assetId).filter(Boolean);
   const [prepHints, changes, assetElsewhere] = await Promise.all([

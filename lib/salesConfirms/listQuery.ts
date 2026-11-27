@@ -23,6 +23,7 @@ import {
   importStateFromRow,
   isSalesConfirmStatus,
   safeDocUrl,
+  salesChangedSince,
   type SalesConfirmContacts,
   type SalesConfirmListResult,
   type SalesConfirmListRow,
@@ -228,10 +229,7 @@ function buildRow(c: ConfirmDbRow, work: WorkDbRow | undefined, units: SalesUnit
     .filter(Boolean);
 
   const ver = c.ver ?? 0;
-  const salesChanged =
-    work && work.seen_ver !== null && work.seen_ver !== undefined && (ver > work.seen_ver || (ver === work.seen_ver && !!work.seen_hash && work.seen_hash !== c.payload_hash))
-      ? { fromVer: work.seen_ver, toVer: ver }
-      : null;
+  const salesChanged = salesChangedSince(work?.seen_ver, ver);
 
   // 지역: 영업 값, 비었으면 주소로 추정(영업 웹앱과 같은 regionOf)
   const reg = regionWithGuess(c.region, c.address);

@@ -3,6 +3,21 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "c71788d347",
+    "date": "2026-11-26",
+    "time": "20:03",
+    "subject": "확인서/출고및반출준비 · 상세 화면 + 영업 양식 그대로 출력(2+3단계) — 목록에서 상호를 누르면 /confirm-form/[id] · 기기마다 제조사·모델명·자산번호·시리얼·출고사양(비워 두면 영업 요청 그대로, 자산번호 → IT재고에서 빈 칸 채움·다른 확인서 같은 번호 경고) · 품목 종류 itemKind(장비·모니터·유지보수 대마다·소프트웨어 칸=라이선스·기타), 칸 계산 slots.ts 한 곳(목록 진행 m 에서 유지보수 수량 빠지던 것 고침), 영업에서 빠진 칸 보존 · 영업 요청과 다르면 저장 때 닫을 수 없는 확인 창 + 서버도 같은 검사(needAck, diff_ack 에 쌍·사람·시각, 영업이 요청을 바꾸면 다시 확인 필요), specCompare(16GB=16G, 애매하면 다름) · 라이선스 키: 입력은 확인서, 저장·보기는 계약관리 잠금 칸(lib/contracts/salesConfirmLink.ts — 거래처 고르기 → 상품 source 'sales_confirm' → 좌석 → writeSecret, 넣을 때도 requireUnlock, 대장에서 고친 칸은 안 덮음) · 출력: 영업 lib/confirm.ts·confirmDoc.ts 사본(fill 없이 원본과 글자까지 같음) + P1~P6(사양 \"요청 → 출고\" 덧붙임·회색 칸 자산번호/S/N/키, 안 온 금액 칸은 ₩0 대신 빈칸, 출고 명세 장, 2면 출고 준비자·출고일, 꼬리 IT 기재, 넘침 신호), sandbox iframe 출력 창(키 잠김이면 찍을지 골라야 인쇄), 교체·유지보수 출력은 영업 최신 양식 받은 뒤 · 출고 준비 일정 시간 = 지역(9시 A·12시 B·15시 C·18시 D·21시 E, regionSlot) 으로 같은 건 일정 표시(읽기만) · SQL 블록 A(④ extra·diff_ack, ③ printed_ver·printed_by)·B(계약 source 'sales_confirm') · 설명서 confirm-form 꼭지 4개·계약관리 꼭지, releases, CLAUDE.md 2+3단계 절",
+    "crew": [
+      "feature-planner",
+      "db-schema",
+      "developer",
+      "ui-designer",
+      "sql-review",
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "694c5b44fe",
     "date": "2026-11-26",
     "time": "17:53",

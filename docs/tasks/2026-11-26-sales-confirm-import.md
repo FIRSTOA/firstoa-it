@@ -187,7 +187,7 @@
 | processors text[] | D12 · **출력 2면 '출고 준비자'**(D25) |
 | started_at / finished_at / shipped_at | 시작·종료·출고 시각(사람이 고칠 수 있음) · shipped_at = **출력 2면 '출고일'**·대장 좌석 설치일 |
 | note text | 비고 |
-| seen_ver int, seen_hash text | **IT가 마지막으로 확인한 영업 버전** → "영업에서 수정됨" = seen_ver 있음 && (ver > seen_ver 또는 같은 ver인데 hash 다름) |
+| seen_ver int, seen_hash text | **IT가 마지막으로 확인한 영업 버전** → "영업에서 수정됨" = seen_ver 있음 && ver > seen_ver (2026-11-27 바꿈 — 예전 "또는 같은 ver인데 hash 다름"은 영업이 export 칸을 넓힌 날 전부 잘못 뜸. 영업은 저장마다 ver 를 올림. `salesChangedSince`) |
 | first_opened_at, first_opened_by | "새로" 강조 = 이게 비어 있음 |
 | checks jsonb `{label:{at,by}}` | 건 단위 체크(기타 묶음) |
 | prep_event_id uuid null, FK → it_calendar_events **on delete set null** · link_source text | **4단계용 — 미리 만들어 두고 1~3단계 코드는 안 씀**(D8) |

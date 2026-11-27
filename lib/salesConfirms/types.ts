@@ -171,6 +171,9 @@ export function safeDocUrl(raw: string | null | undefined): string | null {
   try {
     const u = new URL(raw);
     if (u.protocol !== 'https:' || u.hostname !== SALES_WEBAPP_HOST) return null;
+    // 영업 커밋 b33a4c3(2026-11-27)부터 docUrl = /api/export/it-confirms?…&html=1 — 키 없이 열면 401.
+    // 키를 주소에 붙이는 건 금지(브라우저 기록·로그에 남음) → 이런 주소는 링크로 안 보여 줌.
+    if (u.pathname.startsWith('/api/export/') || u.searchParams.has('key')) return null;
     return u.toString();
   } catch {
     return null;
@@ -211,6 +214,21 @@ export function confirmFormViewHref(view: ConfirmFormView): string {
  */
 export function salesConfirmHref(id: string): string {
   return `/confirm-form/${encodeURIComponent(id)}`;
+}
+
+/**
+ * "영업에서 수정됨" 판정 — 목록·상세·미리보기·홈이 모두 이 함수 하나로(2026-11-27).
+ * 영업 판(ver)이 IT가 마지막으로 확인한 판(③ seen_ver)보다 클 때만.
+ * 영업 웹앱은 저장할 때마다 새 판을 쌓음(ver = 판 개수 + 1, 영업 커밋 b33a4c3 의 confirm·swap·svc 저장 코드) → 내용이 바뀌면 ver 가 반드시 오름.
+ * 같은 ver 인데 hash 만 다른 건 영업이 export 모양을 넓힌 것(2026-11-27 칸 추가 때 9건 전부 "v1→v1" 로 잘못 뜸)이라 수정이 아님.
+ * hash 는 ② 판 원문 구분·바뀐 원문 저장과 "무엇이 바뀌었나"의 기준 판 찾기에만 씀.
+ */
+export function salesChangedSince(
+  seenVer: number | null | undefined,
+  ver: number,
+): { fromVer: number; toVer: number } | null {
+  if (seenVer === null || seenVer === undefined || !Number.isFinite(seenVer)) return null;
+  return ver > seenVer ? { fromVer: seenVer, toVer: ver } : null;
 }
 
 // ───────────────────────── 가져오기 상태(⑤ it_sales_import_state) ─────────────────────────

@@ -19,6 +19,7 @@ import {
 import {
   isSalesConfirmStatus,
   safeDocUrl,
+  salesChangedSince,
   type NormalizedSalesConfirm,
   type SalesConfirmItem,
   type SalesConfirmListResult,
@@ -249,7 +250,6 @@ export async function openSalesConfirmPreview(input: {
     const hash = asStr(c.payload_hash);
     let workUpdatedAt: string | null = work?.updated_at ?? null;
     let seenVer = work?.seen_ver ?? null;
-    let seenHash = work?.seen_hash ?? null;
 
     // 처음 열람 표시("새로" 끝) — 실패해도 미리보기는 보여 주되 이유는 서버 로그에
     const now = new Date().toISOString();
@@ -263,7 +263,6 @@ export async function openSalesConfirmPreview(input: {
         if (error) throw error;
         workUpdatedAt = (data as { updated_at: string }).updated_at;
         seenVer = ver;
-        seenHash = hash;
       } else if (!work.first_opened_at || work.seen_ver === null) {
         const patch: WorkPatch = { updated_at: now, updated_by: actor };
         if (!work.first_opened_at) {
@@ -283,10 +282,7 @@ export async function openSalesConfirmPreview(input: {
         if (error) throw error;
         if (data && data.length > 0) {
           workUpdatedAt = (data[0] as { updated_at: string }).updated_at;
-          if (work.seen_ver === null) {
-            seenVer = ver;
-            seenHash = hash;
-          }
+          if (work.seen_ver === null) seenVer = ver;
         } // 0줄 = 그 사이 누가 고침 — 열람 표시는 다음에 다시
       }
     } catch (err) {
@@ -294,8 +290,7 @@ export async function openSalesConfirmPreview(input: {
     }
 
     const status: SalesConfirmStatus = work && isSalesConfirmStatus(work.status) ? work.status : '접수';
-    const salesChanged =
-      seenVer !== null && (ver > seenVer || (ver === seenVer && !!seenHash && seenHash !== hash)) ? { fromVer: seenVer, toVer: ver } : null;
+    const salesChanged = salesChangedSince(seenVer, ver);
     const fromPayload = normalizeSalesConfirm(c.payload);
     const confirm = fromPayload.ok ? fromPayload.value : confirmFromStored(c);
     return {

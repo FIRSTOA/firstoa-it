@@ -11,7 +11,7 @@ import { summarizeReview } from '@/lib/billingAllocation';
 import { buildContractsOverview } from '@/lib/contracts/clients';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
-import { importStateFromRow, type SalesImportState, type SalesImportStateRow } from '@/lib/salesConfirms/types';
+import { importStateFromRow, salesChangedSince, type SalesImportState, type SalesImportStateRow } from '@/lib/salesConfirms/types';
 import { isPrepDone, isPrepInProgress, shortDateLabel } from '@/lib/shipmentPrep';
 import {
   BILLING_LINES_TABLE,
@@ -455,7 +455,7 @@ export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
       if (!w || !w.first_opened_at) isNew++;
       if (c.delivery_date && c.delivery_date >= today && c.delivery_date <= target && (status === '접수' || status === '준비중')) urgent++;
       const ver = c.ver ?? 0;
-      if (w && w.seen_ver !== null && (ver > w.seen_ver || (ver === w.seen_ver && !!w.seen_hash && w.seen_hash !== c.payload_hash))) changed++;
+      if (w && salesChangedSince(w.seen_ver, ver)) changed++;
     }
     return {
       key: 'salesConfirm',
