@@ -3,6 +3,16 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "39ef7c80c5",
+    "date": "2026-11-27",
+    "time": "11:33",
+    "subject": "영업 확인서 · \"영업에서 수정됨\" 잘못 뜨던 것 고침 — 영업 웹앱이 2026-11-27(커밋 b33a4c3) export 칸을 넓혀(status·createdAt·renderer·doc·계약 칸 등) 저장된 9건 전부 hash 가 바뀌어 \"영업에서 수정됨 v1→v1\" 이 뜸(라이브 확인) · 영업 저장 코드는 저장마다 ver = 판 개수+1 이라 판정을 ver↑ 만으로(salesChangedSince 한 함수 — 목록·상세·미리보기·홈 네 곳), hash 는 판 구분·기준 판 찾기에만 · 영업 docUrl 이 이제 키가 있어야 열리는 export 주소(누르면 401)라 safeDocUrl 이 /api/export/·key= 주소는 링크로 안 보여 줌(키를 주소에 붙이지 않음) · 미리보기의 안 쓰는 seenHash 정리 · releases·CLAUDE.md·설계 한 줄",
+    "crew": [
+      "qa-checker",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "c71788d347",
     "date": "2026-11-26",
     "time": "20:03",

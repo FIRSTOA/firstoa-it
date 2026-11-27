@@ -404,13 +404,15 @@ export function buildSalesPrintHtml(input: SalesPrintInput): SalesPrintResult {
   const { detail, options } = input;
   const c = detail.confirm;
 
-  // 교체·유지보수 확인서 — 지금 가진 양식(11-18판)엔 교체 전/후·유지보수 자리가 없음(D24)
+  // 납품이 아닌 확인서(교체·유지보수·소프트웨어 …) — 지금 가진 양식(11-18판)은 납품 양식뿐(D24).
+  // 영업 b33a4c3(2026-11-27)부터 type '소프트웨어' 가 따로 와서, 예전 /교체|유지보수/ 검사로는 소프트웨어 확인서를 납품 양식으로 잘못 그렸음.
+  // 빈 type(옛 원문)은 납품으로 봄.
   const type = tr(c.type);
-  if (/교체|유지보수/.test(type)) {
+  if (type && type !== '납품') {
     return {
       html: '',
       notes: [],
-      blocked: `${type} 확인서는 영업 웹앱 최신 양식을 받으면 출력이 열려요 — 지금 가진 양식엔 교체 전/후·유지보수 자리가 없어서 회수 기기가 빠진 종이가 나가요. 기기 칸 입력·저장은 지금도 돼요.`,
+      blocked: `${type} 확인서 출력은 영업 웹앱 새 양식으로 바꾸는 중이에요(곧 열려요) — 지금 가진 양식은 납품 양식뿐이라 다른 모양의 종이가 나가요. 기기 칸 입력·저장은 지금도 돼요.`,
       attached: false,
     };
   }
