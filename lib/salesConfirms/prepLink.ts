@@ -23,7 +23,7 @@ import {
 import { findAssetBriefs } from '@/lib/inventory/assetIndex';
 import { isItPrepTarget, isPrepDone, isPrepInProgress, isPrepOverhaul, type PrepChecks, type PrepUnit } from '@/lib/shipmentPrep';
 import { sheetFailReason } from '@/lib/syncFailure';
-import { isMissingSalesTable, readDeliveryModes } from './listQuery';
+import { isMissingSalesColumn, isMissingSalesTable, readDeliveryModes } from './listQuery';
 import { normalizeSalesConfirm } from './normalize';
 import { regionWithGuess } from './prepMatch';
 import {
@@ -554,10 +554,13 @@ const REPORT_SRC_CONFIRM_COLS = 'id,items,replace_info,payload';
 /** ④ 1단계부터 있는 칸만(블록 A 의 extra·diff_ack 는 보고 기기에 필요 없음 — 칸 없음 판정 없이 읽음) */
 const REPORT_SRC_UNIT_COLS =
   'id,confirm_id,slot_key,unit_no,item_snapshot,asset_id,serial,actual_maker,actual_model,spec_override,checks,note,updated_at,updated_by';
+/** + extra — `＋ 줄 추가` 표시(extra.added)가 있어야 추가 줄이 보고 기기로 감(없으면 "영업에서 빠진 칸"으로 셈). SQL 블록 A 전이면 칸 없이 */
+const REPORT_SRC_UNIT_COLS_FULL = `${REPORT_SRC_UNIT_COLS},extra`;
 
 /**
  * 확인서들의 칸(상세와 같은 계산 — 저장된 payload 를 지금 normalize 로, 안 읽히면 ① 칸 사본) + ④ 를 붙임.
  * ①·④ 를 id 묶음으로 한 번씩(확인서마다 따로 안 읽음). 없는 확인서는 빠짐.
+ * ④ 는 extra 칸까지(추가 줄 표시) — 블록 A 전(칸 없음, isMissingSalesColumn 으로 좁게)이면 extra 없이 다시(그땐 추가 줄도 있을 수 없음).
  */
 export async function readSlotLinesFor(
   supabase: Supa,
@@ -568,14 +571,12 @@ export async function readSlotLinesFor(
   if (!ids.length) return out;
   const confirmRows: Json[] = [];
   const unitsBy = new Map<string, SalesUnitRow[]>();
-  for (const part of chunks(ids, CHUNK)) {
-    const { data, error } = await supabase.from(SALES_CONFIRMS_TABLE).select(REPORT_SRC_CONFIRM_COLS).in('id', part);
-    if (error) throw error;
-    confirmRows.push(...((data ?? []) as unknown as Json[]));
-    const units = await readAllPages<Json>((a, b) =>
+  let unitCols = REPORT_SRC_UNIT_COLS_FULL;
+  const readUnits = (part: string[]) =>
+    readAllPages<Json>((a, b) =>
       supabase
         .from(SALES_CONFIRM_UNITS_TABLE)
-        .select(REPORT_SRC_UNIT_COLS)
+        .select(unitCols)
         .in('confirm_id', part)
         .order('confirm_id')
         .order('slot_key')
@@ -583,6 +584,18 @@ export async function readSlotLinesFor(
         .order('id')
         .range(a, b) as unknown as PromiseLike<{ data: Json[] | null; error: unknown }>,
     );
+  for (const part of chunks(ids, CHUNK)) {
+    const { data, error } = await supabase.from(SALES_CONFIRMS_TABLE).select(REPORT_SRC_CONFIRM_COLS).in('id', part);
+    if (error) throw error;
+    confirmRows.push(...((data ?? []) as unknown as Json[]));
+    let units: Json[];
+    try {
+      units = await readUnits(part);
+    } catch (err) {
+      if (unitCols === REPORT_SRC_UNIT_COLS || !isMissingSalesColumn(err)) throw err;
+      unitCols = REPORT_SRC_UNIT_COLS;
+      units = await readUnits(part);
+    }
     for (const r of units) {
       const cid = String(r.confirm_id ?? '');
       (unitsBy.get(cid) ?? unitsBy.set(cid, []).get(cid)!).push(unitRowFromDb(r));

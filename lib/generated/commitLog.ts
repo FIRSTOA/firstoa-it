@@ -3,6 +3,19 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "1e9f35ea93",
+    "date": "2026-11-27",
+    "time": "17:05",
+    "subject": "확인서 ↔ 출고 준비 4-2 · 자산번호는 확인서에 한 번만 — 완료 보고·카톡·IT재고까지 — 4단계 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md F9~F14·F22·F23 + \"4-2 연동 규칙 기준\"(integration-rules 구현 전 기준, 구현 후 검사 통과) · 확인서와 연결된 일정이면 savePrepReport update 직전 한 곳에서 서버가 확인서 ④ 기기 칸으로 보고 units 를 다시 만듦(prepLink.linkedReportSource — 장비·모니터·기타 중 자산번호/시리얼 있는 칸, 교체는 교체 후만, 유지보수·소프트웨어·빠진 칸·지움/취소/따로 보는 확인서 제외) → send 는 저장 뒤 DB 재읽기라 카톡·재고 반영·앨범·재고 다시 반영·예전 시트 채우기가 같은 사본 · buildPrepMessage·enqueueOutbox·KAKAO_ROOM·applyStockUnit·recordStockOutcome·retryPrepStock·getAlbum·stockTargetIds·confirmLink 변경 0 · 처음 발송 선점 .is('sent_at', null)(두 창 동시에도 카톡 1번)·카톡 실패면 내 값일 때만 되돌림·이미 보낸 보고 send 는 저장 전 거절 · 확인서 읽기 실패 = 창 기기로 저장 + linkWarning(0대면 send 거절) · needAck(noUnits·dropUnits) 확인 창 · 'auto' 연결 저장(사람이 보고 저장·발송할 때) · 완료 보고 창 확인서 모드(보기만·확인서에서 고치기), 확인서 상세 📷 완료 보고·보고 상태·보고 기기를 확인서로 옮기기(importReportUnitsToConfirm — ④ 자산번호·시리얼만) · getPrepEventRow · 상세 page maxDuration 300 · 설명서·releases·CLAUDE.md",
+    "crew": [
+      "developer",
+      "ui-designer",
+      "qa-checker",
+      "integration-rules",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "a56439f96b",
     "date": "2026-11-27",
     "time": "16:50",

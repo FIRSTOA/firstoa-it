@@ -5,12 +5,13 @@
  * 쓰는 곳: ③ it_sales_confirm_work · ④ it_sales_confirm_units 뿐. ①② 영업 원본·출고 준비 표·캘린더·IT재고는 읽기만.
  * 시트·네이버·카톡·영업 쪽 쓰기 없음. 라이선스 키는 여기서 절대 다루지 않음(salesLicenseActions — developer E).
  *
- * 차이 확인(D27) — 서버 액션은 누구나 부를 수 있으므로 서버도 같은 검사:
- *   저장할 출고 값(제조사·모델명·사양)과 지금 DB 의 영업 값(payload 를 다시 normalize)으로 diffsFor 를 계산 →
- *   acks 에도 기존 diff_ack 에도 없는 차이가 있으면 저장하지 않고 needAck. acks 는 {field, sales, actual} 이 지금 계산과
- *   (앞뒤 공백 빼고) 같을 때만 인정, at·by 는 서버가 채움. 차이가 없어진 칸의 기록은 지움.
- *   이번 저장이 출고 값(제조사·모델명·사양)을 바꾸지 않으면(자산번호·시리얼·메모·체크만) 이미 풀려 있던 차이("다시 확인 필요")로 막지 않음
- *   — 새로 생기는 미확인 차이가 없으므로. 그 칸은 화면·목록에 "다시 확인 필요"로 그대로 남음.
+ * 차이 확인(D27 → 2026-11-27 사용자 결정으로 바뀜): **저장은 막지 않음** — 영업 요청과 다른 칸은 그대로 저장하고 화면·목록에 노랗게
+ *   ("요청과 다름" = slots.unackedDiffs). 확인은 출력 창 [인쇄](IT 기재) 때 한 번에(ackDiffsForPrint) 또는 칸의 [확인](ackUnitDiffs).
+ *   확인 기록 diff_ack 는 그대로: {field, sales, actual} 이 지금 계산과(앞뒤 공백 빼고) 같은 확인만 인정, at·by 는 서버가 채움,
+ *   차이가 없어진 칸의 기록은 지움, (영업, 출고) 쌍이 바뀌면 다시 "요청과 다름". 확인 액션은 서버가 다시 읽어 계산한 차이가
+ *   acks 에 다 있어야만 씀(아니면 needAck — 그 사이 값이 바뀜).
+ * `＋ 줄 추가`(addSalesUnit)·`✕ 줄 빼기`(removeAddedSalesUnit): 납품 확인서의 장비·모니터·기타 줄만(slots.addLineAllowed),
+ *   ④ extra.added 표시 행. 칸 계산은 ④ 를 붙여서 해야 추가 줄이 보임(currentLines).
  * 동시 수정: updated_at(DB 문자열 그대로) 비교. 체크(checks)만 바꾸는 저장은 서버가 그 항목만 합쳐 충돌 없이 다시 시도.
  * 'use server' 파일이라 async 함수만 export — 상수·타입은 lib/salesConfirms/ 에.
  */
@@ -19,12 +20,16 @@ import { ITEM_KIND_RULES, checkGroupFor, type ItemKind } from '@/lib/salesConfir
 import { isMissingSalesColumn, isMissingSalesTable } from '@/lib/salesConfirms/listQuery';
 import { hasSpec, specKeys } from '@/lib/salesConfirms/salesForm/confirm';
 import {
+  ADDED_LINE_MAX,
+  addLineAllowed,
+  addedSlotCount,
   buildSlotLines,
   findSlotLine,
   isAcked,
   isDiffField,
   itemSnapshot,
   kindOfSlotKey,
+  nextAddedUnitNo,
   parseSpec,
   slotItems,
   unitDiffs,
@@ -70,6 +75,7 @@ const NOT_CONFIGURED = 'Supabase 설정이 필요해요.';
 const GENERIC = '저장하지 못했어요. 잠시 뒤 다시 해 주세요.';
 const NO_TABLE = '영업 확인서 표가 아직 없어요 — supabase/sales_confirms_schema.sql 을 실행해 주세요.';
 const MSG_NEED_ACK = '영업 요청과 다른 칸이 있어요 — 한 번 더 확인해 주세요.';
+const MSG_NEED_ACK_PRINT = '그 사이 영업 요청과 다른 칸이 바뀌었어요 — 새로 읽은 뒤 다시 확인해 주세요.';
 const MSG_NEED_NAME = '이름을 먼저 적어 주세요 — 누가 확인했는지 남겨요.';
 const MSG_ORPHAN = '이 칸은 영업에서 빠졌어요 — 아래 "영업에서 빠진 칸"에서 다른 칸으로 옮긴 뒤 고쳐 주세요.';
 
@@ -143,12 +149,6 @@ function dedupeDiffs(list: DiffItem[]): DiffItem[] {
   });
 }
 
-const sameSpecMap = (a: SalesSpec, b: SalesSpec) => {
-  const ka = Object.keys(a).sort();
-  const kb = Object.keys(b).sort();
-  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && a[k as SalesSpecKey] === b[k as SalesSpecKey]);
-};
-
 /** 이 종류·품목에서 받는 칸(itemKind 규칙 + 사양은 hasSpec 품목의 specKeys 만) */
 function allowedFields(kind: ItemKind, cat: string) {
   const f = ITEM_KIND_RULES[kind].fields;
@@ -193,11 +193,14 @@ function workFail(where: string, err: unknown): SalesWorkSaveResult {
 const needSql = (): SalesUnitSaveResult => ({ ok: false, needSql: true, error: MSG_NEED_SQL });
 const conflict = (): SalesUnitSaveResult => ({ ok: false, conflict: true, error: MSG_CONFLICT });
 
-/** 지금 영업 품목으로 칸 계산(④ 없이 — 칸이 있는지·종류·품목만) */
+/**
+ * 지금 영업 품목으로 칸 계산 — 칸이 있는지·종류·품목(+ 지금 ④ 를 붙인 값). ④ 를 같이 읽어야 `＋ 줄 추가`한 칸(extra.added)도 칸으로 잡힘
+ * (예전엔 ④ 없이 계산해 영업 수량 칸만 있었음). ① 과 ④ 는 동시에 읽음.
+ */
 async function currentLines(supabase: Supa, confirmId: string) {
-  const rec = await readConfirmRecord(supabase, confirmId);
+  const [rec, read] = await Promise.all([readConfirmRecord(supabase, confirmId), readUnitsFor(supabase, confirmId)]);
   if (!rec) throw new SalesWorkError('not_found', MSG_NOT_FOUND);
-  return buildSlotLines(slotItems(rec.confirm), []).lines;
+  return buildSlotLines(slotItems(rec.confirm), read.units).lines;
 }
 
 // ───────────────────────── 상세 열기 ─────────────────────────
@@ -283,15 +286,10 @@ function applyUnitPatch(cur: SalesUnitRow | null, patch: UnitPatchInput, kind: I
   return v;
 }
 
-/** 이번 저장이 출고 값(제조사·모델명·사양)을 바꾸는지 — 바꾸면 차이 확인을 강제 */
-function changesActual(cur: SalesUnitRow | null, v: UnitValues): boolean {
-  if (!cur) return !!(v.actual_maker || v.actual_model || Object.keys(v.spec_override).length);
-  return v.actual_maker !== cur.actualMaker || v.actual_model !== cur.actualModel || !sameSpecMap(v.spec_override, cur.specOverride);
-}
-
 /**
  * 기기 칸 하나 저장. unitId 가 null 이면 새 칸(이미 있으면 conflict), 있으면 expectedUpdatedAt 이 같을 때만(체크만 바꾸면 항목만 합침).
- * 영업 요청과 다른데 확인 안 된 칸 → needAck(저장 안 함). SQL 블록 A 전 → needSql.
+ * 영업 요청과 달라도 **막지 않고 저장**(2026-11-27 사용자 결정 — 확인은 인쇄 때 한 번에). acks 를 같이 보내면(지금 화면은 안 보냄) 그 확인도 기록.
+ * `＋ 줄 추가`한 칸도 같은 길(currentLines 가 ④ 를 붙여 계산). SQL 블록 A 전 → needSql.
  */
 export async function saveSalesUnit(input: {
   confirmId: string;
@@ -339,13 +337,9 @@ export async function saveSalesUnit(input: {
       const now = new Date().toISOString();
       const v = applyUnitPatch(cur, patch, kind, item.cat, actor, now);
 
-      // 차이 확인(D27)
+      // 차이는 막지 않음 — 확인 기록만 지금 차이에 맞춰 정리(없어진 칸 기록은 지움, 확인 안 된 차이는 화면에 노랗게)
       const diffs = unitDiffs(kind, item, { actualMaker: v.actual_maker, actualModel: v.actual_model, specOverride: v.spec_override });
       const stored = cur?.diffAck ?? {};
-      if (changesActual(cur, v)) {
-        const need = diffs.filter((d) => !isAcked(stored, d));
-        if (need.some((d) => !acks.some((a) => ackMatches(a, d)))) return { ok: false, needAck: need, error: MSG_NEED_ACK };
-      }
       const row: Json = { ...v, diff_ack: nextDiffAck(stored, diffs, acks, actor, now), updated_by: actor };
 
       if (cur) {
@@ -371,7 +365,7 @@ export async function saveSalesUnit(input: {
 /**
  * 품목 줄의 모든 칸에 같은 값 — [이 품목 사양 한꺼번에]·[제품명 한꺼번에]. 칸 행이 없으면 만듦.
  * specOverride 는 **합침**(넘긴 칸만 바꿈, 빈 값이면 그 칸을 지움, 안 넘긴 칸은 칸마다 그대로). actualModel·actualMaker 는 넘기면 그 값('' = 지움).
- * 차이 확인은 줄 전체 한 번 — 칸마다 계산한 확인 안 된 차이를 모아(같은 것 하나로) needAck, 확인 하나로 그 줄 칸 전부에 기록.
+ * `＋ 줄 추가`한 칸도 그 줄 칸이라 같이 바뀜. 영업 요청과 달라도 막지 않음(2026-11-27 — 확인은 인쇄 때 한 번에, acks 가 오면 기록).
  */
 export async function applyLineValues(input: {
   confirmId: string;
@@ -414,27 +408,14 @@ export async function applyLineValues(input: {
         spec_override: spec,
       };
     };
-    const needOf = (cur: SalesUnitRow | null, b: ReturnType<typeof build>) => {
-      const diffs = unitDiffs(line.kind, line.item, { actualMaker: b.actual_maker, actualModel: b.actual_model, specOverride: b.spec_override });
-      const v = { ...b, asset_id: '', serial: '', note: '', extra: {}, checks: {} } as UnitValues;
-      const need = changesActual(cur, v) ? diffs.filter((d) => !isAcked(cur?.diffAck ?? {}, d)) : [];
-      return { diffs, need };
-    };
+    const diffsOf = (b: ReturnType<typeof build>) =>
+      unitDiffs(line.kind, line.item, { actualMaker: b.actual_maker, actualModel: b.actual_model, specOverride: b.spec_override });
 
     const read = await readUnitsFor(supabase, input.confirmId);
     if (!read.schemaReady) return needSql();
     const unitAt = (units: SalesUnitRow[], unitNo: number) => units.find((u) => u.slotKey === line.slotKey && u.unitNo === unitNo) ?? null;
 
-    // 1) 줄 전체 차이를 먼저 모아 한 번에 물음
-    const allNeed: DiffItem[] = [];
-    for (const s of line.slots) {
-      const cur = unitAt(read.units, s.unitNo);
-      allNeed.push(...needOf(cur, build(cur)).need);
-    }
-    const need = dedupeDiffs(allNeed);
-    if (need.some((d) => !acks.some((a) => ackMatches(a, d)))) return { ok: false, needAck: need, error: MSG_NEED_ACK };
-
-    // 2) 칸마다 저장(그 사이 바뀐 칸은 다시 읽어 한 번 더 — 새 미확인 차이가 생기면 멈춤)
+    // 칸마다 저장(그 사이 바뀐 칸은 다시 읽어 한 번 더). 차이는 막지 않음 — 확인 기록만 지금 차이에 맞춰 정리
     const saved: SalesUnitRow[] = [];
     for (const s of line.slots) {
       let cur = unitAt(read.units, s.unitNo);
@@ -446,12 +427,13 @@ export async function applyLineValues(input: {
         }
         const now = new Date().toISOString();
         const b = build(cur);
-        const { diffs, need: unitNeed } = needOf(cur, b);
-        if (unitNeed.some((d) => !acks.some((a) => ackMatches(a, d)))) return conflict();
-        const row: Json = { ...b, diff_ack: nextDiffAck(cur?.diffAck ?? {}, diffs, acks, actor, now), updated_by: actor };
+        const row: Json = { ...b, diff_ack: nextDiffAck(cur?.diffAck ?? {}, diffsOf(b), acks, actor, now), updated_by: actor };
         if (cur) {
           if (!cur.itemSnapshot) row.item_snapshot = itemSnapshot(line.item);
           done = await updateUnitIf(supabase, cur, row, true);
+        } else if (s.added) {
+          // 추가한 줄이 그 사이 빠짐 — 표시 없이 다시 만들면 "영업에서 빠진 칸"이 되므로 만들지 않고 건너뜀
+          break;
         } else {
           done = await insertUnit(
             supabase,
@@ -460,6 +442,7 @@ export async function applyLineValues(input: {
           );
         }
       }
+      if (!done && s.added && !cur) continue;
       if (!done) return conflict();
       saved.push(done);
     }
@@ -470,7 +453,7 @@ export async function applyLineValues(input: {
 }
 
 /**
- * "다시 확인 필요" [확인] · 영업 품목이 바뀜 [확인함] — 값은 안 바꾸고 확인 기록만 새로 + item_snapshot 을 지금 영업 품목으로.
+ * 칸의 "요청과 다름" [확인] — 값은 안 바꾸고 확인 기록만 새로 + item_snapshot 을 지금 영업 품목으로.
  * acks 는 지금 확인 안 된 차이를 전부 담아야 함(빠진 게 있으면 needAck). 차이가 없으면 acks 빈 배열로 스냅숏만 갱신.
  */
 export async function ackUnitDiffs(input: { confirmId: string; unitId: string; acks: DiffItem[]; actor: string }): Promise<SalesUnitSaveResult> {
@@ -503,6 +486,77 @@ export async function ackUnitDiffs(input: { confirmId: string; unitId: string; a
     return conflict();
   } catch (err) {
     return unitFail('차이 확인 기록', err);
+  }
+}
+
+/** 인쇄 확인 한 번에 받는 칸 수(서버 액션 입력 크기) */
+const PRINT_ACK_MAX_UNITS = 500;
+
+/**
+ * 출력 창 [인쇄](IT 기재 넣음) 전 "영업 요청과 다른 칸 n개" → [맞아요, 인쇄] (2026-11-27 사용자 결정 — 예전 D27 "저장 때 확인 창"을 대신함).
+ * 종이에 나가는 칸(영업 수량 칸 + `＋ 줄 추가`한 칸 — 영업에서 빠진 칸은 종이에 안 나가 제외)의 확인 안 된 차이를 한 번에 diff_ack 에 기록.
+ *   ① ①④ 를 지금 다시 읽어 칸마다 확인 안 된 차이를 계산 → 화면이 보낸 acks(칸 id 별)에 **전부** 있어야 씀. 하나라도 없으면 아무것도 안 쓰고 needAck
+ *      (그 사이 누가 값을 바꿈 → 화면이 새로 읽고 다시 물음).
+ *   ② 칸마다 조건부 update(읽은 updated_at 그대로 — 동시 수정 검사). 그 사이 바뀐 칸이 있으면 처음부터 다시(3번까지, 이미 쓴 칸은 차이가 없어져 건너뜀).
+ *   item_snapshot 은 안 바꿈("영업 품목이 바뀌었어요"는 따로 [확인함]). 쓴 칸을 돌려줌 — 화면은 이 줄로 updated_at·확인 표시를 맞춤.
+ * 차이가 하나도 없으면 아무것도 안 쓰고 ok(units []).
+ */
+export async function ackDiffsForPrint(input: {
+  confirmId: string;
+  acks: { unitId: string; diffs: DiffItem[] }[];
+  actor: string;
+}): Promise<SalesUnitSaveResult> {
+  if (!isConfirmId(input?.confirmId)) return { ok: false, error: '확인서를 정해 주세요.' };
+  if (!isSupabaseConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  const actor = cleanActor(input.actor);
+  if (!actor) return { ok: false, error: MSG_NEED_NAME };
+  const ackBy = new Map<string, DiffItem[]>();
+  for (const g of Array.isArray(input.acks) ? input.acks.slice(0, PRINT_ACK_MAX_UNITS) : []) {
+    if (!g || typeof g !== 'object' || !isUuid((g as { unitId?: unknown }).unitId)) continue;
+    const id = (g as { unitId: string }).unitId.toLowerCase();
+    ackBy.set(id, [...(ackBy.get(id) ?? []), ...cleanAcks((g as { diffs?: unknown }).diffs)]);
+  }
+
+  try {
+    const supabase = createAdminClient();
+    const written = new Map<string, SalesUnitRow>();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const [rec, read] = await Promise.all([readConfirmRecord(supabase, input.confirmId), readUnitsFor(supabase, input.confirmId)]);
+      if (!rec) return { ok: false, error: MSG_NOT_FOUND };
+      if (!read.schemaReady) return needSql();
+      const { lines } = buildSlotLines(slotItems(rec.confirm), read.units);
+
+      // ① 지금 확인 안 된 차이가 화면 확인에 다 있는지
+      const todo: { line: (typeof lines)[number]; unit: SalesUnitRow; acks: DiffItem[] }[] = [];
+      const missing: DiffItem[] = [];
+      for (const line of lines) {
+        for (const s of line.slots) {
+          if (!s.unit || !s.unackedDiffs.length) continue;
+          const acks = ackBy.get(s.unit.id.toLowerCase()) ?? [];
+          const notCovered = s.unackedDiffs.filter((d) => !acks.some((a) => ackMatches(a, d)));
+          if (notCovered.length) missing.push(...notCovered);
+          else todo.push({ line, unit: s.unit, acks });
+        }
+      }
+      if (missing.length) return { ok: false, needAck: dedupeDiffs(missing), error: MSG_NEED_ACK_PRINT };
+
+      // ② 칸마다 조건부 기록
+      let raced = false;
+      for (const t of todo) {
+        const now = new Date().toISOString();
+        const diffs = unitDiffs(t.line.kind, t.line.item, t.unit);
+        const updated = await updateUnitIf(supabase, t.unit, { diff_ack: nextDiffAck(t.unit.diffAck, diffs, t.acks, actor, now), updated_by: actor }, true);
+        if (!updated) {
+          raced = true;
+          break;
+        }
+        written.set(updated.id, updated);
+      }
+      if (!raced) return { ok: true, units: [...written.values()] };
+    }
+    return conflict();
+  } catch (err) {
+    return unitFail('인쇄 전 차이 확인 기록', err);
   }
 }
 
@@ -584,7 +638,13 @@ export async function moveOrphanUnit(input: {
       if (error) throw error;
       if (!data || data.length === 0) return conflict();
     }
-    const moved = await updateUnitIf(supabase, unit, { slot_key: toSlotKey, unit_no: toUnitNo, updated_by: actor }, schemaReady);
+    const patch: Json = { slot_key: toSlotKey, unit_no: toUnitNo, updated_by: actor };
+    // `＋ 줄 추가`한 칸으로 옮기면 추가 줄 표시도 같이(없으면 영업 수량 밖 번호라 다시 "영업에서 빠진 칸"이 됨)
+    if (target.slot.added) {
+      if (!schemaReady) return needSql();
+      patch.extra = { ...unit.extra, added: true };
+    }
+    const moved = await updateUnitIf(supabase, unit, patch, schemaReady);
     return moved ? { ok: true, units: [moved] } : conflict();
   } catch (err) {
     return unitFail('빠진 칸 옮기기', err);
@@ -615,6 +675,90 @@ export async function deleteOrphanUnit(input: { confirmId: string; unitId: strin
     return { ok: true, units: [] };
   } catch (err) {
     return unitFail('빠진 칸 지우기', err);
+  }
+}
+
+// ───────────────────────── `＋ 줄 추가` · `✕ 줄 빼기` (2026-11-27 사용자 결정) ─────────────────────────
+
+/**
+ * 품목 줄에 영업 수량보다 한 대 더 — 그 줄의 다음 번호(nextAddedUnitNo — 영업에서 빠진 칸 번호와도 안 겹침)로 빈 ④ 행,
+ * extra = { added: true }, item_snapshot = 지금 영업 품목. 납품 확인서의 장비·모니터·기타 줄만(slots.addLineAllowed — 화면과 같은 판정).
+ * 값은 화면의 칸 카드가 평소처럼 저장(saveSalesUnit). 같은 번호가 그 사이 생기면(23505) 다시 읽어 한 번 더. SQL 블록 A 전 → needSql.
+ */
+export async function addSalesUnit(input: { confirmId: string; itemIndex: number; actor: string }): Promise<SalesUnitSaveResult> {
+  if (!isConfirmId(input?.confirmId)) return { ok: false, error: '확인서를 정해 주세요.' };
+  const itemIndex = Math.floor(Number(input.itemIndex));
+  if (!Number.isFinite(itemIndex) || itemIndex < 0) return { ok: false, error: '품목을 정해 주세요.' };
+  if (!isSupabaseConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  const actor = cleanActor(input.actor);
+  if (!actor) return { ok: false, error: MSG_NEED_NAME };
+  try {
+    const supabase = createAdminClient();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const [rec, read] = await Promise.all([readConfirmRecord(supabase, input.confirmId), readUnitsFor(supabase, input.confirmId)]);
+      if (!rec) return { ok: false, error: MSG_NOT_FOUND };
+      if (!read.schemaReady) return needSql();
+      const line = buildSlotLines(slotItems(rec.confirm), read.units).lines[itemIndex];
+      if (!line) return { ok: false, error: '품목을 찾지 못했어요 — 영업이 품목을 바꿨을 수 있어요. 새로고침해 주세요.' };
+      if (!addLineAllowed(rec.confirm, line.kind)) {
+        return { ok: false, error: '이 품목에는 줄을 더할 수 없어요(납품 확인서의 장비·모니터·기타만).' };
+      }
+      if (addedSlotCount(line) >= ADDED_LINE_MAX) return { ok: false, error: `한 품목에 ${ADDED_LINE_MAX}줄까지만 더할 수 있어요.` };
+      const unitNo = nextAddedUnitNo(line, read.units);
+      const created = await insertUnit(
+        supabase,
+        {
+          confirm_id: input.confirmId,
+          slot_key: line.slotKey,
+          unit_no: unitNo,
+          item_snapshot: itemSnapshot(line.item),
+          extra: { added: true },
+          updated_by: actor,
+        },
+        true,
+      );
+      if (created) return { ok: true, units: [created] };
+      // 그 사이 같은 번호가 생김(다른 창에서 동시에 줄 추가) — 다시 읽어 다음 번호로
+    }
+    return conflict();
+  } catch (err) {
+    return unitFail('줄 추가', err);
+  }
+}
+
+/**
+ * `✕ 줄 빼기` — `＋ 줄 추가`한 칸(지금 영업 수량 밖에 붙은 SalesSlot.added)만 ④ 행째 지움. 영업 수량 안 칸·빠진 칸은 거절.
+ * expectedUpdatedAt(화면이 본 값)과 같을 때만 — 그 사이 누가 값을 적었으면 conflict(화면이 다시 읽음). 값 있는 줄은 화면이 먼저 확인을 받음.
+ */
+export async function removeAddedSalesUnit(input: {
+  confirmId: string;
+  unitId: string;
+  expectedUpdatedAt: string;
+  actor: string;
+}): Promise<SalesUnitSaveResult> {
+  if (!isConfirmId(input?.confirmId) || !isUuid(input?.unitId)) return { ok: false, error: '칸을 정해 주세요.' };
+  if (!isSupabaseConfigured()) return { ok: false, error: NOT_CONFIGURED };
+  const expected = typeof input.expectedUpdatedAt === 'string' ? input.expectedUpdatedAt : '';
+  try {
+    const supabase = createAdminClient();
+    const lines = await currentLines(supabase, input.confirmId);
+    const { unit } = await readUnitRow(supabase, input.confirmId, { id: input.unitId });
+    if (!unit) return { ok: true, units: [] }; // 이미 빠짐
+    const hit = findSlotLine(lines, unit.slotKey, unit.unitNo);
+    if (!hit || !hit.slot.added) return { ok: false, error: '추가한 줄만 뺄 수 있어요 — 영업 수량 안의 칸은 값을 비워 주세요.' };
+    if (!expected || ms(unit.updatedAt) !== ms(expected)) return conflict();
+    const { data, error } = await supabase
+      .from(SALES_CONFIRM_UNITS_TABLE)
+      .delete()
+      .eq('id', unit.id)
+      .eq('confirm_id', input.confirmId)
+      .eq('updated_at', unit.updatedAt)
+      .select('id');
+    if (error) throw error;
+    if (!data || data.length === 0) return conflict();
+    return { ok: true, units: [] };
+  } catch (err) {
+    return unitFail('줄 빼기', err);
   }
 }
 

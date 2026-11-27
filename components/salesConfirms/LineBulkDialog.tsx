@@ -23,7 +23,7 @@ interface Props {
  *  spec     = [이 품목 사양 한꺼번에] — 그 줄 모든 칸의 출고사양을 같은 값으로
  *  software = [제품명 한꺼번에] — 그 줄 모든 칸의 제품명·제조사
  *  key      = [같은 키를 모든 칸에] — 볼륨 라이선스(잠금 풀린 상태에서만 저장)
- * 영업 요청과 다르면 저장 때 차이 확인 창이 한 번 뜸(부모가 처리).
+ * 영업 요청과 달라도 그대로 저장(노란 표시) — 확인은 인쇄할 때 한 번에(2026-11-27).
  */
 export default function LineBulkDialog({ mode, line, onClose, onApplyValues, onApplyKey }: Props) {
   const keys = specKeys(line.item.cat) as SalesSpecKey[];

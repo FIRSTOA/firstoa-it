@@ -1,6 +1,7 @@
 /**
  * 영업 확인서 상세 화면이 같이 쓰는 모양·도우미(순수 — 서버·브라우저 어디서나).
- * 차이(노란색) 표시는 서버가 계산한 SalesSlot.unackedDiffs·④ diff_ack 만 보고 그림 — 화면이 따로 비교하지 않음(판정은 서버 한 곳).
+ * 차이(노란색) 표시는 SalesSlot.unackedDiffs·④ diff_ack 만 보고 그림 — 화면이 따로 비교하지 않음. unackedDiffs 는 서버(slots.buildSlotLines)가
+ * 계산하고, 저장 직후엔 상세 화면이 **같은 순수 함수**(slots.unackedDiffsFor)로 그 칸만 다시 계산(2026-11-27 — 저장이 더는 확인을 겸하지 않음).
  */
 import type {
   DiffField,
@@ -87,7 +88,7 @@ export function slotMarks(slot: SalesSlot): Partial<Record<DiffField, FieldMark>
     }
   }
   for (const d of slot.unackedDiffs) {
-    marks[d.field] = { state: 'need', sales: d.sales, text: '영업 요청과 달라요 — 확인이 필요해요' };
+    marks[d.field] = { state: 'need', sales: d.sales, text: '영업 요청과 달라요 — 인쇄할 때 한 번에 확인해요' };
   }
   return marks;
 }
@@ -126,21 +127,6 @@ export function unitFilled(kind: ItemKind, u: SalesUnitRow | null): boolean {
   if (!u) return false;
   if (kind === 'maintenance') return !!(u.assetId.trim() || u.serial.trim());
   return !!u.assetId.trim();
-}
-
-/** ISO → <input type="datetime-local"> 값(한국 시간) */
-export function toKstInput(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  return new Date(t + 9 * 3600_000).toISOString().slice(0, 16);
-}
-
-/** <input type="datetime-local"> 값(한국 시간) → ISO. 빈 값·이상한 값이면 null */
-export function fromKstInput(v: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return null;
-  const t = Date.parse(`${v}:00+09:00`);
-  return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
 /** "1시간 40분" 꼴 */

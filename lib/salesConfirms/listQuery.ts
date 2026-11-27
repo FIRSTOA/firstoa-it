@@ -140,8 +140,8 @@ interface UnitDbRow extends Json {
   confirm_id: string;
 }
 const UNIT_COLS_BASE = 'id,confirm_id,slot_key,unit_no,asset_id,serial,actual_maker,actual_model,spec_override,updated_at';
-/** 블록 A 뒤 — 다시 확인 필요(diff_ack) 계산용 */
-const UNIT_COLS_FULL: string = `${UNIT_COLS_BASE},diff_ack`;
+/** 블록 A 뒤 — 요청과 다름(diff_ack) 계산 + `＋ 줄 추가` 표시(extra.added — 진행 m 에 추가 줄도 셈, 없으면 "영업에서 빠진 칸"으로 보임) */
+const UNIT_COLS_FULL: string = `${UNIT_COLS_BASE},diff_ack,extra`;
 
 const asStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : '');
 const asObj = (v: unknown): Json => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : {});

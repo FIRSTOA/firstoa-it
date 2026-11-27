@@ -8,6 +8,10 @@
  * 화면을 그릴 때마다 지금 영업 품목으로 칸을 계산하고 ④ 행을 (slot_key, unit_no)로 붙임 → 가져오기는 ④를 안 건드림.
  * 갈 곳 없는 ④ 행 중 IT가 뭐라도 적은 행 = "영업에서 빠진 칸"(지우지 않음), 아무것도 안 적은 행은 안 보임.
  * 교체 건에 items 가 비고 after 만 오면 after 를 1칸짜리 품목으로 봄(slotItems).
+ * `＋ 줄 추가`(2026-11-27 사용자 결정): ④ extra.added 표시가 있는 행은 unit_no 가 영업 수량보다 커도 "빠진 칸"이 아니라
+ *   그 품목의 정상 칸(SalesSlot.added — 영업 수량 칸 뒤, unit_no 순). 표시 없는 넘는 행은 지금처럼 "빠진 칸".
+ *   영업이 수량을 늘려 그 번호가 영업 칸 안에 들어오면 그냥 영업 칸(added 아님 — 종이 영업 줄로).
+ *   **화면·저장 검사·목록·완료 보고(prepLink)가 모두 이 함수로 칸을 만듦 → ④ 를 읽을 때 extra 칸도 같이 읽어야 함.**
  */
 import type {
   DiffAckMap,
@@ -57,10 +61,11 @@ export function parseChecks(raw: unknown): Record<string, { at: string; by: stri
   return out;
 }
 
-/** ④ extra — pc·user·ledgerPushed 만(라이선스 키 같은 다른 칸은 버림 — 키는 ④ 에 절대 안 둠) */
+/** ④ extra — pc·user·ledgerPushed·added 만(라이선스 키 같은 다른 칸은 버림 — 키는 ④ 에 절대 안 둠) */
 export function parseExtra(raw: unknown): SalesUnitExtra {
   const out: SalesUnitExtra = {};
   if (!isObj(raw)) return out;
+  if (raw.added === true) out.added = true;
   const pc = str(raw.pc, 100);
   if (pc) out.pc = pc;
   const user = str(raw.user, 100);
@@ -250,7 +255,7 @@ export function unackedDiffsFor(kind: ItemKind, item: SalesConfirmItem, unit: Sa
   return unitDiffs(kind, item, unit).filter((d) => !isAcked(unit.diffAck, d));
 }
 
-/** IT가 뭐라도 적은 칸인지(대장에 올린 소프트웨어 칸 포함) — 아니면 "영업에서 빠진 칸"에 안 보임 */
+/** IT가 뭐라도 적은 칸인지(대장에 올린 소프트웨어 칸 포함, extra.added 표시만 있는 빈 줄은 아님) — 아니면 "영업에서 빠진 칸"에 안 보임 */
 export function unitHasContent(u: SalesUnitRow): boolean {
   if (u.assetId || u.serial || u.actualMaker || u.actualModel || u.note) return true;
   if (Object.values(u.specOverride ?? {}).some((v) => String(v ?? '').trim())) return true;
@@ -268,8 +273,45 @@ export function slotFilled(kind: ItemKind, unit: Pick<SalesUnitRow, 'assetId' | 
 
 const unitKey = (slotKey: string, unitNo: number) => `${slotKey}\u0000${unitNo}`;
 
+/** `＋ 줄 추가`를 받는 종류 — 장비·모니터·기타(완료 보고로 가는 칸과 같음, prepLinkRules REPORT_KINDS). 유지보수·소프트웨어는 안 받음 */
+export const ADDABLE_KINDS: readonly ItemKind[] = ['device', 'monitor', 'other'];
+/** 품목 한 줄에 더할 수 있는 줄 수(영업 수량 밖) */
+export const ADDED_LINE_MAX = 30;
+
+/**
+ * 이 확인서·품목 종류에 `＋ 줄 추가`를 보여 주고 받는지(화면·서버 같은 판정).
+ * 납품(영업 양식 confirm — 옛 원문이면 type '납품')만: 교체 종이는 교체 후 한 대 칸뿐, 유지보수·소프트웨어는 'IT 기재 명세'가 이미 대마다,
+ * 따로 보는 종류(판매·철수·이전)는 기기 칸이 없음.
+ */
+export function addLineAllowed(
+  confirm: Pick<NormalizedSalesConfirm, 'type' | 'renderer' | 'otherRenderer'>,
+  kind: ItemKind,
+): boolean {
+  if (!ADDABLE_KINDS.includes(kind)) return false;
+  if (confirm.otherRenderer) return false;
+  if (confirm.renderer) return confirm.renderer === 'confirm';
+  return String(confirm.type ?? '').trim() === '납품';
+}
+
+/** 줄 추가 때 새 unit_no — 영업 수량 칸·붙은 칸과 이 칸 열쇠의 ④ 행(영업에서 빠진 칸 포함) 중 가장 큰 번호 + 1(같은 번호 충돌 방지) */
+export function nextAddedUnitNo(
+  line: Pick<SalesSlotLine, 'slotKey' | 'slots'>,
+  units: readonly Pick<SalesUnitRow, 'slotKey' | 'unitNo'>[],
+): number {
+  let max = 0;
+  for (const s of line.slots) max = Math.max(max, s.unitNo);
+  for (const u of units) if (u.slotKey === line.slotKey) max = Math.max(max, u.unitNo);
+  return max + 1;
+}
+
+/** 이 줄에 지금 붙은 추가 줄 수 */
+export function addedSlotCount(line: Pick<SalesSlotLine, 'slots'>): number {
+  return line.slots.filter((s) => s.added).length;
+}
+
 /**
  * 지금 품목으로 칸을 계산하고 ④ 행을 붙임.
+ *   영업 수량 칸(1..수량) 뒤에 ④ extra.added 행(unit_no > 수량)을 unit_no 순으로 붙임(SalesSlot.added).
  * @returns lines(품목 줄마다 칸), orphans(갈 곳 없는 행 중 뭐라도 적은 것 — slot_key·unit_no 순)
  */
 export function buildSlotLines(
@@ -277,9 +319,16 @@ export function buildSlotLines(
   units: readonly SalesUnitRow[],
 ): { lines: SalesSlotLine[]; orphans: SalesUnitRow[] } {
   const byKey = new Map<string, SalesUnitRow>();
+  const addedByKey = new Map<string, SalesUnitRow[]>();
   for (const u of units) {
     const k = unitKey(u.slotKey, u.unitNo);
-    if (!byKey.has(k)) byKey.set(k, u);
+    if (byKey.has(k)) continue;
+    byKey.set(k, u);
+    if (u.extra?.added === true && u.unitNo >= 1) {
+      const list = addedByKey.get(u.slotKey);
+      if (list) list.push(u);
+      else addedByKey.set(u.slotKey, [u]);
+    }
   }
   const keys = slotKeysFor(items);
   const used = new Set<SalesUnitRow>();
@@ -295,6 +344,13 @@ export function buildSlotLines(
         if (snapshotChanged(unit.itemSnapshot, item)) changed = true;
       }
       slots.push({ slotKey: keys[i], unitNo: n, unit, unackedDiffs: unit ? unackedDiffsFor(kind, item, unit) : [] });
+    }
+    // `＋ 줄 추가`한 행 — 영업 수량 밖 번호만(안쪽 번호는 위에서 영업 칸으로 붙음)
+    const added = (addedByKey.get(keys[i]) ?? []).filter((u) => u.unitNo > count).sort((a, b) => a.unitNo - b.unitNo);
+    for (const unit of added) {
+      used.add(unit);
+      if (snapshotChanged(unit.itemSnapshot, item)) changed = true;
+      slots.push({ slotKey: keys[i], unitNo: unit.unitNo, unit, unackedDiffs: unackedDiffsFor(kind, item, unit), added: true });
     }
     return { itemIndex: i, item, kind, slotKey: keys[i], slots, snapshotChanged: changed };
   });
@@ -318,7 +374,7 @@ export function findSlotLine(
   return null;
 }
 
-/** 진행 n/m — m = 장비·모니터·유지보수 칸 수(itemKind 규칙 countsProgress), n = 그중 채운 칸 */
+/** 진행 n/m — m = 장비·모니터·유지보수 칸 수(itemKind 규칙 countsProgress, `＋ 줄 추가`한 칸 포함 — 내보낼 기기라서), n = 그중 채운 칸 */
 export function slotProgress(lines: readonly SalesSlotLine[]): { filled: number; total: number } {
   let filled = 0;
   let total = 0;
@@ -330,7 +386,7 @@ export function slotProgress(lines: readonly SalesSlotLine[]): { filled: number;
   return { filled, total };
 }
 
-/** "다시 확인 필요" 칸 수(확인 안 된 차이가 하나라도 있는 칸) */
+/** "요청과 다름"(확인 안 된 차이가 하나라도 있는) 칸 수 — 2026-11-27부터 저장은 안 막고 인쇄 때 한 번에 확인 */
 export function recheckSlotCount(lines: readonly SalesSlotLine[]): number {
   let n = 0;
   for (const line of lines) for (const s of line.slots) if (s.unackedDiffs.length) n++;

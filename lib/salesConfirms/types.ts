@@ -671,6 +671,11 @@ export interface SalesUnitExtra {
   user?: string;
   /** 소프트웨어: 지난번 대장에 올린 값(대장에서 사람이 고친 칸은 안 덮기 위한 비교용 — §3-11) */
   ledgerPushed?: { product?: string; pc?: string; user?: string; at?: string };
+  /**
+   * `＋ 줄 추가`로 만든 줄(2026-11-27 사용자 결정 — 영업 수량보다 더 내보내는 기기). slots.ts 가 영업 수량 칸 뒤에 정상 칸으로 붙임
+   * (표시 없는 넘는 칸은 지금처럼 "영업에서 빠진 칸"). 종이엔 '추가 출고 기기' 장, 완료 보고·카톡·IT재고엔 다른 칸과 같이 감.
+   */
+  added?: boolean;
 }
 
 /** ④ 한 줄 화면 모양 */
@@ -701,6 +706,8 @@ export interface SalesSlot {
   unit: SalesUnitRow | null;
   /** 영업 요청과 다른데 확인 안 된 칸(영업 요청이 바뀌어 풀린 것 포함) — 없으면 [] */
   unackedDiffs: DiffItem[];
+  /** `＋ 줄 추가`로 영업 수량 뒤에 붙은 칸(④ extra.added, unit_no > 영업 수량) — 영업 수량 안 칸은 없음(undefined) */
+  added?: boolean;
 }
 
 /** 품목 줄 하나 + 그 줄의 기기 칸 */
@@ -773,10 +780,13 @@ export interface SalesConfirmDetailData {
   consignName?: string;
 }
 
-/** 기기 칸 저장 결과(saveSalesUnit·applyLineValues·ackUnitDiffs·moveOrphanUnit·deleteOrphanUnit) */
+/** 기기 칸 저장 결과(saveSalesUnit·applyLineValues·ackUnitDiffs·ackDiffsForPrint·moveOrphanUnit·deleteOrphanUnit·addSalesUnit·removeAddedSalesUnit) */
 export type SalesUnitSaveResult =
   | { ok: true; units: SalesUnitRow[] }
-  /** 영업 요청과 다른데 확인(acks) 없음 → 저장 안 함, 화면이 확인 창을 띄움(서버도 같은 검사 — D27) */
+  /**
+   * 확인 기록을 남기려는데 지금 확인 안 된 차이가 acks 에 다 없음 → 아무것도 안 씀(ackUnitDiffs·ackDiffsForPrint — 그 사이 값이 바뀜).
+   * 2026-11-27 사용자 결정으로 **저장(saveSalesUnit·applyLineValues)은 이걸 안 돌려줌** — 차이는 노란 표시, 확인은 인쇄 때 한 번에.
+   */
   | { ok: false; needAck: DiffItem[]; error: string }
   /** updated_at 이 달라 저장 안 함 → 상세를 다시 읽음 */
   | { ok: false; conflict: true; error: string }
@@ -794,7 +804,11 @@ export type SalesUnitSaveResult =
  *                          acks: DiffItem[]; actor: string }): Promise<SalesUnitSaveResult>
  *   applyLineValues(input: { confirmId; itemIndex; values: { specOverride?: SalesSpec; actualModel?: string; actualMaker?: string }; acks: DiffItem[]; actor })
  *       : Promise<SalesUnitSaveResult>
- *   ackUnitDiffs(input: { confirmId; unitId; acks: DiffItem[]; actor }): Promise<SalesUnitSaveResult>        ← "다시 확인 필요" [확인]
+ *   ackUnitDiffs(input: { confirmId; unitId; acks: DiffItem[]; actor }): Promise<SalesUnitSaveResult>        ← 칸의 "요청과 다름" [확인]
+ *   ackDiffsForPrint(input: { confirmId; acks: { unitId; diffs: DiffItem[] }[]; actor }): Promise<SalesUnitSaveResult>
+ *       ← 출력 창 [인쇄](IT 기재) 전 "영업 요청과 다른 칸 n개" [맞아요, 인쇄] — 종이에 나가는 칸 전부를 한 번에 확인 기록(diff_ack)
+ *   addSalesUnit(input: { confirmId; itemIndex; actor }) / removeAddedSalesUnit(input: { confirmId; unitId; expectedUpdatedAt; actor })
+ *       ← `＋ 줄 추가`·`✕ 줄 빼기`(납품 확인서의 장비·모니터·기타 줄만 — slots.addLineAllowed)
  *   moveOrphanUnit(input: { confirmId; unitId; toSlotKey; toUnitNo; actor }) / deleteOrphanUnit(input: { confirmId; unitId; actor })
  *       : Promise<SalesUnitSaveResult>
  *   saveSalesWork(input: { confirmId; expectedUpdatedAt: string | null;
@@ -949,6 +963,21 @@ export interface SalesSvcSheet {
   rows: string[][];
 }
 
+/**
+ * 납품 '추가 출고 기기' 장 — `＋ 줄 추가`로 영업 수량보다 더 적은 기기(SalesSlot.added). 영업 종이엔 그 줄이 없으니
+ * 마지막 영업 장 뒤(2면이 있으면 그 앞)에 같은 틀·색으로 붙임(itFill.applyFillPlan — DOM 으로만). 칸 값은 SalesFillCell(요청과 다른 토막 강조).
+ */
+export interface SalesExtraSheet {
+  title: string;
+  company: string;
+  deliveryDate: string;
+  docNo: string;
+  /** 순 · 품목 · 제조사 · 모델명 · 자산번호 · S/N · 출고 사양 */
+  columns: string[];
+  /** 대마다 한 줄(품목 순서 → 칸 번호 순), 칸 수 = columns 수. 빈 칸 = parts [] (손으로 적기) */
+  rows: SalesFillCell[][];
+}
+
 /** printFill.buildFillPlan 결과 — 값은 전부 그냥 글자(넣는 쪽이 textContent 로) */
 export interface SalesFillPlan {
   /** itFill.fillKey(mark, item, unit) 열쇠 → 칸 값. 원본 모드면 {} */
@@ -959,6 +988,8 @@ export interface SalesFillPlan {
   stamp: string;
   /** svc 일 때만 */
   svcSheet: SalesSvcSheet | null;
+  /** 납품에 추가한 줄(SalesSlot.added)이 있을 때만 — 그 칸들은 cells 에 안 들어감(실시간 HTML 에 칸이 없는 게 정상 → missing 아님) */
+  extraSheet: SalesExtraSheet | null;
   /** 사본으로 그릴 때 doc 복사본 region 이 비면 넣을 추정 지역(D21) — 영업 실시간 HTML 엔 안 씀 */
   regionFill: string | null;
   notes: SalesPrintNote[];

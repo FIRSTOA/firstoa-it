@@ -27,6 +27,7 @@
  *   sandbox 문서 출처는 'null' 이라 보낼 때 targetOrigin '*'. 받는 쪽은 e.source === iframe.contentWindow 인 것만.
  */
 import type {
+  SalesExtraSheet,
   SalesFillApplyResult,
   SalesFillCell,
   SalesFillPlan,
@@ -186,6 +187,8 @@ const FILL_CSS = `
 .itx-page .itx-tbl td { font-weight:700; color:#000; }
 .itx-page .itx-tbl td.c { text-align:center; }
 .itx-page .itx-tbl td.nm { font-weight:600; }
+.itx-page .itx-tbl .itx-e { font-weight:900; color:#000; }
+.itx-page .itx-tbl .itx-e u { text-decoration:underline; text-decoration-thickness:1.4px; text-underline-offset:1.2px; }
 `;
 
 /**
@@ -291,6 +294,8 @@ function make<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, cls?
 const SHEET_COL_WIDTHS: Record<number, string[]> = {
   4: ['9mm', '66mm', '42mm', ''],
   5: ['9mm', '46mm', '26mm', '32mm', ''],
+  // '추가 출고 기기'(순·품목·제조사·모델명·자산번호·S/N·출고 사양)
+  7: ['8mm', '22mm', '19mm', '32mm', '22mm', '30mm', ''],
 };
 
 /** 유지보수·소프트웨어 'IT 기재 명세' 장(E20) — 영업 마지막 장 뒤에, 같은 .page 틀·색. 28줄 넘으면 다음 장(머리줄 반복) */
@@ -382,6 +387,124 @@ function appendSvcSheet(doc: Document, sheet: SalesSvcSheet, stamp: string): num
   return chunks.length;
 }
 
+/** 표 칸 하나에 SalesFillCell(요청과 다른 토막 = 굵게+밑줄) — textContent·createElement 로만 */
+function fillTd(doc: Document, td: Element, cell: SalesFillCell | undefined): void {
+  for (const p of cell?.parts ?? []) {
+    if (!p || typeof p.text !== 'string' || !p.text) continue;
+    if (p.emph) {
+      const b = make(doc, 'b', 'itx-e');
+      b.appendChild(make(doc, 'u', undefined, p.text));
+      td.appendChild(b);
+    } else {
+      td.appendChild(doc.createTextNode(p.text));
+    }
+  }
+  const sub = String(cell?.sub ?? '').trim();
+  if (sub) td.appendChild(doc.createTextNode(`${td.textContent ? ' ' : ''}${sub}`));
+}
+
+/**
+ * 납품 '추가 출고 기기' 장 — `＋ 줄 추가`로 영업 수량보다 더 적은 기기(영업 종이엔 그 줄이 없음, 2026-11-27 사용자 결정).
+ * 영업 첫 장과 같은 틀·색(.page 클래스 그대로 + 로고)으로 마지막 영업 장 뒤에 — 2면(출고·설치, 우리 사본에만)이 있으면 그 앞.
+ * 28줄 넘으면 다음 장(머리줄 반복). 값은 textContent·createElement 로만.
+ */
+function appendExtraSheet(doc: Document, sheet: SalesExtraSheet, stamp: string): number {
+  const body = doc.body;
+  if (!body || !sheet.rows.length) return 0;
+  const pages = body.querySelectorAll('.page');
+  const first = pages[0] ?? null;
+  const last = pages[pages.length - 1] ?? null;
+  const baseClass = first
+    ? first.className
+        .split(/\s+/)
+        .filter((c) => c && c !== 'itx-page')
+        .join(' ')
+    : '';
+  const pageClass = `${/(^|\s)page(\s|$)/.test(baseClass) ? baseClass : `page ${baseClass}`.trim()} itx-page`;
+  const logo = first ? first.querySelector('.top img') : null;
+  // 2면(출고·설치 — 출고 준비자 칸이 있는 장) 앞에, 없으면 마지막 장 뒤
+  const backMark = body.querySelector(`[${IT_ATTR.mark}="${IT_MARK.preparer}"]`);
+  const backPage = backMark ? backMark.closest('.page') : null;
+  // 영업 장이 body 바로 아래가 아니어도(감싼 div) 같은 부모에 붙임
+  const parent: Node = (backPage ?? last)?.parentNode ?? body;
+  let anchor: Node | null = backPage ?? (last ? last.nextSibling : null);
+  const chunks: SalesFillCell[][][] = [];
+  for (let i = 0; i < sheet.rows.length; i += IT_SHEET_ROWS) chunks.push(sheet.rows.slice(i, i + IT_SHEET_ROWS));
+  const widths = SHEET_COL_WIDTHS[sheet.columns.length] ?? [];
+
+  chunks.forEach((chunk, k) => {
+    const page = make(doc, 'div', pageClass);
+    page.setAttribute(OWN_ATTR, '1');
+
+    const top = make(doc, 'div', 'top');
+    if (logo) top.appendChild(logo.cloneNode(false));
+    const nmBox = make(doc, 'div');
+    nmBox.appendChild(make(doc, 'div', 'nm', '(주)퍼스트전산'));
+    nmBox.appendChild(make(doc, 'div', 'tl', '1면 품목의 별첨 · 영업 요청 수량보다 더 내보낸 기기'));
+    top.appendChild(nmBox);
+    page.appendChild(top);
+
+    const bar = make(doc, 'div', 'bar');
+    bar.appendChild(make(doc, 'div', 't', chunks.length > 1 ? `${sheet.title} (${k + 1}/${chunks.length})` : sheet.title));
+    page.appendChild(bar);
+
+    const kv = make(doc, 'table', 'kv box');
+    const tr = make(doc, 'tr');
+    tr.appendChild(make(doc, 'th', undefined, '상호'));
+    tr.appendChild(make(doc, 'td', 'co', sheet.company));
+    tr.appendChild(make(doc, 'th', undefined, '납품일'));
+    tr.appendChild(make(doc, 'td', undefined, sheet.deliveryDate));
+    tr.appendChild(make(doc, 'th', undefined, '번호'));
+    tr.appendChild(make(doc, 'td', undefined, sheet.docNo));
+    kv.appendChild(tr);
+    page.appendChild(kv);
+
+    const box = make(doc, 'div', 'box');
+    const h3 = make(doc, 'h3', undefined, '추가 출고 기기 · 대마다 한 줄 ');
+    h3.appendChild(make(doc, 'small', undefined, '품목 번호 = 1면 품목 번호 · 빈 칸 = 출고·설치 때 직접 기재'));
+    box.appendChild(h3);
+    const tbl = make(doc, 'table', 'itx-tbl');
+    if (widths.length) {
+      const cg = make(doc, 'colgroup');
+      for (const w of widths) {
+        const col = make(doc, 'col');
+        if (w) col.style.width = w;
+        cg.appendChild(col);
+      }
+      tbl.appendChild(cg);
+    }
+    const thead = make(doc, 'thead');
+    const hr = make(doc, 'tr');
+    for (const c of sheet.columns) hr.appendChild(make(doc, 'th', undefined, c));
+    thead.appendChild(hr);
+    tbl.appendChild(thead);
+    const tbody = make(doc, 'tbody');
+    for (const r of chunk) {
+      const row = make(doc, 'tr');
+      sheet.columns.forEach((_, ci) => {
+        const td = make(doc, 'td', ci === 0 ? 'c' : ci === 1 ? 'nm' : undefined);
+        fillTd(doc, td, r[ci]);
+        row.appendChild(td);
+      });
+      tbody.appendChild(row);
+    }
+    tbl.appendChild(tbody);
+    box.appendChild(tbl);
+    page.appendChild(box);
+
+    const foot = make(doc, 'div', 'foot');
+    const left = make(doc, 'span', undefined, [sheet.docNo, sheet.company].filter(Boolean).join(' · '));
+    if (stamp) putStamp(doc, left, stamp);
+    foot.appendChild(left);
+    foot.appendChild(make(doc, 'span', undefined, '1면 품목의 별첨 · IT 기재'));
+    page.appendChild(foot);
+
+    parent.insertBefore(page, anchor);
+    anchor = backPage ?? page.nextSibling;
+  });
+  return chunks.length;
+}
+
 /**
  * 영업 양식 그림(왼쪽 위 토끼 로고 `/confirm/rabbit.png`)은 영업 웹앱 주소로 오는데, 그 주소는 영업 로그인이 있어야 열림
  * (로그인 없으면 307 → /login — 우리 출력 창에선 그림이 깨져 X, 2026-11-27 사용자 신고).
@@ -406,7 +529,7 @@ function useOwnSalesAssets(doc: Document): void {
 }
 
 /**
- * 표시 칸에 plan 의 값 넣기 + 우리 CSS·스크립트(+ svc 면 'IT 기재 명세' 장).
+ * 표시 칸에 plan 의 값 넣기 + 우리 CSS·스크립트(+ svc 면 'IT 기재 명세' 장, 납품에 추가한 줄이 있으면 '추가 출고 기기' 장).
  * missing = 넣을 값이 있는데 갈 칸을 못 찾은 열쇠들(값 없음) — 실시간 HTML 에서 1개라도 있으면 E7 고르기.
  * 맨 먼저 영업 주소 그림을 우리 사본으로 바꿔 끼움(useOwnSalesAssets).
  */
@@ -461,6 +584,8 @@ export function applyFillPlan(doc: Document, plan: SalesFillPlan, renderer: Sale
   }
 
   if (plan.svcSheet && renderer === 'svc') appendSvcSheet(doc, plan.svcSheet, stamp.trim() ? stamp : '');
+  // 납품 `＋ 줄 추가` 기기 — 표시 칸이 아니라 새 장이라 missing 으로 안 셈(영업 HTML 에 그 줄이 없는 게 정상)
+  if (plan.extraSheet && plan.extraSheet.rows.length) appendExtraSheet(doc, plan.extraSheet, stamp.trim() ? stamp : '');
 
   // 우리 CSS·스크립트 — <head> 끝(영업 <style> 뒤라 같은 강도면 우리 것이 이김)
   const head = doc.head ?? doc.documentElement;

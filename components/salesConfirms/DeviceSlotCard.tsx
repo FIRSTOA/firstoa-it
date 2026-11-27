@@ -31,8 +31,10 @@ export interface DeviceSlotCardProps {
   disabled: boolean;
   saveUnit: SaveUnit;
   lookupAsset: LookupAsset;
-  /** "다시 확인 필요" [확인] */
+  /** "요청과 다름" [확인](인쇄 전에 미리 확인하고 싶을 때 — 안 눌러도 인쇄 때 한 번에 물음) */
   onRecheck: (slot: SalesSlot) => void;
+  /** `＋ 줄 추가`한 칸(slot.added)의 `✕ 줄 빼기` — 없으면 단추 없음 */
+  onRemove?: () => void;
   /** 이 기기의 체크 항목(없으면 체크 칸 없음) */
   checkItems: { label: string }[];
   /** 이 확인서 안 다른 칸에도 같은 자산번호가 있음 */
@@ -97,6 +99,7 @@ export default function DeviceSlotCard({
   assetElsewhere,
   headLabel,
   onDirtyChange,
+  onRemove,
 }: DeviceSlotCardProps) {
   const unit = slot.unit;
   const rule = ITEM_KIND_RULES[kind];
@@ -221,7 +224,7 @@ export default function DeviceSlotCard({
         }
         if (!cur.serial.trim() && res.serials[0]) over.serial = res.serials[0];
         // 출고사양 칸(CPU·RAM·SSD·HDD·그래픽)도 IT재고 사양 글자에서 채움 — 빈 칸만, 읽기 자신 없으면 안 채움(stockSpec.ts).
-        // 영업 요청과 다르면 저장 때 지금처럼 확인 창이 뜸(SSD 500=512 같은 급은 같다고 봄 — specCompare).
+        // 영업 요청과 다르면 노랗게 표시되고 인쇄할 때 한 번에 확인(SSD 500=512 같은 급은 같다고 봄 — specCompare).
         if (keys.length > 0 && res.specHint) {
           const stock = specFromStockLabel(res.specHint);
           const next = { ...cur.spec };
@@ -260,13 +263,29 @@ export default function DeviceSlotCard({
     <div ref={rootRef} id={id} className={`sc-slot${needCount > 0 ? ' sc-slot-warn' : ''}`}>
       <div className="sc-slot-head">
         <b>{headLabel ?? `${slot.unitNo}번`}{kind === 'maintenance' ? ' (유지보수 대상)' : ''}</b>
+        {slot.added && (
+          <span className="sc-pill sc-pill-indigo" title="영업 수량보다 더 내보내는 기기 — 종이 뒤 '추가 출고 기기' 장에 나가요">
+            추가한 줄
+          </span>
+        )}
         {statusText && <span className={`sc-save-state ${status}`}>{statusText}</span>}
-        {needCount > 0 && unit && (
+        {((needCount > 0 && unit) || onRemove) && (
           <span className="sc-slot-recheck">
-            <span className="sc-pill sc-pill-amber">다시 확인 필요 {needCount}</span>
-            <button type="button" className="btn btn-ghost sc-btn" disabled={disabled} onClick={() => onRecheck(slot)}>
-              확인
-            </button>
+            {needCount > 0 && unit && (
+              <>
+                <span className="sc-pill sc-pill-amber" title="저장은 됐어요 — 인쇄할 때 한 번에 확인해요">
+                  요청과 다름 {needCount}
+                </span>
+                <button type="button" className="btn btn-ghost sc-btn" disabled={disabled} onClick={() => onRecheck(slot)}>
+                  확인
+                </button>
+              </>
+            )}
+            {onRemove && (
+              <button type="button" className="btn btn-ghost sc-btn sc-btn-danger" disabled={disabled} onClick={onRemove}>
+                ✕ 줄 빼기
+              </button>
+            )}
           </span>
         )}
       </div>

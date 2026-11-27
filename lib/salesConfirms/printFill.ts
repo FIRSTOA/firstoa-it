@@ -9,6 +9,8 @@
  *     소프트웨어: 제조사·제품명·설치 PC(자산번호 칸)·"키 …"(시리얼 칸 — keys 'shown' 일 때만, E16)
  *     요청과 다른 칸만 강조(같음 판정 = specCompare — D27 확인 창과 같은 기준), 출고 사양은 다른 토막만(E14)
  *     E15: 자산번호나 시리얼(소프트웨어는 설치 PC나 키)을 적은 기기의 빈 제조사·모델명 = 영업 요청 값, 빈 출고 사양 = '요청과 같음'
+ *     `＋ 줄 추가`한 칸(SalesSlot.added — 2026-11-27 사용자 결정): 영업 종이엔 그 줄이 없음 → cells 에 안 넣고(missing 아님)
+ *     extraSheet('추가 출고 기기' 장 — 순·품목·제조사·모델명·자산번호·S/N·출고 사양, 품목 순 → 칸 번호 순)로. 출고 사양은 요청 값에 고친 칸을 덮은 한 줄(장만 따로 보므로).
  *   교체(swap) — 교체 후 열(E19): after-sn·after-asset·after-maker·after-model 은 비었으면 IT 값, 다르면 칸 아래 "출고 ○○",
  *     after-hw = 영업 값 + IT가 고친 사양이 있으면 아래 "출고: I5/16GB/512GB". 우리 칸 1개 = 교체 후 1대.
  *   유지보수·소프트웨어(svc) — 영업 종이엔 기기별 칸이 없음 → 'IT 기재 명세' 장(svcSheet, E20). 꼬리 stamp 만 영업 장에.
@@ -31,6 +33,7 @@ import { IT_MARK, fillKey, type ItMark } from './salesForm/itFill';
 import { sameSpecValue } from './specCompare';
 import type {
   DiffField,
+  SalesExtraSheet,
   SalesFillCell,
   SalesFillPart,
   SalesFillPlan,
@@ -202,6 +205,57 @@ function confirmUnitCells(line: SalesSlotLine, slot: SalesSlot, ctx: Ctx): Parti
   return out;
 }
 
+// ───────── 납품: `＋ 줄 추가`한 칸 → '추가 출고 기기' 장 ─────────
+
+/** '추가 출고 기기' 장 머리줄 — itFill 의 칸 폭(7열)과 같이 */
+export const EXTRA_SHEET_COLUMNS = ['순', '품목', '제조사', '모델명', '자산번호', 'S/N', '출고 사양'] as const;
+export const EXTRA_SHEET_TITLE = '추가 출고 기기';
+
+const blankCell = (): SalesFillCell => ({ parts: [], sub: '' });
+
+/**
+ * 장의 출고 사양 칸 — 요청 사양에 IT가 고친 칸을 덮은 한 줄(요청과 다른 토막만 강조). 장은 따로 보므로 '요청과 같음' 대신 값 그대로.
+ * 자산번호·시리얼도 고친 사양도 없는 빈 줄이면 null(손으로 적기).
+ */
+function extraSpecCell(item: { spec: SalesSpec }, override: SalesSpec, has: boolean): SalesFillCell | null {
+  const tokens: SalesFillPart[] = [];
+  let overridden = false;
+  for (const k of SPEC_LINE_ORDER) {
+    const r = specOf(item.spec, k);
+    const o = specOf(override, k);
+    if (o) overridden = true;
+    const v = o || r;
+    if (!v) continue;
+    if (tokens.length) tokens.push({ text: '/', emph: false });
+    tokens.push({ text: v, emph: !!o && !!r && !same(`spec:${k}` as DiffField, r, o) });
+  }
+  if (!tokens.length || (!has && !overridden)) return null;
+  return { parts: mergeParts(tokens), sub: '' };
+}
+
+/** 추가한 칸 한 줄(7칸 — EXTRA_SHEET_COLUMNS 순서). 빈 칸은 parts [] */
+function extraRow(seq: number, line: SalesSlotLine, slot: SalesSlot, ctx: Ctx): SalesFillCell[] {
+  const u = slot.unit;
+  const item = line.item;
+  const used = { e15: false };
+  const asset = tr(u?.assetId);
+  const serial = tr(u?.serial);
+  const has = !!(asset || serial);
+  const maker = u ? nameCell('maker', tr(item.maker), tr(u.actualMaker), has, used) : null;
+  const model = u ? nameCell('model', tr(item.model), tr(u.actualModel), has, used) : null;
+  const spec = u && line.kind === 'device' && hasSpec(item.cat) ? extraSpecCell(item, u.specOverride ?? {}, has) : null;
+  if (used.e15) ctx.e15 += 1;
+  return [
+    plainCell(String(seq)) ?? blankCell(),
+    plainCell(`${line.itemIndex + 1}. ${catOf(item.cat)}`) ?? blankCell(),
+    maker ?? blankCell(),
+    model ?? blankCell(),
+    plainCell(asset) ?? blankCell(),
+    plainCell(serial) ?? blankCell(),
+    spec ?? blankCell(),
+  ];
+}
+
 // ───────── 교체: 교체 후 열 ─────────
 
 function swapCells(after: Json, slot: SalesSlot | null): Partial<Record<ItMark, SalesFillCell>> {
@@ -278,7 +332,7 @@ export function buildFillPlan(input: SalesPrintInput): SalesFillPlan {
   const notes: SalesPrintNote[] = [];
   const warn = (text: string) => notes.push({ tone: 'warn', text });
   const info = (text: string) => notes.push({ tone: 'info', text });
-  const plan: SalesFillPlan = { cells: {}, back: null, stamp: '', svcSheet: null, regionFill: null, notes, blocked: null };
+  const plan: SalesFillPlan = { cells: {}, back: null, stamp: '', svcSheet: null, extraSheet: null, regionFill: null, notes, blocked: null };
 
   const renderer = c.renderer ?? null;
   const doc = isObj(c.formDoc) ? c.formDoc : null;
@@ -334,8 +388,12 @@ export function buildFillPlan(input: SalesPrintInput): SalesFillPlan {
     const isIt = doc.kind !== 'mfp';
     let mismatch = 0;
     let noRow = 0;
-    if (!isIt) info('복합기 확인서로 왔어요 — 영업 양식 그대로 나가고 IT 칸은 채우지 않아요');
-    else {
+    const extraRows: SalesFillCell[][] = [];
+    const addedCount = detail.lines.reduce((sum, l) => sum + l.slots.filter((s) => s.added).length, 0);
+    if (!isIt) {
+      info('복합기 확인서로 왔어요 — 영업 양식 그대로 나가고 IT 칸은 채우지 않아요');
+      if (addedCount) warn(`복합기 확인서라 추가한 줄 ${addedCount}대는 종이에 안 나가요`);
+    } else {
       for (const line of detail.lines) {
         const di = docItems[line.itemIndex];
         if (!isObj(di) || catOf(di.cat) !== catOf(line.item.cat)) {
@@ -345,6 +403,11 @@ export function buildFillPlan(input: SalesPrintInput): SalesFillPlan {
         const n = line.itemIndex + 1; // 영업 양식 td.n 품목 번호(별지까지 이어짐)
         const salesRows = Math.max(1, Math.floor(Number(di.qty) || 1));
         for (const s of line.slots) {
+          // `＋ 줄 추가`한 칸 — 영업 종이엔 줄이 없음 → '추가 출고 기기' 장(cells 에 안 넣음 = 못 넣은 값으로 안 셈)
+          if (s.added) {
+            extraRows.push(extraRow(extraRows.length + 1, line, s, ctx));
+            continue;
+          }
           const cells = confirmUnitCells(line, s, ctx);
           if (!Object.keys(cells).length) continue;
           if (s.unitNo > salesRows) {
@@ -357,6 +420,18 @@ export function buildFillPlan(input: SalesPrintInput): SalesFillPlan {
     }
     if (mismatch) warn(`영업 양식의 품목 순서와 기기 칸이 맞지 않는 품목 ${mismatch}개는 IT 칸을 비워 둬요 — 상세를 새로 읽은 뒤 다시 열어 주세요`);
     if (noRow) warn(`영업 양식에 줄이 없는 기기 ${noRow}대는 종이에 안 나가요 — 영업 수량을 확인해 주세요`);
+    if (extraRows.length) {
+      const sheet: SalesExtraSheet = {
+        title: EXTRA_SHEET_TITLE,
+        company: tr(doc.company) || c.company,
+        deliveryDate: tr(doc.deliveryDate) || (c.deliveryDate ?? ''),
+        docNo: tr(doc.no) || c.docNo,
+        columns: [...EXTRA_SHEET_COLUMNS],
+        rows: extraRows,
+      };
+      plan.extraSheet = sheet;
+      info(`영업 수량보다 더 적은 기기 ${extraRows.length}대는 영업 종이 뒤 '${EXTRA_SHEET_TITLE}' 장에 나가요`);
+    }
     if (options.withBack) {
       plan.back = {
         preparer: detail.work.processors.map(tr).filter(Boolean).join(', '),
@@ -392,7 +467,7 @@ export function buildFillPlan(input: SalesPrintInput): SalesFillPlan {
   if (detail.salesChanged) {
     warn(`영업에서 고친 판(v${detail.salesChanged.fromVer} → v${detail.salesChanged.toVer})을 아직 '확인함' 안 했어요 — 상세에서 무엇이 바뀌었나 먼저 보세요`);
   }
-  if (recheck) warn(`영업 요청이 바뀌어 다시 확인이 필요한 기기 칸 ${recheck}개 — 상세에서 확인해 주세요(종이엔 지금 값이 그대로 나가요)`);
+  if (recheck) warn(`영업 요청과 다른 기기 칸 ${recheck}개 — [인쇄]를 누르면 한 번에 확인해요(종이엔 지금 값이 그대로 나가요)`);
   if (ctx.e15) {
     info(`자산번호·시리얼만 적은 기기 ${ctx.e15}대는 출고 칸의 제조사·모델명을 영업 요청 그대로, 출고 사양을 '${E15_SAME_SPEC}'으로 적어요 — 사양이 다르면 상세에서 꼭 고치세요`);
   }

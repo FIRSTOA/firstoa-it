@@ -7,17 +7,20 @@ import { acknowledgeSalesConfirmChange } from '@/app/confirm-form/salesActions';
 import {
   ackSnapshot,
   ackUnitDiffs,
+  addSalesUnit,
   applyLineValues,
   deleteOrphanUnit,
   lookupSalesUnitAsset,
   moveOrphanUnit,
   openSalesConfirm,
+  removeAddedSalesUnit,
   saveSalesUnit,
   saveSalesWork,
 } from '@/app/confirm-form/salesDetailActions';
 import { getConfirmLicenseState, pushUnitsToLedger, saveLineLicenseKey, saveUnitLicenseKey } from '@/app/confirm-form/salesLicenseActions';
 import { ITEM_KIND_LABEL, ITEM_KIND_RULES, checkGroupFor, type ItemKind } from '@/lib/salesConfirms/itemKind';
 import { hasSpec } from '@/lib/salesConfirms/salesForm/confirm';
+import { ADDED_LINE_MAX, addLineAllowed, addedSlotCount, unackedDiffsFor, unitHasContent } from '@/lib/salesConfirms/slots';
 import {
   CHECK_GROUP_PER_CONFIRM,
   SALES_CONFIRM_STATUSES,
@@ -43,10 +46,8 @@ import ChecklistPanel from './ChecklistPanel';
 import DeviceSlotCard from './DeviceSlotCard';
 import DiffConfirmDialog from './DiffConfirmDialog';
 import {
-  fromKstInput,
   minutesText,
   slotDomId,
-  toKstInput,
   unitFilled,
   type LookupAsset,
   type SaveUnit,
@@ -202,6 +203,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
     return new Promise<boolean>((resolve) => setAckReq({ items, modelLabel, resolve }));
   }, []);
 
+  // 저장·확인 뒤 돌아온 칸을 붙임 — "요청과 다름"은 서버와 같은 순수 함수로 그 칸만 다시 계산(저장은 더는 확인을 겸하지 않음, 2026-11-27)
   const applyUnits = useCallback((units: SalesUnitRow[]) => {
     setData((d) => ({
       ...d,
@@ -209,7 +211,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         ...l,
         slots: l.slots.map((s) => {
           const u = units.find((x) => x.slotKey === s.slotKey && x.unitNo === s.unitNo);
-          return u ? { ...s, unit: u, unackedDiffs: [] } : s;
+          return u ? { ...s, unit: u, unackedDiffs: unackedDiffsFor(l.kind, l.item, u) } : s;
         }),
       })),
       orphans: d.orphans.map((o) => units.find((x) => x.id === o.id) ?? o),
@@ -295,7 +297,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
     [confirmId],
   );
 
-  // "다시 확인 필요" [확인]
+  // 칸의 "요청과 다름" [확인] — 인쇄 전에 미리 확인하고 싶을 때(안 눌러도 인쇄 때 한 번에 물음)
   const recheck = useCallback(
     (slot: SalesSlot) => {
       const unit = slot.unit;
@@ -365,6 +367,50 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
       }),
     [confirmId, reload, runUnitAction, serial, toast],
   );
+
+  // ───── `＋ 줄 추가` · `✕ 줄 빼기` (2026-11-27 사용자 결정 — 영업 수량보다 더 내보내는 기기) ─────
+  const [addingLine, setAddingLine] = useState<number | null>(null);
+  function addLine(line: SalesSlotLine) {
+    if (addingLine !== null) return;
+    setAddingLine(line.itemIndex);
+    void serial(async () => {
+      try {
+        const r = await runUnitAction(
+          (_acks, who) => addSalesUnit({ confirmId, itemIndex: line.itemIndex, actor: who }),
+          modelLabelOf(line.itemIndex),
+        );
+        if (!r.ok) return;
+        const fresh = await reload(true);
+        toast.show('줄을 하나 더했어요 — 자산번호를 적어 주세요.');
+        // 새 칸(그 줄의 마지막 추가 칸)으로 — 그려진 뒤에
+        const added = fresh?.lines.find((l) => l.itemIndex === line.itemIndex)?.slots.filter((s) => s.added) ?? [];
+        const last = added[added.length - 1];
+        if (last) window.setTimeout(() => scrollToSlot(line.itemIndex, last.unitNo), 60);
+      } finally {
+        setAddingLine(null);
+      }
+    });
+  }
+  function removeLine(line: SalesSlotLine, slot: SalesSlot) {
+    const u = slot.unit;
+    if (!u || !slot.added) return;
+    if (unitHasContent(u)) {
+      const what = u.assetId ? `자산번호 ${u.assetId} 등 ` : '';
+      if (!window.confirm(`${line.item.cat || '기타'} ${slot.unitNo}번(추가한 줄)에 적은 ${what}값도 같이 지워져요. 이 줄을 뺄까요?`)) return;
+    }
+    void serial(async () => {
+      // 저장 줄 뒤에서 — 방금 저장한 값의 updated_at 으로
+      const cur = findSlot(dataRef.current, { itemIndex: line.itemIndex, slotKey: slot.slotKey, unitNo: slot.unitNo })?.unit ?? u;
+      const r = await runUnitAction(
+        (_acks, who) => removeAddedSalesUnit({ confirmId, unitId: cur.id, expectedUpdatedAt: cur.updatedAt, actor: who }),
+        modelLabelOf(line.itemIndex),
+      );
+      if (r.ok) {
+        await reload(true);
+        toast.show('줄을 뺐어요.');
+      }
+    });
+  }
 
   // ───── 처리 상태·처리자·시각·비고·건 단위 체크 (③) ─────
   const saveWork = useCallback(
@@ -621,7 +667,11 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
     for (const l of data.lines) {
       for (const s of l.slots) {
         if (s.unit && (s.unit.assetId || s.unit.serial || s.unit.actualModel || s.unit.note)) continue;
-        out.push({ slotKey: s.slotKey, unitNo: s.unitNo, label: `${l.itemIndex + 1}번 품목 ${l.item.cat || '기타'} · ${s.unitNo}번 칸` });
+        out.push({
+          slotKey: s.slotKey,
+          unitNo: s.unitNo,
+          label: `${l.itemIndex + 1}번 품목 ${l.item.cat || '기타'} · ${s.unitNo}번 칸${s.added ? ' (추가한 줄)' : ''}`,
+        });
       }
     }
     return out;
@@ -705,20 +755,6 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
     ? [c.deletedAt ? fmtDateTime(c.deletedAt) : '', (c.deletedBy ?? '').trim()].filter((v) => v && v !== '-').join(' · ')
     : '';
   const dateLabel = !isOther ? '납품/교체일' : ['판매', '철수', '이전'].includes(c.type.trim()) ? `${c.type.trim()}일` : '날짜';
-  async function stamp(which: 'startedAt' | 'finishedAt') {
-    const now = new Date().toISOString();
-    const patch: WorkPatch = which === 'startedAt' ? { startedAt: now } : { finishedAt: now };
-    if (which === 'startedAt' && status === '접수') patch.status = '준비중';
-    if (which === 'finishedAt' && (status === '접수' || status === '준비중')) patch.status = '준비완료';
-    await saveWork(patch);
-  }
-  async function editTime(which: 'startedAt' | 'finishedAt' | 'shippedAt', v: string) {
-    const iso = fromKstInput(v);
-    if (!iso) return; // 지운 값은 보내지 않음(그대로)
-    const cur = data.work[which];
-    if (cur && Date.parse(cur) === Date.parse(iso)) return;
-    await saveWork({ [which]: iso } as WorkPatch);
-  }
   function toggleProcessor(name: string) {
     const list = data.work.processors.includes(name) ? data.work.processors.filter((p) => p !== name) : [...data.work.processors, name];
     void saveWork({ processors: list });
@@ -1019,7 +1055,9 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
       )}
       {!isOther && recheckSlots > 0 && (
         <div className="ct-band warn" role="status">
-          <span>영업 요청이 바뀌어 다시 확인할 칸이 {recheckSlots}개 있어요. 칸의 [확인]을 눌러 주세요(값은 안 바뀌어요).</span>
+          <span>
+            영업 요청과 다른 칸이 {recheckSlots}개 있어요(노란 칸). 저장은 됐어요 — [🖨 확인서 출력]에서 [인쇄]를 누를 때 한 번에 확인해요.
+          </span>
           <button type="button" className="btn btn-ghost sc-btn" onClick={goRecheck}>
             첫 칸으로 →
           </button>
@@ -1053,11 +1091,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
                 )}
               </div>
             </div>
-            <div className="sc-times">
-              <TimeField label="시작" iso={data.work.startedAt} onNow={() => void stamp('startedAt')} onEdit={(v) => void editTime('startedAt', v)} />
-              <TimeField label="끝" iso={data.work.finishedAt} onNow={() => void stamp('finishedAt')} onEdit={(v) => void editTime('finishedAt', v)} />
-              <TimeField label="출고" iso={data.work.shippedAt} onEdit={(v) => void editTime('shippedAt', v)} />
-            </div>
+            {/* 시작·끝·출고 시각 칸은 화면에서 뺌(2026-11-27 사용자) — 처리여부를 바꾸면 서버가 빈 시각을 저절로 적음(saveSalesWork) */}
           </>
         )}
         {isOther && data.work.processors.length > 0 && <div className="sc-muted">처리자: {data.work.processors.join(', ')} (목록에서 바꿔요)</div>}
@@ -1077,6 +1111,8 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         data.lines.map((line) => {
           const item = line.item;
           const kind: ItemKind = line.kind;
+          // `＋ 줄 추가` — 납품 확인서의 장비·모니터·기타 줄만(서버도 같은 판정 slots.addLineAllowed)
+          const lineAddable = addLineAllowed(c, kind);
           const specChips: [string, string][] = [
             ...SALES_SPEC_KEYS.filter((k) => (item.spec[k] ?? '').trim()).map((k): [string, string] => [k, item.spec[k] ?? '']),
             ...Object.entries(item.specExtra ?? {}),
@@ -1178,9 +1214,23 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
                         assetElsewhere={data.assetElsewhere}
                         headLabel={isSwap ? (line.slots.length > 1 ? `교체 후 기기 ${slot.unitNo}` : '교체 후 기기') : undefined}
                         onDirtyChange={onDirtyChange}
+                        onRemove={slot.added && slot.unit ? () => removeLine(line, slot) : undefined}
                       />
                     ),
                   )}
+                </div>
+              )}
+              {lineAddable && (
+                <div className="sc-add-line">
+                  <button
+                    type="button"
+                    className="btn btn-ghost sc-btn"
+                    disabled={unitsDisabled || addingLine !== null || addedSlotCount(line) >= ADDED_LINE_MAX}
+                    onClick={() => addLine(line)}
+                  >
+                    {addingLine === line.itemIndex ? '줄 추가 중…' : '＋ 줄 추가'}
+                  </button>
+                  <span className="sc-muted">영업 수량({item.qty}대)보다 더 내보낼 때 — 종이 뒤 &lsquo;추가 출고 기기&rsquo; 장에 나가요</span>
                 </div>
               )}
             </section>
@@ -1350,6 +1400,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
           onClose={() => setPrintMode(null)}
           onWarn={toast.warn}
           onSalesChanged={reloadForPrint}
+          onUnitsAcked={applyUnits}
           onPrinted={(info) =>
             setData((d) => ({
               ...d,
@@ -1487,18 +1538,3 @@ function SwapBeforeBox({ before }: { before: unknown }) {
   );
 }
 
-function TimeField({ label, iso, onNow, onEdit }: { label: string; iso: string | null; onNow?: () => void; onEdit: (v: string) => void }) {
-  const [v, setV] = useState(toKstInput(iso));
-  useEffect(() => setV(toKstInput(iso)), [iso]);
-  return (
-    <div className="sc-time">
-      <label>{label}</label>
-      <input type="datetime-local" className="sc-in" value={v} onChange={(e) => setV(e.target.value)} onBlur={() => onEdit(v)} />
-      {onNow && (
-        <button type="button" className="btn btn-ghost sc-btn" onClick={onNow}>
-          지금
-        </button>
-      )}
-    </div>
-  );
-}

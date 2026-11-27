@@ -141,7 +141,9 @@ export default function SoftwareSlotCard(p: SoftwareSlotCardProps) {
         {statusText && <span className={`sc-save-state ${status}`}>{statusText}</span>}
         {needCount > 0 && unit && (
           <span className="sc-slot-recheck">
-            <span className="sc-pill sc-pill-amber">다시 확인 필요 {needCount}</span>
+            <span className="sc-pill sc-pill-amber" title="저장은 됐어요 — 인쇄할 때 한 번에 확인해요">
+              요청과 다름 {needCount}
+            </span>
             <button type="button" className="btn btn-ghost sc-btn" disabled={disabled} onClick={() => onRecheck(slot)}>
               확인
             </button>

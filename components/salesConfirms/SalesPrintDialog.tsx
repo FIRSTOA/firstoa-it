@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { markSalesConfirmPrinted } from '@/app/confirm-form/salesDetailActions';
+import { ackDiffsForPrint, markSalesConfirmPrinted } from '@/app/confirm-form/salesDetailActions';
 import { getSalesPrintKeys } from '@/app/confirm-form/salesLicenseActions';
 import { isOtherSalesType } from '@/lib/salesConfirms/types';
 import type {
@@ -16,8 +16,11 @@ import type {
   SalesPrintMode,
   SalesPrintNote,
   SalesRenderer,
+  SalesUnitRow,
+  SalesUnitSaveResult,
 } from '@/lib/salesConfirms/types';
 import { fmtDateTime } from './format';
+import PrintDiffConfirmDialog, { type PrintDiffGroup } from './PrintDiffConfirmDialog';
 
 /*
  * 출력 창(설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md §3-H·E1·E4~E8·E14~E22).
@@ -231,7 +234,7 @@ function buildPrint(a: BuildArgs): SalesPrintBuild {
 
   // ── 영업 원본 그대로(E22): IT 값 없이. 우리 스크립트(인쇄·높이 신호)만 붙이려고 빈 채움 목록으로 한 번 지나감 ──
   if (a.mode === 'original') {
-    const empty: SalesFillPlan = { ...plan, cells: {}, back: null, stamp: '', svcSheet: null, regionFill: null, notes: [], blocked: null };
+    const empty: SalesFillPlan = { ...plan, cells: {}, back: null, stamp: '', svcSheet: null, extraSheet: null, regionFill: null, notes: [], blocked: null };
     const renderer = c.renderer ?? a.acq.marks?.form ?? null;
     if (a.acq.liveHtml) {
       const doc = parseHtml(a.acq.liveHtml);
@@ -287,10 +290,31 @@ function buildOtherPrint(it: ItFillMod, acq: Acquired): SalesPrintBuild {
     const why = acq.liveFail ? ` (${acq.liveFail})` : '';
     return { html: '', source: 'live', sourceReason: '', missing: [], notes: [], blocked: `${OTHER_NO_LIVE}${why}` };
   }
-  const empty: SalesFillPlan = { cells: {}, back: null, stamp: '', svcSheet: null, regionFill: null, notes: [], blocked: null };
+  const empty: SalesFillPlan = { cells: {}, back: null, stamp: '', svcSheet: null, extraSheet: null, regionFill: null, notes: [], blocked: null };
   const doc = parseHtml(acq.liveHtml);
   it.applyFillPlan(doc, empty, 'confirm');
   return { html: it.serializeFilled(doc), source: 'live', sourceReason: '', missing: [], notes: [], blocked: null };
+}
+
+/**
+ * [인쇄](IT 기재) 전에 물을 "영업 요청과 다른 칸" — 종이에 나가는 칸(영업 수량 칸 + 추가한 줄)의 확인 안 된 차이(서버 계산 unackedDiffs) 칸별로.
+ * 영업에서 빠진 칸은 종이에 안 나가 안 물음. 서버(ackDiffsForPrint)가 다시 읽어 같은 계산으로 검사함.
+ */
+function pendingPrintDiffs(detail: SalesConfirmDetailData): PrintDiffGroup[] {
+  const out: PrintDiffGroup[] = [];
+  for (const line of detail.lines) {
+    for (const s of line.slots) {
+      if (!s.unit || !s.unackedDiffs.length) continue;
+      const asset = s.unit.assetId.trim();
+      out.push({
+        unitId: s.unit.id,
+        label: `${line.itemIndex + 1}번 ${line.item.cat || '기타'} · ${s.unitNo}번 기기${s.added ? ' (추가한 줄)' : ''}${asset ? ` · ${asset}` : ''}`,
+        modelLabel: line.kind === 'software' ? '제품명' : '모델명',
+        diffs: s.unackedDiffs,
+      });
+    }
+  }
+  return out;
 }
 
 function readWithBack(): boolean {
@@ -320,6 +344,8 @@ interface Props {
   onWarn: (msg: string) => void;
   /** 열 때 영업에서 한 건 받아 바뀌었으면 부름 — 부모가 상세를 다시 읽고 새 데이터를 돌려줌(못 읽으면 null) */
   onSalesChanged: () => Promise<SalesConfirmDetailData | null>;
+  /** [인쇄] 전 차이 확인을 기록한 칸들(④ updated_at·diff_ack 가 바뀜) — 부모가 칸에 반영해야 다음 저장이 가짜 충돌이 안 남 */
+  onUnitsAcked: (units: SalesUnitRow[]) => void;
 }
 
 type KeyChoice = null | 'shown' | 'blank';
@@ -342,6 +368,7 @@ export default function SalesPrintDialog({
   onPrinted,
   onWarn,
   onSalesChanged,
+  onUnitsAcked,
 }: Props) {
   const confirmId = detail.confirm.id;
   /** 따로 보는 종류(철수·이전·판매) — 영업 원본 보기만(모드 칩·2면·키 고르기 없음, 출력 기록 없음) */
@@ -370,6 +397,9 @@ export default function SalesPrintDialog({
   const [overflowPages, setOverflowPages] = useState<number[] | null>(null);
   const [docHeight, setDocHeight] = useState<number | null>(null);
   const [printing, setPrinting] = useState(false);
+  /** [인쇄] 전 "영업 요청과 다른 칸" 확인 창(null = 닫힘) — 2026-11-27 사용자 결정(저장 때 대신 인쇄 때 한 번에) */
+  const [diffAsk, setDiffAsk] = useState<PrintDiffGroup[] | null>(null);
+  const [diffBusy, setDiffBusy] = useState(false);
   const [hint, setHint] = useState('');
   const [scale, setScale] = useState(1);
   const nowIso = useRef(new Date().toISOString()).current;
@@ -574,17 +604,20 @@ export default function SalesPrintDialog({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !printing) onClose();
+      if (e.key !== 'Escape' || printing || diffBusy) return;
+      // 차이 확인 창이 떠 있으면 그 창만 닫음(= [다시 볼게요], 인쇄 안 함)
+      if (diffAsk) setDiffAsk(null);
+      else onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, printing]);
+  }, [onClose, printing, diffAsk, diffBusy]);
 
   const keyGate = needKeyChoice && keyChoice === null;
   const needLiveChoice = mode === 'fill' && !!b && b.source === 'live' && b.missing.length > 0 && liveChoice === 'ask';
   // 지운 확인서 — IT 기재 넣음(출력 기록이 남는 쪽)은 체크해야 인쇄. 원본 모드는 지금처럼
   const deletedGate = mode === 'fill' && salesDeleted && !deletedAck;
-  const canPrint = !!b && !b.blocked && !!html && !keyGate && !needLiveChoice && !deletedGate && !keysBusy && !printing;
+  const canPrint = !!b && !b.blocked && !!html && !keyGate && !needLiveChoice && !deletedGate && !keysBusy && !printing && !diffAsk && !diffBusy;
   const deletedMeta = salesDeleted
     ? [detail.confirm.deletedAt ? fmtDateTime(detail.confirm.deletedAt) : '', (detail.confirm.deletedBy ?? '').trim()]
         .filter((v) => v && v !== '-')
@@ -599,6 +632,54 @@ export default function SalesPrintDialog({
       if (got) setHint('이름을 적었어요. 종이 꼬리에 이름이 들어가게 다시 그렸으니 [인쇄]를 한 번 더 눌러 주세요.');
       return;
     }
+    // IT 기재 모드: 영업 요청과 다른 칸이 있으면 목록을 한 번 보여 주고 [맞아요, 인쇄]일 때만(원본 모드는 묻지 않음)
+    if (mode === 'fill') {
+      const groups = pendingPrintDiffs(detailRef.current);
+      if (groups.length) {
+        setHint('');
+        setDiffAsk(groups);
+        return;
+      }
+    }
+    await sendPrint();
+  }
+
+  /** [맞아요, 인쇄] — 서버에 확인 기록(ackDiffsForPrint) → 성공해야 인쇄. 그 사이 값이 바뀌었으면 인쇄 안 하고 새로 읽음 */
+  async function ackThenPrint() {
+    const groups = diffAsk;
+    const who = actor.trim();
+    if (!groups || diffBusy) return;
+    if (!who) {
+      setDiffAsk(null);
+      return;
+    }
+    setDiffBusy(true);
+    let res: SalesUnitSaveResult | null = null;
+    try {
+      res = await ackDiffsForPrint({ confirmId, acks: groups.map((g) => ({ unitId: g.unitId, diffs: g.diffs })), actor: who });
+    } catch (e) {
+      onWarn(`확인 기록을 남기지 못해 인쇄하지 않았어요 — ${e instanceof Error ? e.message : '인터넷 연결을 확인해 주세요'}`);
+    } finally {
+      setDiffBusy(false);
+    }
+    if (!res) return; // 창은 그대로 — 다시 누를 수 있음
+    setDiffAsk(null);
+    if (res.ok) {
+      await sendPrint();
+      if (res.units.length) onUnitsAcked(res.units);
+      return;
+    }
+    if ('needAck' in res || 'conflict' in res) {
+      onWarn('그 사이 기기 칸 값이 바뀌어서 인쇄하지 않았어요 — 새로 읽었어요. 종이를 다시 보고 [인쇄]를 한 번 더 눌러 주세요.');
+      await onSalesChangedRef.current();
+      return;
+    }
+    onWarn(`확인 기록을 남기지 못해 인쇄하지 않았어요 — ${res.error}`);
+  }
+
+  /** 인쇄 창 띄우기(미리보기 안 우리 스크립트에 신호) + IT 기재 모드면 출력 기록 */
+  async function sendPrint() {
+    if (!mods) return;
     setHint('');
     setPrinting(true);
     // 인쇄 창은 미리보기 안 우리 스크립트가 띄움(부모는 신호만)
@@ -844,6 +925,10 @@ export default function SalesPrintDialog({
           </div>
         </div>
       </div>
+      {/* [인쇄] 전 "영업 요청과 다른 칸" — 출력 창 위(z 58 > 56)에 */}
+      {diffAsk && (
+        <PrintDiffConfirmDialog groups={diffAsk} busy={diffBusy} onConfirm={() => void ackThenPrint()} onBack={() => setDiffAsk(null)} />
+      )}
     </div>
   );
 }

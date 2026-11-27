@@ -13,8 +13,9 @@ interface Props {
 }
 
 /**
- * 영업 요청과 출고 값이 다를 때 저장 전에 한 번 더 묻는 창(D27) — 닫기 버튼·바깥 누르기·Esc 로 닫히지 않음.
+ * 칸 하나의 "요청과 다름" [확인] 창 — 닫기 버튼·바깥 누르기·Esc 로 닫히지 않음.
  * 반드시 [맞아요, 이대로] 나 [다시 고칠게요] 중 하나. 핸드폰에선 아래에서 올라오는 시트(.modal 공통 규칙).
+ * (2026-11-27부터 저장 때는 안 뜸 — 저장은 그대로 되고, 확인은 출력 창 [인쇄] 때 PrintDiffConfirmDialog 로 한 번에. 이 창은 칸의 [확인]만)
  */
 export default function DiffConfirmDialog({ items, modelLabel = '모델명', busy, onConfirm, onRedo }: Props) {
   return (

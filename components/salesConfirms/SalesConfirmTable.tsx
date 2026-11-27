@@ -251,7 +251,11 @@ function Row({
                 {deletedMeta && <span className="sc-del-meta">{deletedMeta}</span>}
               </span>
             )}
-            {recheck > 0 && <span className="sc-pill sc-pill-amber">다시 확인 필요 {recheck}</span>}
+            {recheck > 0 && (
+              <span className="sc-pill sc-pill-amber" title="영업 요청과 다른 기기 칸 — 인쇄할 때 한 번에 확인해요">
+                요청과 다름 {recheck}
+              </span>
+            )}
             {printed &&
               (row.printStale ? (
                 <span className="sc-pill sc-pill-amber" title="출력한 뒤 영업이 고쳤거나 IT 값이 바뀌었어요">
