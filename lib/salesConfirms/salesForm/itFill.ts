@@ -383,13 +383,38 @@ function appendSvcSheet(doc: Document, sheet: SalesSvcSheet, stamp: string): num
 }
 
 /**
+ * 영업 양식 그림(왼쪽 위 토끼 로고 `/confirm/rabbit.png`)은 영업 웹앱 주소로 오는데, 그 주소는 영업 로그인이 있어야 열림
+ * (로그인 없으면 307 → /login — 우리 출력 창에선 그림이 깨져 X, 2026-11-27 사용자 신고).
+ * 같은 파일이 우리 `public/confirm/` 에 있으므로(영업 커밋 b33a4c3 blob 과 같음) 영업 주소의 `/confirm/…` 그림만 우리 주소로 바꿔 끼움.
+ * 브라우저(출력 창 — DOMParser 문서)에서만 돎. 우리 사본(renderCopy)은 이미 우리 주소라 바뀌는 것 없음.
+ */
+const SALES_ASSET_HOST = 'firstoa-smart-sales-os.vercel.app';
+function useOwnSalesAssets(doc: Document): void {
+  if (typeof location === 'undefined' || !location.origin) return;
+  for (const img of Array.from(doc.querySelectorAll('img[src]'))) {
+    const src = img.getAttribute('src') ?? '';
+    let u: URL;
+    try {
+      u = new URL(src, location.origin);
+    } catch {
+      continue;
+    }
+    if (u.hostname === SALES_ASSET_HOST && u.pathname.startsWith('/confirm/')) {
+      img.setAttribute('src', `${location.origin}${u.pathname}`);
+    }
+  }
+}
+
+/**
  * 표시 칸에 plan 의 값 넣기 + 우리 CSS·스크립트(+ svc 면 'IT 기재 명세' 장).
  * missing = 넣을 값이 있는데 갈 칸을 못 찾은 열쇠들(값 없음) — 실시간 HTML 에서 1개라도 있으면 E7 고르기.
+ * 맨 먼저 영업 주소 그림을 우리 사본으로 바꿔 끼움(useOwnSalesAssets).
  */
 export function applyFillPlan(doc: Document, plan: SalesFillPlan, renderer: SalesRenderer): SalesFillApplyResult {
   if (doc.querySelector(`[${OWN_ATTR}]`)) {
     throw new Error('이미 채운 문서예요 — 받은 HTML 을 다시 읽어서 채워 주세요');
   }
+  useOwnSalesAssets(doc);
   const missing: string[] = [];
   let filled = 0;
   const index = indexMarks(doc);

@@ -220,6 +220,8 @@
     **조각조각 말고 14개 파일 주석 전체를 한 번에 읽고 가릴 것**(b33a4c3 때 세 번 나눠 하다 검사실에 계속 걸림). 코드(문자열·정규식) 안이면 바꾸지 말고 멈춤.
     "코드 0 변경" 확인 = TypeScript scanner 로 주석 뺀 토큰 열이 원본과 같은지(스크립트 예: 스크래치패드 redact/verify.cjs 방식). 커밋 전 deploy-check 에 "주석 속 실제 상호·이름·번호" 검사를 꼭 시킬 것.
   - 신호는 그대로 `{source:'sales-confirm', type:'sales-confirm:print|overflow|size'}` postMessage(넘침은 알림만).
+  - 영업 실시간 HTML 의 그림(토끼 로고 `https://<영업>/confirm/rabbit.png`)은 **영업 로그인이 있어야 열림**(없으면 307 → /login, 우리 출력에선 X) →
+    `itFill.applyFillPlan` 이 영업 주소의 `/confirm/…` 그림을 우리 `public/confirm/` 사본으로 바꿔 끼움(모든 출력·원본 보기 경로가 이 함수를 거침). 영업이 새 그림을 쓰면 우리 public 에도 사본.
 - **라이선스 키**(`lib/contracts/salesConfirmLink.ts` — 계약관리 쪽 유일한 새 파일, 기존 contracts 파일은 import 만): 확인서 소프트웨어 칸 하나 = 좌석 하나.
   거래처 → 상품(`source='sales_confirm'`, `source_key='sales_confirm:<확인서id>:<제품명 정규화>'`) → 좌석(`'sales_confirm_unit:<④ id>'`) → 키(`writeSecret`).
   키 넣기·보기·대장 쓰기는 전부 `requireUnlock`. 대장에서 사람이 고친 칸은 ④ `extra.ledgerPushed` 와 비교해 안 덮음. 키 값은 ③④·로그·localStorage 어디에도 없음.
