@@ -1796,3 +1796,27 @@ a.chip{text-decoration:none; display:inline-flex; align-items:center;}
   .mn-act{flex:1; justify-content:center; padding:8px 8px; font-size:12px;}
   .mn-ui{white-space:normal;}
 }
+
+/* ── 영업 확인서 1차(2026-11-27) — 출력 창 위 "어느 양식으로 그렸나" 한 줄·보기 모드, 상세 동기화 회색 줄, 교체 전 기기 상자 ── */
+.sc-print-source{margin:0; border-radius:0; border-left-width:4px; border-top:0; border-right:0;}
+.sc-print-modes{display:flex; flex-direction:column; gap:6px;}
+.sc-print-modes .sc-sec-title{margin:0;}
+.sc-sync-line{font-weight:600;}
+.sc-before-box{margin:8px 0 10px; padding:10px 12px; border:1px solid var(--ink-200); border-radius:10px; background:var(--slate-50); color:var(--ink-500);}
+.sc-before-title{font-size:12.5px; font-weight:800; color:var(--ink-500); margin-bottom:6px;}
+.sc-before-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px 14px;}
+.sc-before-cell{display:flex; flex-direction:column; gap:1px; min-width:0;}
+.sc-before-val{font-size:13px; font-weight:600; color:var(--ink-700); word-break:break-word; white-space:pre-wrap;}
+@media (max-width:640px){
+  /* 출력 창 — 핸드폰은 영업 원본 축소 보기만(인쇄·모드 칩은 .sc-pc-only 로 숨김). 위 설정·알림, 아래 종이. 높이는 100vh 대신 overlay(inset:0)를 채움 */
+  .modal-overlay.sc-print-overlay{align-items:stretch; padding:0;}
+  .sc-print{border-radius:0;}
+  .sc-print-head{padding:10px 12px;}
+  .sc-print-head .sc-muted{flex-basis:100%;}
+  .sc-print-head-btns{margin-left:0; width:100%; justify-content:space-between; align-items:center;}
+  .sc-print-head-btns .btn{min-height:40px;}
+  .sc-print-body{flex-direction:column;}
+  .sc-print-side{flex:0 0 auto; width:auto; max-height:38%; border-right:0; border-bottom:1px solid var(--ink-100); padding:10px 12px;}
+  .sc-print-area{flex:1 1 auto; min-height:0; padding:10px 4px;}
+  .sc-before-grid{grid-template-columns:1fr 1fr;}
+}

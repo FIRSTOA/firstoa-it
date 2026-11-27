@@ -2,11 +2,11 @@
 // =====================================================================================
 // [영업 웹앱 사본 — 고치지 말 것]
 // 출처: GitHub FIRSTOA/firstoa-smart-sales-os  lib/confirm.ts
-//       커밋 bedddc1c35be84cc68612c2a32a6f261fc389ead (2026-11-18) — 2026-11-26 받음(읽기만)
-// 쓰는 곳: lib/salesConfirms/salesForm/confirmDoc.ts(영업 출력 양식 사본), slots·printFill(hasSpec·specKeys·regionOf 등)
-// 영업 웹앱이 최신판을 GitHub 에 올리면 이 파일을 통째로 바꾸고(이 머리 주석만 새로), confirmDoc.ts 의 P1~P6 을 다시 적용.
-// 설계: docs/tasks/2026-11-26-sales-confirm-import.md §3-9 (D16)
+//       커밋 b33a4c34a8b0161a54f4a2fa4e2b9f5299edf5be — blob 1d5cd4b7474c84f4fc377f77e2cf06b49ff32905 — 2026-11-27 받음(읽기만)
+// 설계: docs/tasks/2026-11-27-sales-export-b33a4c3.md §3-D (E6·E11·E12) — 영업 새 판 받는 법도 거기.
+// 본문은 글자 그대로(종이에 직접 안 쓰여도 렌더러 import 로 이어져 같이 받음 — E12).
 // =====================================================================================
+import { rowOf, statusDeposit, statusDeliverer, statusPeople, statusContract, statusDevice, statusItem, statusModel, statusPeriod, statusYm } from './statusRow';
 /**
  * 납품 확인서 (복합기 · IT) — 화면·서버·출력이 함께 쓰는 모양과 규칙
  *  복합기와 IT는 출고 준비 부서가 달라 확인서를 반드시 따로 쓴다.
@@ -64,6 +64,12 @@ export type ConfDoc = {
   contractMail: string; // 메일주소 → 전자 · '수기' → 수기 · 그 외 → 확인서서명
   items: ConfItem[];
   supplies: ConfSupply[];
+  /** 제목용 — 앞머리글(특이사항 머리) · 위탁사명(비우면 퍼스트) · 제목(비우면 자동) */
+  head?: string;
+  consign?: string;
+  title?: string;
+  shipType?: string; // 위탁 · 직송 (위탁사가 있을 때 — 현황표 납품담당)
+  route?: string; // 유입경로 (증설 · 옥외광고 · 낙주체크 · 소개 · 개인영업(…) 등)
   consultNo?: string;
   quoteId?: string;
   savedBy?: string;
@@ -71,7 +77,7 @@ export type ConfDoc = {
 };
 
 export const REGIONS = ['수도권A', '수도권B', '수도권C', '수도권D', '수도권E'];
-export const MFP_CATS = ['컬러복합기', '흑백복합기', '컬러프린터', '흑백프린터', '기타'];
+export const MFP_CATS = ['컬러복합기', '흑백복합기', '컬러프린터', '흑백프린터', '무한프린터', '플로터', '기타']; // 무한프린터 = 잉크젯 (2026-11-25)
 export const IT_CATS = ['데스크탑', '노트북', '모니터', '맥북', '태블릿', '기타'];
 /** IT 사양 — 기본 순서. 인치는 노트북일 때만 */
 export const SPEC_KEYS = ['인치', 'CPU', 'RAM', 'SSD', 'HDD', '그래픽', 'OS'] as const;
@@ -86,10 +92,28 @@ export function contractType(mail: string): '전자' | '수기' | '확인서서�
   return '확인서서명';
 }
 
-export const num = (s: string | number | null | undefined) => {
-  const n = Number(String(s ?? '').replace(/[^\d.-]/g, ''));
+/**
+ * 금액·숫자 글 → 숫자. '20만원' → 200000 · '12.5만' → 125000 · '1억 2천만' → 120000000 · '5천원' → 5000 · '150,000원' → 150000
+ *  (예전엔 숫자만 남겨 '20만원'이 20이 되던 문제 — 2026-11-24 보증금)
+ */
+export function wonNum(s: string | number | null | undefined): number {
+  if (typeof s === 'number') return Number.isFinite(s) ? s : 0;
+  const t = String(s ?? '').replace(/[\s,]/g, '');
+  if (/[억만천]/.test(t)) {
+    let total = 0;
+    let hit = false;
+    for (const [re, mul] of [[/([\d.]+)억/, 1e8], [/([\d.]+)천만/, 1e7], [/([\d.]+)백만/, 1e6], [/([\d.]+)만/, 1e4], [/([\d.]+)천(?!만)/, 1e3]] as [RegExp, number][]) {
+      const m = re.exec(t);
+      if (m) (total += Number(m[1]) * mul), (hit = true);
+    }
+    const tail = /만(\d+)원?$/.exec(t); // '20만5000원'
+    if (tail) total += Number(tail[1]);
+    if (hit) return Math.round(total);
+  }
+  const n = Number(t.replace(/[^\d.-]/g, ''));
   return Number.isFinite(n) ? n : 0;
-};
+}
+export const num = (s: string | number | null | undefined) => wonNum(s);
 export const won = (n: number) => `₩${Math.round(n).toLocaleString()}`;
 export const totalRent = (d: Pick<ConfDoc, 'items'>) => d.items.reduce((s, i) => s + (Number(i.rent) || 0), 0);
 export const totalUnits = (d: Pick<ConfDoc, 'items'>) => d.items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
@@ -140,6 +164,11 @@ export function emptyConf(kind: ConfKind): ConfDoc {
     resident: '',
     taxMail: '',
     contractMail: '',
+    head: '',
+    consign: '',
+    shipType: '',
+    route: '',
+    title: '',
     items: [emptyItem(kind)],
     supplies: [],
   };
@@ -200,39 +229,36 @@ export function fromQuote(q: AnyQ): Partial<ConfDoc> {
   return out;
 }
 
-/* ───────── 현황표 한 줄 (붙여넣기용) ───────── */
-/** 현황표 머리글 (B열 '구분'부터 AD열 '업종'까지) — 품목마다 한 줄 */
-export const STATUS_COLS = [
-  '구분', '지역', '분류', '년월', '납품일', '납품담당', '납품여부', '통합리스트순', '계약서여부', '업체명', '계약기간', '기본료', '품목',
-  '유입경로', '유입경로 (자세히)', '매입가', '교체/철수사유 (자세히)', '유입담당자', '영업담당자', '계약검수자', '보증금', '보증금입금확인',
-  '교체전기종', '기종', '수량', '담당자', '설치인원', '소요시간', '업종',
-] as const;
+/* ───────── 현황표 한 줄 (붙여넣기용) — 값 규칙은 lib/statusRow.ts (납품·교체·철수 공통) ───────── */
+export { STATUS_COLS, toTsv } from './statusRow';
+/** 납품: 품목마다 한 줄 */
 export function statusRows(d: ConfDoc): string[][] {
-  const ym = (d.deliveryDate || d.orderDate || '').replace(/^\d{2}(\d{2})-(\d{2}).*/, '$1$2');
   const ct = contractType(d.contractMail);
-  return d.items.map((it) => {
-    const v: Record<string, string> = {
-      구분: d.term === '현장/단기' ? '현장' : '일반',
+  const [route, ...routeMore] = (d.route ?? '').split('/').map((x) => x.trim());
+  return d.items.map((it, idx) =>
+    rowOf({
+      구분: d.term === '현장/단기' ? '현장/단기' : '일반/장기',
       지역: d.region,
+      납품담당: statusDeliverer(d),
       분류: '납품',
-      년월: ym,
+      년월: statusYm(d.deliveryDate || d.orderDate),
       납품일: d.deliveryDate,
-      계약서여부: ct === '전자' ? '전자계약' : ct === '수기' ? '수기계약' : '확인서서명',
+      계약서여부: statusContract(ct),
       업체명: d.company,
-      계약기간: d.months ? `${d.months}개월` : '',
-      기본료: it.rent ? String(it.rent) : '',
-      품목: it.cat,
-      유입담당자: d.inflow,
-      영업담당자: d.sales,
-      보증금: d.deposit ? String(num(d.deposit)) : '무',
-      기종: it.model,
+      계약기간: statusPeriod(d.months),
+      기본료: it.rent ? String(Math.round(it.rent / Math.max(1, it.qty || 1))) : '0', // 무상·빈칸 → 0 (2026-11-26)
+      품목: statusItem(it.cat),
+      유입경로: route ?? '',
+      '유입경로 (자세히)': routeMore.join('/'),
+      ...statusPeople(d.inflow, d.sales),
+      ...statusDeposit(idx === 0 ? num(d.deposit) : 0), // 보증금은 계약 하나에 한 번 (첫 줄에만)
+      교체전기종: statusDevice(it.cat),
+      기종: statusModel(it.model, it.state),
       수량: String(it.qty || ''),
       업종: d.industry,
-    };
-    return STATUS_COLS.map((h) => v[h] ?? '');
-  });
+    }),
+  );
 }
-export const toTsv = (rows: string[][]) => rows.map((r) => r.map((c) => String(c ?? '').replace(/[\t\n\r]+/g, ' ')).join('\t')).join('\n');
 
 /* ───────── 지역 자동 구분 (주소 → 수도권A~E, E = 수도권 외 전부) — 사용자 제공 기준 2026-11-18 ───────── */
 const REGION_RULES: { region: string; area: '서울' | '경기' | '인천' | '충북'; names: string[] }[] = [
@@ -269,4 +295,19 @@ export function regionOf(address: string): string {
   if (found.length === 1) return found[0];
   if (area === '충북') return '수도권E';
   return ''; // 모르거나 두 곳 이상(시·도 없이 '중구')이면 직접 고르게
+}
+
+/* ───────── 계약기간: 적은 그대로 ('3년' · '6개월 이상' · '8개월(7월 중순까지)') — 사용자 2026-11-24 ───────── */
+/** 화면·출력용: 숫자만 있으면 '36개월', 글이면 그대로 */
+export const periodText = (v: string) => {
+  const t = String(v ?? '').trim();
+  return /^\d+$/.test(t) ? `${t}개월` : t;
+};
+/** 개월 수 (장기/단기 가름용): '3년' → 36 · '6개월 이상' → 6 · '36' → 36 · 모르면 0 */
+export function periodMonths(v: string): number {
+  const t = String(v ?? '');
+  const y = /(\d+(?:\.\d+)?)\s*년/.exec(t);
+  if (y) return Math.round(Number(y[1]) * 12);
+  const m = /(\d+)\s*개?월/.exec(t) ?? /^\s*(\d+)\s*$/.exec(t);
+  return m ? Number(m[1]) : 0;
 }

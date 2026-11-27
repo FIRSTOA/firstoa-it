@@ -23,7 +23,6 @@ import {
   SALES_CONFIRM_STATUSES,
   SALES_SPEC_KEYS,
   confirmFormViewHref,
-  safeDocUrl,
   type ConfirmLicenseState,
   type DiffItem,
   type LedgerClientCandidate,
@@ -31,6 +30,7 @@ import {
   type LicenseActionResult,
   type SalesConfirmDetailData,
   type SalesConfirmStatus,
+  type SalesPrintMode,
   type SalesSlot,
   type SalesSlotLine,
   type SalesSpec,
@@ -58,7 +58,7 @@ import LineBulkDialog, { type LineBulkMode } from './LineBulkDialog';
 import OrphanPanel, { type OrphanTarget } from './OrphanPanel';
 import PrepHintBox from './PrepHintBox';
 import SalesChangeBanner from './SalesChangeBanner';
-import SalesPrintDialog from './SalesPrintDialog';
+import SalesPrintDialog, { syncSalesConfirmOne } from './SalesPrintDialog';
 import { useSalesActor, useSalesToast } from './salesUi';
 import SoftwareSlotCard from './SoftwareSlotCard';
 import UnknownValue from './UnknownValue';
@@ -132,25 +132,36 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
   const [sqlNeeded, setSqlNeeded] = useState(false);
   const [sqlB, setSqlB] = useState(false);
   const [ackBusy, setAckBusy] = useState(false);
-  const [printOpen, setPrintOpen] = useState(false);
+  /** 출력 창 — null = 닫힘, 'fill' = 🖨 확인서 출력, 'original' = 영업 원본 보기(E22) */
+  const [printMode, setPrintMode] = useState<SalesPrintMode | null>(null);
+  const printOpenRef = useRef(false);
+  printOpenRef.current = printMode !== null;
   const [bulk, setBulk] = useState<{ mode: LineBulkMode; itemIndex: number } | null>(null);
+  /** 영업이 고쳤는데 입력 중이라 다시 읽지 않고 기다리는 중 → "영업이 방금 고쳤어요 [새로 보기]" 띠 */
+  const [salesPending, setSalesPending] = useState(false);
 
   const c = data.confirm;
-  const docUrl = safeDocUrl(data.docUrl);
+  const isSwap = c.renderer === 'swap' || c.type === '교체';
   const hasSoftware = data.lines.some((l) => l.kind === 'software');
   const schemaOk = data.schemaReady && !sqlNeeded;
   const unitsDisabled = !schemaOk;
 
-  // ───── 다시 읽기 ─────
+  // ───── 다시 읽기(읽은 새 데이터를 돌려줌 — 출력 창이 새 판으로 그릴 때 씀) ─────
   const reload = useCallback(
-    async (quiet = false) => {
+    async (quiet = false): Promise<SalesConfirmDetailData | null> => {
       setReloading(true);
       try {
         const res = await openSalesConfirm({ id: confirmId, actor: actorRef.current });
-        if (res.ok) setData(res.data);
-        else if (!quiet) toast.warn(`다시 읽지 못했어요 — ${res.error}`);
+        if (res.ok) {
+          setData(res.data);
+          setSalesPending(false); // 새로 읽었으니 영업 최신 판이 들어옴
+          return res.data;
+        }
+        if (!quiet) toast.warn(`다시 읽지 못했어요 — ${res.error}`);
+        return null;
       } catch (e) {
         if (!quiet) toast.warn(`다시 읽지 못했어요 — ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+        return null;
       } finally {
         setReloading(false);
       }
@@ -688,6 +699,8 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
   }
 
   const [noteDraft, setNoteDraft] = useState(data.work.note);
+  const noteDraftRef = useRef(noteDraft);
+  noteDraftRef.current = noteDraft;
   const noteBase = useRef(data.work.note);
   useEffect(() => {
     if (noteDraft === noteBase.current) setNoteDraft(data.work.note);
@@ -696,11 +709,87 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.work.note]);
 
+  // ───── 영업 내용 동기화(E1) — 이 확인서 한 건만: 처음 그린 뒤 1번 · 화면이 보이는 동안 60초마다 · 탭으로 돌아왔을 때(60초 지났으면) ─────
+  // 바뀌면 입력 중이 아닐 때 바로 다시 읽음("영업에서 수정됨" 띠가 뜸), 입력 중이면 [새로 보기] 띠만(적던 값은 그대로).
+  // 출력 창이 열려 있는 동안은 출력 창이 스스로 받으므로 쉼. 오류는 조용히 다음 차례 — 3번 연달아면 회색 한 줄.
+  /** 기기 칸 카드가 알려 주는 "저장값과 다른 초안이 있는 칸"(slotDomId) */
+  const dirtySlots = useRef(new Set<string>());
+  const onDirtyChange = useCallback((key: string, dirty: boolean) => {
+    if (dirty) dirtySlots.current.add(key);
+    else dirtySlots.current.delete(key);
+  }, []);
+  const isEditing = useCallback(
+    () => dirtySlots.current.size > 0 || noteDraftRef.current.trim() !== noteBase.current.trim(),
+    [],
+  );
+  const [salesMissing, setSalesMissing] = useState(false);
+  const [syncProblem, setSyncProblem] = useState('');
+  const syncBusy = useRef(false);
+  const lastSyncAt = useRef(0);
+  const syncFails = useRef(0);
+
+  const syncFromSales = useCallback(async () => {
+    if (syncBusy.current || printOpenRef.current) return;
+    syncBusy.current = true;
+    lastSyncAt.current = Date.now();
+    try {
+      const r = await syncSalesConfirmOne(confirmId, 'detail', 20_000);
+      if (r.kind === 'skipped') return; // 방금 누가 받음 — 다음 차례에
+      if (r.kind === 'fail') {
+        syncFails.current += 1;
+        if (syncFails.current >= 3) setSyncProblem(r.error);
+        return;
+      }
+      syncFails.current = 0;
+      setSyncProblem('');
+      setSalesMissing(r.notFound);
+      if (r.changed > 0) {
+        if (isEditing()) {
+          setSalesPending(true);
+        } else {
+          // 저장 줄 뒤에 세움 — 저장 중에 옛 값으로 덮어 가짜 충돌이 나지 않게.
+          // 다시 읽기에 실패하면 다음 차례엔 "바뀐 것 없음"이라 조용히 묻히므로 [새로 보기] 띠로 남김
+          const fresh = await serial(() => reload(true));
+          if (!fresh) setSalesPending(true);
+        }
+      }
+    } finally {
+      syncBusy.current = false;
+    }
+  }, [confirmId, isEditing, reload, serial]);
+  const syncRef = useRef(syncFromSales);
+  syncRef.current = syncFromSales;
+
+  useEffect(() => {
+    const SYNC_MS = 60_000;
+    void syncRef.current();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void syncRef.current();
+    }, SYNC_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastSyncAt.current >= SYNC_MS) void syncRef.current();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  async function showSalesUpdate() {
+    const fresh = await serial(() => reload());
+    if (fresh) toast.show('영업이 고친 내용을 불러왔어요.');
+  }
+
+  // 출력 창이 열 때 영업에서 새 판을 받았으면 — 입력 중이어도 새로 읽음(카드의 적던 칸은 그대로 남음)
+  const reloadForPrint = useCallback(() => serial(() => reload(true)), [reload, serial]);
+
+  // 교체: 현장상주 칸 = 교체 요청자(고객), 계약담당은 결제담당과 같은 값이 와서 같으면 숨김
   const contactRows: [string, string][] = [
     ['대표번호', c.contacts.phone],
     ['IT담당', c.contacts.manager],
-    ['계약담당', c.contacts.contractor],
-    ['현장 상주', c.contacts.resident],
+    ...(isSwap && c.contacts.contractor.trim() === c.contacts.payer.trim() ? [] : [['계약담당', c.contacts.contractor] as [string, string]]),
+    [isSwap ? '교체 요청자' : '현장 상주', c.contacts.resident],
     ['결제담당', c.contacts.payer],
   ];
   const hasReplace = !!c.replaceInfo && (!isBlank(c.replaceInfo.before) || !isBlank(c.replaceInfo.after));
@@ -743,12 +832,10 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
             ← 목록
           </Link>
           <span className="sc-dh-top-right">
-            {docUrl && (
-              <a className="btn btn-ghost sc-btn" href={docUrl} target="_blank" rel="noopener noreferrer">
-                영업 원본 열기 ↗
-              </a>
-            )}
-            <button type="button" className="btn btn-primary sc-pc-only" onClick={() => setPrintOpen(true)}>
+            <button type="button" className="btn btn-ghost sc-btn" onClick={() => setPrintMode('original')}>
+              영업 원본 보기
+            </button>
+            <button type="button" className="btn btn-primary sc-pc-only" onClick={() => setPrintMode('fill')}>
               🖨 확인서 출력
             </button>
             <span className="sc-phone-only sc-muted">출력은 PC에서 해 주세요.</span>
@@ -841,19 +928,32 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
           </span>
         </div>
       )}
+      {salesPending && (
+        <div className="ct-band warn" role="status">
+          <span>영업이 방금 이 확인서를 고쳤어요. 적던 값은 그대로 있어요 — 다 적었으면 [새로 보기]를 눌러 주세요.</span>
+          <button type="button" className="btn btn-primary sc-btn" disabled={reloading} onClick={() => void showSalesUpdate()}>
+            새로 보기
+          </button>
+        </div>
+      )}
       {data.salesChanged && (
         <SalesChangeBanner
           change={data.salesChanged}
           versionCount={data.versionCount}
-          docUrl={data.docUrl}
           changes={data.changes}
           busy={ackBusy}
           onAck={() => void ackChange()}
+          onViewOriginal={() => setPrintMode('original')}
         />
       )}
-      {c.type !== '납품' && c.type && (
-        <div className="ct-band muted">
-          <span>{c.type} 확인서예요. 칸 입력은 지금 되지만, 종이 출력은 영업 최신 양식을 받은 뒤에 열려요.</span>
+      {salesMissing && (
+        <div className="ct-band muted sc-sync-line" role="status">
+          <span>영업 웹앱에서 이 확인서를 못 찾았어요(종류가 바뀌었을 수 있어요). 아래는 마지막으로 받은 내용이에요.</span>
+        </div>
+      )}
+      {syncProblem && !salesMissing && (
+        <div className="ct-band muted sc-sync-line" role="status">
+          <span>영업 웹앱에서 새 내용을 받지 못하고 있어요({syncProblem.replace(/[.。]\s*$/, '')}). 1분마다 다시 해 볼게요.</span>
         </div>
       )}
       {recheckSlots > 0 && (
@@ -968,6 +1068,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
                   </button>
                 </div>
               )}
+              {isSwap && c.replaceInfo && line.itemIndex === data.lines[0]?.itemIndex && <SwapBeforeBox before={c.replaceInfo.before} />}
               {line.slots.length === 0 ? (
                 <div className="detail-empty sc-line-empty">수량이 0이라 기기 칸이 없어요.</div>
               ) : (
@@ -981,6 +1082,7 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
                         disabled={unitsDisabled}
                         saveUnit={saveUnit}
                         onRecheck={recheck}
+                        onDirtyChange={onDirtyChange}
                         licState={lic.state?.units.find((u) => u.unitId === slot.unit?.id)}
                         clientName={lic.state?.clientName ?? null}
                         unlocked={lic.state ? lic.state.unlocked : null}
@@ -1005,6 +1107,8 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
                         checkItems={checkItemsFor(line)}
                         dupAsset={!!slot.unit && dupAssets.has(slot.unit.assetId.trim().toUpperCase())}
                         assetElsewhere={data.assetElsewhere}
+                        headLabel={isSwap ? (line.slots.length > 1 ? `교체 후 기기 ${slot.unitNo}` : '교체 후 기기') : undefined}
+                        onDirtyChange={onDirtyChange}
                       />
                     ),
                   )}
@@ -1054,7 +1158,8 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
         <div className="sc-sec-title">특이사항 (영업이 적은 것)</div>
         {c.special.trim() ? <div className="sc-pre">{c.special}</div> : <div className="detail-empty">적힌 특이사항이 없어요.</div>}
 
-        {hasReplace && c.replaceInfo && (
+        {/* 교체 건은 교체 전 기기를 품목 칸 위 회색 상자로 보여 줌 — 여기선 그 밖(품목이 없거나 교체가 아닌데 값이 온 것)만 */}
+        {hasReplace && c.replaceInfo && !(isSwap && data.lines.length > 0) && (
           <>
             <div className="sc-sec-title">교체 내용 (회수할 기존 기기 — 보기만)</div>
             <div className="sc-replace">
@@ -1152,16 +1257,18 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
           onApplyKey={(key) => saveLineKey(bulk.itemIndex, key)}
         />
       )}
-      {printOpen && (
+      {printMode && (
         <SalesPrintDialog
           detail={data}
+          initialMode={printMode}
           license={lic.state}
           hasSoftware={hasSoftware}
           onUnlock={askUnlock}
           actor={actor}
           ensureActor={ensureActor}
-          onClose={() => setPrintOpen(false)}
+          onClose={() => setPrintMode(null)}
           onWarn={toast.warn}
+          onSalesChanged={reloadForPrint}
           onPrinted={(info) =>
             setData((d) => ({
               ...d,
@@ -1198,6 +1305,50 @@ function Info({ label, value, wide, tel }: { label: string; value: string; wide?
     <div className={`sc-info${wide ? ' wide' : ''}${v ? '' : ' empty'}`}>
       <span className="detail-label">{label}</span>
       <span className="detail-value">{body}</span>
+    </div>
+  );
+}
+
+/** 교체 전 기기 칸 — 영업 export before {item, model, maker, sn, asset, spec(하드웨어), sw} 의 값 이름표 */
+const SWAP_BEFORE_FIELDS: [string, string][] = [
+  ['item', '품목'],
+  ['maker', '제조사'],
+  ['model', '모델명'],
+  ['asset', '자산번호'],
+  ['sn', '기번(S/N)'],
+  ['spec', '하드웨어'],
+  ['sw', '소프트웨어'],
+];
+
+/** 교체 전(회수할) 기기 — 영업이 임대리스트에서 채운 값, 보기만(IT 입력 칸은 이번엔 안 만듦 — E19) */
+function SwapBeforeBox({ before }: { before: unknown }) {
+  const isObj = !!before && typeof before === 'object' && !Array.isArray(before);
+  const o = isObj ? (before as Record<string, unknown>) : null;
+  const rows = o
+    ? SWAP_BEFORE_FIELDS.map(([k, label]): [string, string] => {
+        const v = o[k];
+        return [label, typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : ''];
+      }).filter(([, v]) => v)
+    : [];
+  return (
+    <div className="sc-before-box">
+      <div className="sc-before-title">교체 전 기기 (회수 — 영업이 적은 값, 보기만)</div>
+      {o ? (
+        rows.length > 0 ? (
+          <div className="sc-before-grid">
+            {rows.map(([label, v]) => (
+              <div key={label} className="sc-before-cell">
+                <span className="detail-label">{label}</span>
+                <span className="sc-before-val">{v}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="detail-empty">영업이 교체 전 기기를 적지 않았어요.</div>
+        )
+      ) : (
+        <UnknownValue value={before} />
+      )}
     </div>
   );
 }

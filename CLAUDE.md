@@ -140,9 +140,16 @@
     spec 에 지침 밖 한글 칸 2개 있음 → `specExtra`(이름 그대로) 로 보존해 미리보기에 보여 줌. 영업 웹앱의 '인치'는 노트북만.
   - 미리보기(이후 상세도)는 **저장된 payload 를 지금 normalize 로 다시 읽음** — 정규화를 고쳐도 이미 받은 건에 바로 반영(hash 는 원문 기준이라 안 바뀜 → 가짜 "수정됨" 없음).
     ① 의 정규화 칸(contacts·items 등)은 받을 때 한 번 만든 사본이라 목록 요약에만 씀(원문이 안 바뀌면 다시 안 씀).
-  - 라우트 `POST /api/sales-confirms/import`(화면 열 때·3분마다·🔄·⋯날짜, 홈은 10분 넘었으면 `after()`). Vercel cron 안 씀(Hobby 하루 1번).
-  - since(D14) = 늘 한국 오늘−30일, 그날 첫 한 번 −90일(`last_deep_at`), 날짜 고르기 365일까지. hash(키 정렬 JSON sha256)로 바뀐 것만 씀.
-  - 겹침 막기: ⑤ `it_sales_import_state` 'main' 줄 조건부 update(60초, 강제 10초). 바뀐 건은 ②(판 원문) 먼저 → ①(그래야 실패해도 다음에 저절로 맞춰짐).
+  - 라우트 `POST /api/sales-confirms/import`(목록: 화면 열 때·**60초마다**·🔄·⋯날짜, 홈은 10분 넘었으면 `after()`). Vercel cron 안 씀(Hobby 하루 1번).
+    **한 건 받기**(2026-11-27, 설계 `docs/tasks/2026-11-27-sales-export-b33a4c3.md` E1): 본문 `{id, trigger:'detail'|'print'}` — 상세 화면이 열 때·보이는 동안 60초·탭 복귀,
+    출력 창이 열 때(3초) 그 한 건만 `?id=&type=`(type 은 ① 값). 쓰기 규칙은 목록과 같음(①② 만). 바뀌면 상세가 다시 읽음, 입력 중이면 [새로 보기] 띠.
+  - since = 그날(한국) 첫 성공 전 90일(`last_deep_at`), 그 뒤 **어제부터**(영업 export since = 저장·지운 날짜 기준이라 빠짐없음), 날짜 고르기 365일까지.
+    hash(키 정렬 JSON sha256)로 바뀐 것만 씀. 영업 시각(savedAt·createdAt·deletedAt)은 **시간대 없는 한국 시각** → normalize 가 +09:00 으로 읽음(전엔 UTC 로 읽어 9시간 늦었음).
+  - 겹침 막기: ⑤ `it_sales_import_state` 'main' 줄 조건부 update(55초 — 화면 60초와 딱 같으면 두 번에 한 번 건너뜀, 강제 10초). 같은 표에 줄 'one'(한 건 3초)·'html'(양식 중계 2초)도 씀 —
+    상태 띠·홈이 읽는 곳은 늘 'main' 만. 바뀐 건은 ②(판 원문) 먼저 → ①(그래야 실패해도 다음에 저절로 맞춰짐).
+  - export 새 칸(영업 b33a4c3): status('deleted')·deletedAt/By·createdAt/By·renderer('confirm'|'swap'|'svc')·doc(영업 출력 함수에 그대로 넣는 확인서 전체).
+    normalize → `renderer`·`formDoc`(svc 는 items[].cost 매입가 뺌 — 브라우저로 감)·`salesDeleted`(deleted 이고 savedAt ≤ deletedAt — 영업 납품·교체 저장이 지움 표시를 안 지움).
+    svc(유지보수·소프트웨어) items 는 doc.items 에서(이름 빈 줄 빼고, '3대'→3). 지운 확인서 화면 표시는 2차(설계 E26~E28).
   - ver 0~2147483647 밖·`\u0000` 든 건은 그 건만 건너뜀(묶음 실패 방지). 일부만 모양이 다르면 나머지 반영 + 'bad_shape' 주황 띠.
 - **표**(`supabase/sales_confirms_schema.sql`, 칸 이름은 `lib/salesConfirms/types.ts` 맨 위 주석이 기준): ①② 영업 원본 = **importer.ts 만 씀**,
   ③ work·④ units = IT 값 = 화면 액션만 씀. **가져오기 코드(normalize·source·importer·route)는 ③④ 표 이름을 import 도 하지 말 것**(IT 값 덮어쓰기를 구조로 막음).
@@ -162,19 +169,33 @@
 - **사용자 결정**: 기기마다 **제조사·모델명·자산번호·시리얼·출고사양**(이 순서). 종이엔 영업 값 그대로 + 출고 값 **덧붙임**("요청 8GB → 출고 16GB").
   영업 요청과 다르면 저장할 때 **닫을 수 없는 확인 창**(서버도 같은 검사 — acks 없으면 `needAck`). 유지보수도 **대마다**.
   라이선스 키는 **적음** — 입력은 확인서, 저장·보기는 계약관리 잠금 칸(넣을 때도 비밀번호), **종이에도 찍음**.
-  출력은 **영업 웹앱 확인서 양식 그대로**(회색 빈칸 채움). 교체·유지보수 출력은 영업 최신 양식을 받은 뒤(지금은 blocked, 입력은 됨).
+  출력은 **영업 웹앱 확인서 양식 그대로**. (2026-11-27 사용자: 영업이 **지금** 뽑는 양식 그대로 + 내용·양식 **실시간** — 아래 "출력 1차" 가 이 줄보다 우선)
 - **품목 종류**(`itemKind.ts`): 유지보수(PC유지보수 포함) → 소프트웨어 → 모니터 → 장비 → 기타. 칸 계산은 `slots.ts` 한 곳(목록 진행 m 도) —
   유지보수·소프트웨어는 수량 0이면 1칸. 칸 열쇠 = `<품목구분>#n` + unit_no. 갈 곳 없는 칸(IT가 뭐라도 적은 것)은 "영업에서 빠진 칸"으로 남김(자동 삭제 없음).
 - **같다고 보는 기준**(`specCompare.ts`): 공백·대소문자·하이픈 무시, 용량 16GB=16G=16·1TB=1000GB=1024GB, 애매하면 다름. diff_ack 는 칸마다 (영업, 출고) 쌍 —
   쌍이 바뀌면 다시 확인. 출고 값을 안 바꾸는 저장(자산번호·시리얼·체크만)은 막지 않음(창고 핸드폰 체크가 안 막히게).
-- **양식 사본**: `lib/salesConfirms/salesForm/confirm.ts`(영업 lib/confirm.ts 그대로) · `confirmDoc.ts`(영업 lib/confirmDoc.ts + `[IT 바꿈 P1~P6]`) · `public/confirm/rabbit.png`.
-  **fill 없이 그리면 영업 원본과 글자까지 같아야 함.** P1 품목 줄(사양 덧붙임·회색 칸) · P2 안 온 돈·계약서 칸은 ₩0·자동 체크 대신 빈칸 ·
-  P3 출고 명세(대수별) 장 · P4 2면 출고 준비자·출고일 · P5 꼬리 "IT 기재" · P6 신호 스크립트.
-  **영업 새 판 받는 법**: 두 파일을 통째로 바꾸고(머리 주석만 새 커밋으로) P1~P6 다시 적용 → "사본 정확" 비교 → 교체 양식 회색 칸 자리 정하고 blocked 풂.
-  채우기 규칙은 `printFill.ts` `buildSalesPrintHtml`(순수, 화면에서 바로). 출력 창은 `iframe srcDoc` + `sandbox="allow-scripts allow-modals"`
-  (**allow-same-origin 넣지 말 것**), 신호는 `{source:'sales-confirm', type:'sales-confirm:print|overflow|size'}` postMessage.
-- **영업 가져오기에 아직 없는 칸**: 계약·금액(months·deposit·payNote·extra·orderDate·industry·statusNo·fax·taxMail·contractMail·kind·items[].rent·supplies[].price) —
-  normalize 가 `print`(안 오면 null)로 읽음. 영업 쪽에 추가·소프트웨어 포함·최신 양식 GitHub push·취소 표시를 요청함(사용자가 전달, 답 대기).
+- **출력 1차(2026-11-27, 설계 `docs/tasks/2026-11-27-sales-export-b33a4c3.md` E4~E23 — 옛 P1~P3·출고 명세 옵션·D22 한도 폐기)**:
+  - **양식 = 영업 실시간 HTML + IT 칸 표시**: 출력 창이 열 때 한 건 받기 → `POST /api/sales-confirms/form-html {id}`(서버가 헤더 키로 영업 `html=1` 을 받아
+    **JSON 으로만** 감쌈 — 우리 주소에서 영업 HTML 을 text/html 로 절대 내보내지 말 것, 2MB·4초, ⑤ 'html' 2초) → 브라우저 `DOMParser`(스크립트 안 도는 빈 문서)
+    → `<body data-it-spec="1" data-it-form data-it-ver data-it-id>` 확인(`itFill.checkFormMarks`) → `applyFillPlan` 이 `[data-it]` 칸에 `textContent`·`createElement` 로만 값
+    → `serializeFilled` → iframe `srcDoc` + `sandbox="allow-scripts allow-modals"`(**allow-same-origin 넣지 말 것**). **HTML 을 정규식으로 고치기·innerHTML 에 값 넣기 금지.**
+    영업이 표시(data-it — 이름은 `itFill.ts` IT_MARK 한 곳 = 영업에 보낸 요청 글 설계 §11)를 붙이면 **배포 없이** 출력이 늘 영업 최신 양식.
+  - **대신 그리기(사본)**: 영업 응답 없음·표시 없음(붙이기 전엔 늘)·모르는 판·판 다름·2면 켬·`SALES_FORM_SOURCE=copy`(끄는 스위치) → `printFill.renderCopy(formDoc, renderer, origin, withBack, marks=true)`
+    를 같은 DOMParser→applyFillPlan 으로(채우기 한 길). 실시간인데 갈 칸 없는 값이 있으면 사람이 고름(E7). 출력 창 위에 "영업 최신 양식 / 받아 둔 양식(11-27판) — 이유".
+  - 채울 값 = `printFill.buildFillPlan`(순수): 납품 = 새 양식 오른쪽 '출고시 기재사항' 대마다 5칸(제조사·모델명·자산번호·시리얼·출고 사양),
+    요청과 다른 칸·토막만 굵게+밑줄("요청 → 출고" 글자 없음 — 왼쪽 요청·오른쪽 출고가 같은 줄), 비워 둔 기기 = 요청 값·"요청과 같음"(E15 상수),
+    교체 = 교체 후 열(다르면 아래 "출고 ○○"), 유지보수·소프트웨어 = 고객 서명 장 뒤 'IT 기재 명세' 장. 2면은 기본 끔. 금액은 영업 종이처럼 그대로.
+    원본 모드(`영업 원본 보기`)도 빈 plan 으로 applyFillPlan 을 거침(인쇄 스크립트가 붙어야 해서) — IT 값 없음·출력 기록 안 남김.
+  - **사본 = 영업 렌더러 3개가 import 로 끄는 14개 파일만**(`salesForm/{confirm,confirmDoc,confTitle,statusRow,swap,pull,move,sale,svc,furn,kakaoParse,inkjet,swapDoc,svcDoc}.ts`,
+    영업 커밋 b33a4c3 blob 그대로 + 표시 속성만 `[IT 표시]` 주석 자리). `lib/` 통째 금지(로그인·Supabase·고객 자료 bigcoSeed.json 이 따라옴).
+    **marks=false 면 영업 원본과 글자까지 같아야 함.** printFill·itFill·사본은 출력 창을 열 때 `await import()`(상세 첫 화면 JS 안 키움).
+  - **영업 새 판 받는 법**: 커밋 tree 에서 14개 blob 비교 → 렌더러 import 다시 따라가 목록이 늘었는지(서버·DB 코드가 끼면 멈춤) → 통째 교체 + 표시 자리 다시(영업이 표시를 넣었으면 사본 P 자리 없앰)
+    → 옮겨 적기(tsc)만 + `node --permission` 으로 가짜 자료 비교(설계 §3-D 1~5) → 배포. 영업 담당 말: 영업이 양식을 고쳐도 GitHub 은 푸시할 때만 → 필요하면 최신 커밋 요청.
+    **영업 코드 주석에 실제 거래처 이름·담당자 이름·휴대폰 번호·자산번호/시리얼(파싱 예시)이 있음** → 받을 때마다 주석 속 실값을 OO상사·홍길동·01000000000
+    (번호는 모양만 X·0)으로 바꾸고 줄 끝에 `[IT 가림]`(b33a4c3 때 9개 파일 37줄). 주석만 바꾸므로 종이 모양은 그대로.
+    **조각조각 말고 14개 파일 주석 전체를 한 번에 읽고 가릴 것**(b33a4c3 때 세 번 나눠 하다 검사실에 계속 걸림). 코드(문자열·정규식) 안이면 바꾸지 말고 멈춤.
+    "코드 0 변경" 확인 = TypeScript scanner 로 주석 뺀 토큰 열이 원본과 같은지(스크립트 예: 스크래치패드 redact/verify.cjs 방식). 커밋 전 deploy-check 에 "주석 속 실제 상호·이름·번호" 검사를 꼭 시킬 것.
+  - 신호는 그대로 `{source:'sales-confirm', type:'sales-confirm:print|overflow|size'}` postMessage(넘침은 알림만).
 - **라이선스 키**(`lib/contracts/salesConfirmLink.ts` — 계약관리 쪽 유일한 새 파일, 기존 contracts 파일은 import 만): 확인서 소프트웨어 칸 하나 = 좌석 하나.
   거래처 → 상품(`source='sales_confirm'`, `source_key='sales_confirm:<확인서id>:<제품명 정규화>'`) → 좌석(`'sales_confirm_unit:<④ id>'`) → 키(`writeSecret`).
   키 넣기·보기·대장 쓰기는 전부 `requireUnlock`. 대장에서 사람이 고친 칸은 ④ `extra.ledgerPushed` 와 비교해 안 덮음. 키 값은 ③④·로그·localStorage 어디에도 없음.

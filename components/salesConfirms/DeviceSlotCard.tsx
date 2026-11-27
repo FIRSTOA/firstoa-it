@@ -37,6 +37,10 @@ export interface DeviceSlotCardProps {
   dupAsset: boolean;
   /** 열 때 서버가 준 "다른 확인서에도 있는 자산번호"(대문자 자산번호 → 다른 확인서들) */
   assetElsewhere?: Record<string, AssetUse[]>;
+  /** 칸 머리 글자(교체 건 "교체 후 기기") — 없으면 "n번" */
+  headLabel?: string;
+  /** 저장값과 다른 초안이 생기거나 없어질 때(열쇠 = 칸 DOM id) — 상세가 "입력 중"이면 영업 변경을 바로 다시 읽지 않음(E1) */
+  onDirtyChange?: (key: string, dirty: boolean) => void;
 }
 
 interface Draft {
@@ -59,6 +63,18 @@ function draftOf(u: SalesUnitRow | null): Draft {
   };
 }
 
+/** 초안이 저장값과 같은지(공백 무시 — commit 이 보내는 기준과 같음) */
+function sameDraft(a: Draft, b: Draft): boolean {
+  return (
+    a.maker.trim() === b.maker.trim() &&
+    a.model.trim() === b.model.trim() &&
+    a.asset.trim() === b.asset.trim() &&
+    a.serial.trim() === b.serial.trim() &&
+    a.note.trim() === b.note.trim() &&
+    sameDraftSpec(a.spec, b.spec)
+  );
+}
+
 type Status = 'idle' | 'saving' | 'saved' | 'error';
 
 /**
@@ -66,7 +82,20 @@ type Status = 'idle' | 'saving' | 'saved' | 'error';
  * 칸을 나가면 저장(onBlur), 자산번호를 넣고 나가면 IT재고에서 빈 칸(제조사·모델명·시리얼)만 채움.
  * 제조사·모델명·사양 칸은 비어 있는 게 기본 — 흐린 글씨가 영업 요청 값. 영업과 다른 칸은 노란색.
  */
-export default function DeviceSlotCard({ line, slot, kind, disabled, saveUnit, lookupAsset, onRecheck, checkItems, dupAsset, assetElsewhere }: DeviceSlotCardProps) {
+export default function DeviceSlotCard({
+  line,
+  slot,
+  kind,
+  disabled,
+  saveUnit,
+  lookupAsset,
+  onRecheck,
+  checkItems,
+  dupAsset,
+  assetElsewhere,
+  headLabel,
+  onDirtyChange,
+}: DeviceSlotCardProps) {
   const unit = slot.unit;
   const rule = ITEM_KIND_RULES[kind];
   const has = (f: (typeof rule.fields)[number]) => rule.fields.includes(f);
@@ -104,6 +133,15 @@ export default function DeviceSlotCard({ line, slot, kind, disabled, saveUnit, l
     draftRef.current = merged;
     setDraft(merged);
   }, [unit]);
+
+  // 입력 중(저장값과 다른 초안) 알리기 — 칸이 사라지면 끝난 것으로
+  const dirtyKey = slotDomId(line.itemIndex, slot.unitNo);
+  const dirtyCb = useRef(onDirtyChange);
+  dirtyCb.current = onDirtyChange;
+  useEffect(() => {
+    dirtyCb.current?.(dirtyKey, !sameDraft(draft, base.current));
+  }, [draft, dirtyKey]);
+  useEffect(() => () => dirtyCb.current?.(dirtyKey, false), [dirtyKey]);
 
   function set(p: Partial<Draft>) {
     draftRef.current = { ...draftRef.current, ...p };
@@ -182,7 +220,7 @@ export default function DeviceSlotCard({ line, slot, kind, disabled, saveUnit, l
   return (
     <div ref={rootRef} id={id} className={`sc-slot${needCount > 0 ? ' sc-slot-warn' : ''}`}>
       <div className="sc-slot-head">
-        <b>{slot.unitNo}번{kind === 'maintenance' ? ' (유지보수 대상)' : ''}</b>
+        <b>{headLabel ?? `${slot.unitNo}번`}{kind === 'maintenance' ? ' (유지보수 대상)' : ''}</b>
         {statusText && <span className={`sc-save-state ${status}`}>{statusText}</span>}
         {needCount > 0 && unit && (
           <span className="sc-slot-recheck">

@@ -26,6 +26,8 @@ export interface SoftwareSlotCardProps {
   onSaveKey: (slot: SalesSlot, key: string) => Promise<boolean>;
   /** [대장에 올리기] / [다시 올리기] */
   onPushLedger: (unitId: string) => void;
+  /** 저장값과 다른 초안이 생기거나 없어질 때(열쇠 = 칸 DOM id) — 상세가 "입력 중"이면 영업 변경을 바로 다시 읽지 않음(E1) */
+  onDirtyChange?: (key: string, dirty: boolean) => void;
 }
 
 interface Draft {
@@ -44,6 +46,17 @@ function draftOf(u: SalesUnitRow | null): Draft {
     user: u?.extra?.user ?? '',
     note: u?.note ?? '',
   };
+}
+
+/** 초안이 저장값과 같은지(공백 무시 — commit 이 보내는 기준과 같음) */
+function sameDraft(a: Draft, b: Draft): boolean {
+  return (
+    a.model.trim() === b.model.trim() &&
+    a.maker.trim() === b.maker.trim() &&
+    a.pc.trim() === b.pc.trim() &&
+    a.user.trim() === b.user.trim() &&
+    a.note.trim() === b.note.trim()
+  );
 }
 
 type Status = 'idle' | 'saving' | 'saved' | 'error';
@@ -80,6 +93,15 @@ export default function SoftwareSlotCard(p: SoftwareSlotCardProps) {
     draftRef.current = merged;
     setDraft(merged);
   }, [unit]);
+
+  // 입력 중(저장값과 다른 초안) 알리기 — 칸이 사라지면 끝난 것으로
+  const dirtyKey = slotDomId(line.itemIndex, slot.unitNo);
+  const dirtyCb = useRef(p.onDirtyChange);
+  dirtyCb.current = p.onDirtyChange;
+  useEffect(() => {
+    dirtyCb.current?.(dirtyKey, !sameDraft(draft, base.current));
+  }, [draft, dirtyKey]);
+  useEffect(() => () => dirtyCb.current?.(dirtyKey, false), [dirtyKey]);
 
   function set(v: Partial<Draft>) {
     draftRef.current = { ...draftRef.current, ...v };

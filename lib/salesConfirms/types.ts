@@ -150,7 +150,30 @@ export interface NormalizedSalesConfirm {
   reason: string;
   /** (출력용) 계약·청구 요약 칸 — 없으면(예전 정규화로 만든 값) 전부 안 옴으로 봄 */
   print?: SalesPrintExtra;
+
+  // ── 영업 b33a4c3(2026-11-27) export 새 칸 — 설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md E24·E25 ──
+  // normalize 는 늘 채움. 선택(?)인 건 저장 칸으로 만드는 confirmFromStored(원문이 이상할 때만)가 안 채워도 되게.
+  /** 영업 출력 함수 종류 — 옛 원문(b33a4c3 전)이면 null → 출력 막음("다시 가져오기") */
+  renderer?: SalesRenderer | null;
+  /**
+   * 영업 출력 함수(renderConfirm·renderSwap·renderSvc)에 그대로 넣는 확인서 전체 = export `doc` 얕은 복사.
+   * svc 면 items[].cost(매입가)를 뺀 사본 — 이 값은 상세 데이터로 **브라우저까지 감**. 옛 원문이면 null.
+   */
+  formDoc?: Record<string, unknown> | null;
+  /** export status 그대로('deleted' = 영업 지운 목록에 있음). 진짜 지움 판정은 salesDeleted */
+  salesStatus?: 'active' | 'deleted';
+  /** 진짜 지움 = status 'deleted' 이고 savedAt ≤ deletedAt(둘 중 하나 모르면 지움) — 영업 납품·교체 저장이 지움 표시를 안 지움(G4) */
+  salesDeleted?: boolean;
+  /** 지운 시각(ISO — 영업 값은 시간대 없는 한국 시각이라 +09:00 으로 읽음, E24)·지운 사람 */
+  deletedAt?: string | null;
+  deletedBy?: string;
+  /** 처음 저장 시각(ISO, 첫 판 savedAt)·처음 만든 사람 — 접수일시 */
+  createdAt?: string | null;
+  createdBy?: string;
 }
+
+/** 영업 출력 함수 종류(export renderer) — confirm = 납품, swap = 교체, svc = 유지보수·소프트웨어 */
+export type SalesRenderer = 'confirm' | 'swap' | 'svc';
 
 /** 목록 "연락처" 칸 — 대표번호가 없으면 IT담당 → 계약담당 → 현장상주(이름과 같이 적힌 값 그대로) */
 export function contactLine(c: Partial<SalesConfirmContacts> | null | undefined): string {
@@ -249,6 +272,12 @@ export interface SalesImportCounts {
   unchanged: number;
   older: number;
   skipped: number;
+  // (2차 — 설계 E29·E30, 없으면 안 셈) 칸 다시 맞춘 줄 · 같은 판인데 hash 다름 · 받은 기간 안인데 이번에 없음 · 받은 크기 · 걸린 ms
+  repaired?: number;
+  sameVer?: number;
+  missing?: number;
+  bytes?: number;
+  ms?: number;
 }
 
 export interface SalesImportState {
@@ -331,14 +360,41 @@ export interface SalesImportRouteResult {
   state: SalesImportState | null;
   /** 진단(diag: true 로 부를 때만) — 받은 응답의 칸 이름·종류·건수 요약(값 없음, normalize.ts describeShape) */
   shape?: string;
+  /** 이번에 받은 기간이 90일(그날 첫 번·autoDeep)이었는지 — 목록 받기일 때만 */
+  deep?: boolean;
+  /**
+   * 한 건 받기({ id })일 때만(설계 E1) — 원문 없음. changed 는 위 숫자(0|1).
+   * notFound = 영업이 404(종류가 바뀜 등 — 아무것도 안 씀), ver = 받은 판(못 받았으면 null), salesDeleted = 받은 판이 진짜 지움인지.
+   */
+  one?: { ver: number | null; notFound: boolean; salesDeleted: boolean };
 }
 
 /**
  * importer.ts 가 내보낼 함수(라우트·홈이 부름):
- *   runSalesConfirmImport(opts: { force?: boolean; since?: string; trigger: SalesImportTrigger }): Promise<SalesImportRouteResult>
+ *   runSalesConfirmImport(opts: { force?: boolean; since?: string; trigger: SalesImportTrigger; diag?: boolean; id?: string }): Promise<SalesImportRouteResult>
+ *     id 가 있으면 한 건 받기(E1): ① 의 type 으로 `?id=&type=`(헤더 키, 4초), ⑤ 'one' 줄 3초 간격, 쓰기 규칙은 목록과 같음(①② 만).
  *   readSalesImportState(): Promise<SalesImportState | null>   // 표가 없으면 null
+ * 'detail' = 상세 화면(열 때·60초·탭 복귀), 'print' = 출력 창 열 때 — 둘 다 한 건 받기.
  */
-export type SalesImportTrigger = 'page' | 'interval' | 'manual' | 'pick-date' | 'home';
+export type SalesImportTrigger = 'page' | 'interval' | 'manual' | 'pick-date' | 'home' | 'detail' | 'print';
+
+/**
+ * 중계 라우트 POST /api/sales-confirms/form-html { id } 응답(설계 E8) — 영업 html=1(그 순간 영업 최신 양식)을 **JSON 으로만** 감싸 줌.
+ * text/html 로 절대 안 내보냄(우리 주소에서 영업 HTML 이 페이지로 열리면 안 됨). 키는 헤더로만(주소에 안 붙임).
+ *   copy_only    = 환경값 SALES_FORM_SOURCE=copy(끄는 스위치) — 화면은 사본으로
+ *   busy         = ⑤ 'html' 줄 2초 간격에 걸림 — 화면은 사본으로(또는 잠시 뒤 다시)
+ *   not_found    = ① 에 없는 id 이거나 영업 404
+ *   too_big      = 2MB 넘음
+ *   그 밖 = SalesImportErrorCode 와 같은 뜻(no_key·unauthorized·unreachable·db_error)
+ */
+export type SalesFormHtmlResult =
+  | { ok: true; html: string }
+  | {
+      ok: false;
+      reason: 'copy_only' | 'busy' | 'not_found' | 'too_big' | 'no_key' | 'unauthorized' | 'unreachable' | 'bad_request' | 'db_error';
+      /** 쉬운 말(출력 창 위 한 줄에 그대로) */
+      message: string;
+    };
 
 // ───────────────────────── 목록(1단계) ─────────────────────────
 
@@ -730,41 +786,118 @@ export type LicenseActionResult<T> =
 
 // ───────────────────────── 출력(developer D — §3-9, D15~D18·D21~D23·D25·D30) ─────────────────────────
 
+// ── 1차(2026-11-27, 설계 docs/tasks/2026-11-27-sales-export-b33a4c3.md E4~E23) — 옛 P1·P2·P3(납품)·출고 명세 옵션·D22 한도 폐기 ──
+// 흐름(출력 창): ① 한 건 받기(import { id, trigger:'print' }) → ② 중계 form-html → 영업 실시간 HTML
+//   → DOMParser(스크립트 안 도는 빈 문서) → body data-it-spec 확인 → ③ 안 되면 사본 renderCopy(…, marks=true) 를 DOMParser
+//   → ④ itFill.applyFillPlan(doc, plan) → '<!doctype html>' + outerHTML → sandbox iframe(allow-same-origin 금지).
+// 채우기는 한 길: printFill.buildFillPlan(순수) = "어느 표시 칸에 무슨 값", itFill.applyFillPlan(DOM) = 넣기. 정규식으로 HTML 고치기 금지.
+//
+// printFill.ts(developer D) 가 내보낼 것:
+//   buildFillPlan(input: SalesPrintInput): SalesFillPlan                                     — 순수, 브라우저·Node 어디서나
+//   renderCopy(doc: Record<string, unknown>, renderer: SalesRenderer, origin: string, withBack: boolean, marks: boolean, regionFill?: string | null): string
+//                                                                                             — 사본(b33a4c3) 그리기. marks=false 면 영업 원본과 글자까지 같음
+//   SALES_FORM_COPY_LABEL: string                                                             — 출력 창 "받아 둔 양식(○○판)" 글자
+//   SALES_PRINT_MSG_SOURCE / _PRINT / _OVERFLOW / _SIZE                                       — iframe 신호 이름(지금 그대로)
+// salesForm/itFill.ts(developer D) 가 내보낼 것:
+//   IT_MARK(표시 이름 상수) · fillKey(mark, item?, unit?) · readFormMarks(doc: Document): SalesFormMarks
+//   applyFillPlan(doc: Document, plan: SalesFillPlan, renderer: SalesRenderer): SalesFillApplyResult   — textContent·createElement 로만
+//   serializeFilled(doc: Document): string                                                    — '<!doctype html>' + documentElement.outerHTML
+
 export interface SalesPrintOptions {
-  /** 2면(출고·설치 확인) 포함 — 기본 true(영업과 같게) */
+  /** 2면(출고·설치 확인) 포함 — 기본 false(영업 b33a4c3 이 기본으로 안 냄, E18). 납품만 뜻 있음 */
   withBack: boolean;
-  /** 출고 명세(대수별) 장 — 'auto' = 칸에 안 들어갈 때만, 'always' = 늘 */
-  attach: 'auto' | 'always';
-  /** 라이선스 키 — 'shown' = licenseKeys 의 값을 찍음, 'blank' = 그 자리 밑줄 빈칸 */
+  /** 라이선스 키 — 'shown' = licenseKeys 의 값을 찍음, 'blank' = 그 자리 빈칸(D30) */
   keys: 'shown' | 'blank';
+  /** 'fill' = IT 기재 넣음(출력 기록 남김) · 'original' = 영업 원본 그대로(채우기 없음·기록 안 남김, E22) */
+  mode: SalesPrintMode;
 }
+
+export type SalesPrintMode = 'fill' | 'original';
 
 export interface SalesPrintNote {
   tone: 'info' | 'warn';
   text: string;
 }
 
-/** printFill.ts buildSalesPrintHtml(input) 입력 — 화면(상세 데이터)에서 바로 만듦, 서버 안 부름(키만 따로) */
+/** buildFillPlan 입력 — 화면(상세 데이터)에서 바로 만듦, 서버 안 부름(키만 따로) */
 export interface SalesPrintInput {
   detail: SalesConfirmDetailData;
   /** ④ id → 라이선스 키(잠금이 풀렸을 때 getSalesPrintKeys 로 받은 것 — 출력 창 메모리에만) */
   licenseKeys: Record<string, string>;
   options: SalesPrintOptions;
-  /** 넘침 신호(P6ⓑ)를 받은 품목 줄(itemIndex) — 그 줄은 "출고 명세 참조"로 돌림 */
-  overflowItems?: number[];
   nowIso: string;
-  /** 이미지 절대 주소용(location.origin) */
-  origin: string;
   /** 출력하는 사람(꼬리 "IT 기재") */
   actor: string;
 }
 
-export interface SalesPrintResult {
-  /** iframe srcDoc 에 그대로 — 완성된 HTML 문서 한 장(영업 양식). blocked 면 '' */
-  html: string;
+/** 칸에 넣을 글자 한 토막 — emph = 영업 요청과 다름(굵게+밑줄, 흑백 인쇄라 색 안 씀, E14) */
+export interface SalesFillPart {
+  text: string;
+  emph: boolean;
+}
+
+/** 표시 칸 하나에 넣을 값 */
+export interface SalesFillCell {
+  parts: SalesFillPart[];
+  /** 칸 아래 작은 굵은 줄(교체 "출고 ○○" — E19) — 없으면 '' */
+  sub: string;
+}
+
+/** 유지보수·소프트웨어 'IT 기재 명세' 장(E20) — 영업 고객 서명 장 뒤에 같은 틀·색으로 붙음 */
+export interface SalesSvcSheet {
+  /** 'IT 기재 명세 — 유지보수 대상 기기' | 'IT 기재 명세 — 소프트웨어 라이선스' */
+  title: string;
+  /** 작은 머리(영업 값 그대로) */
+  company: string;
+  startDate: string;
+  docNo: string;
+  /** 머리줄(순 포함) — 유지보수: 순·품목·자산번호·S/N / 소프트웨어: 순·제품·설치 PC·사용자·라이선스 키 */
+  columns: string[];
+  /** 줄마다 칸 글자(순 포함). 안 채운 대수는 빈 글자 줄 */
+  rows: string[][];
+}
+
+/** printFill.buildFillPlan 결과 — 값은 전부 그냥 글자(넣는 쪽이 textContent 로) */
+export interface SalesFillPlan {
+  /** itFill.fillKey(mark, item, unit) 열쇠 → 칸 값. 원본 모드면 {} */
+  cells: Record<string, SalesFillCell>;
+  /** 2면 칸(withBack 이고 납품일 때만) */
+  back: { preparer: string; shipDate: string } | null;
+  /** 꼬리 끝 " · IT 기재 MM-DD HH:mm 이름" — 원본 모드면 '' */
+  stamp: string;
+  /** svc 일 때만 */
+  svcSheet: SalesSvcSheet | null;
+  /** 사본으로 그릴 때 doc 복사본 region 이 비면 넣을 추정 지역(D21) — 영업 실시간 HTML 엔 안 씀 */
+  regionFill: string | null;
   notes: SalesPrintNote[];
-  /** 출력을 막는 이유(예: 교체·유지보수 확인서 — 영업 최신 양식 받기 전, D24) — 없으면 null */
+  /** 출력을 막는 이유(옛 원문이라 formDoc·renderer 없음 등) — 없으면 null */
   blocked: string | null;
-  /** 출고 명세 장을 붙였는지 */
-  attached: boolean;
+}
+
+/** <body> 표시(영업이 붙이거나 사본이 marks=true 로 붙임) — 없으면 spec null */
+export interface SalesFormMarks {
+  spec: string | null;
+  form: SalesRenderer | null;
+  ver: number | null;
+  id: string | null;
+}
+
+/** applyFillPlan 결과 */
+export interface SalesFillApplyResult {
+  /** 넣을 값이 있는데 갈 칸을 못 찾은 열쇠들(값 없음) — 실시간 HTML 에서 1개라도 있으면 E7 고르기 */
+  missing: string[];
+  /** 실제로 값을 넣은 칸 수 */
+  filled: number;
+}
+
+/** 출력 창이 그린 결과(화면 상태) */
+export interface SalesPrintBuild {
+  html: string;
+  /** 'live' = 영업 실시간 HTML · 'copy' = 받아 둔 사본(SALES_FORM_COPY_LABEL) */
+  source: 'live' | 'copy';
+  /** copy 일 때 쉬운 말 이유(예: "영업 양식에 아직 IT 칸 표시가 없어요") — live 면 '' */
+  sourceReason: string;
+  missing: string[];
+  notes: SalesPrintNote[];
+  blocked: string | null;
 }

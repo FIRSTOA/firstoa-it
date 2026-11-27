@@ -188,6 +188,13 @@ function toIso(v: unknown): string | null {
   }
   const s = str(v);
   if (!s) return null;
+  // 영업 시각 = 시간대 없는 한국 시각 'YYYY-MM-DD HH:mm(:ss)'(E24) — 서버 시간대와 상관없이 +09:00 으로 읽음.
+  // 시간대(Z·+hh:mm)가 붙은 값은 아래에서 그대로.
+  const kst = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(:\d{2})?(\.\d+)?$/);
+  if (kst) {
+    const t = Date.parse(`${kst[1]}T${kst[2]}${kst[3] ?? ':00'}${kst[4] ?? ''}+09:00`);
+    return Number.isFinite(t) ? new Date(t).toISOString() : null;
+  }
   const t = Date.parse(s);
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
@@ -298,6 +305,27 @@ function contactsOf(v: unknown): SalesConfirmContacts {
   };
 }
 
+/** 영업 svcQty 규칙 — 숫자와 점만 남겨 반올림('3대' → 3, 빈 값 → 0) */
+function svcQty(v: unknown): number {
+  const n = Math.round(Number(String(v ?? '').replace(/[^\d.]/g, '')) || 0);
+  return Math.max(0, n);
+}
+
+/** 영업 doc 얕은 복사 — svc 면 items[].cost(매입가)를 뺀 새 배열(브라우저로 안 감, E25) */
+function formDocOf(doc: unknown, renderer: 'confirm' | 'swap' | 'svc' | null): Record<string, unknown> | null {
+  if (!isObj(doc)) return null;
+  const copy: Record<string, unknown> = { ...doc };
+  if (renderer === 'svc' && Array.isArray(doc.items)) {
+    copy.items = doc.items.map((it) => {
+      if (!isObj(it)) return it;
+      const { cost: _cost, ...rest } = it;
+      void _cost;
+      return rest;
+    });
+  }
+  return copy;
+}
+
 /** 글자(키 포함) 안에 NUL 문자가 있는지 — Postgres jsonb·text 가 거절함 */
 function hasNulChar(v: unknown, depth = 0): boolean {
   if (depth > 20) return false;
@@ -318,7 +346,30 @@ export function normalizeSalesConfirm(raw: unknown): NormalizeResult {
   // Postgres 는 글자 안의 \u0000 을 받지 않음(jsonb·text) — 그 건만 건너뜀
   if (hasNulChar(raw)) return { ok: false, id, reason: '원문에 쓸 수 없는 글자(\\u0000)가 있음' };
 
-  const items = (Array.isArray(raw.items) ? raw.items : []).map(itemOf).filter((x): x is SalesConfirmItem => x !== null);
+  const renderer: 'confirm' | 'swap' | 'svc' | null =
+    raw.renderer === 'confirm' || raw.renderer === 'swap' || raw.renderer === 'svc' ? raw.renderer : null;
+  const formDoc = formDocOf(raw.doc, renderer);
+
+  let items: SalesConfirmItem[];
+  if (renderer === 'svc' && isObj(raw.doc) && Array.isArray(raw.doc.items)) {
+    // 유지보수·소프트웨어: 맨 위 items 의 qty 는 '3대' 면 0 이라 doc 에서(영업 종이도 이름 있는 줄만·숫자만 셈)
+    const kind = str(raw.type);
+    items = [];
+    for (const it of raw.doc.items) {
+      if (!isObj(it)) continue;
+      const name = str(it.name);
+      if (!name) continue;
+      items.push({ cat: kind || '기타', model: name, maker: '', state: '', qty: svcQty(it.qty), spec: {}, place: '', rent: null });
+    }
+  } else {
+    items = (Array.isArray(raw.items) ? raw.items : []).map(itemOf).filter((x): x is SalesConfirmItem => x !== null);
+  }
+  const savedAt = toIso(raw.savedAt);
+  const deletedAt = toIso(raw.deletedAt);
+  const salesStatus: 'active' | 'deleted' = raw.status === 'deleted' ? 'deleted' : 'active';
+  // 진짜 지움 = deleted 이고 마지막 저장 ≤ 지운 시각(영업 납품·교체 저장은 지움 표시를 안 지움). 둘 중 하나 모르면 지움으로
+  const salesDeleted =
+    salesStatus === 'deleted' && (savedAt === null || deletedAt === null || Date.parse(savedAt) <= Date.parse(deletedAt));
   const supplies = (Array.isArray(raw.supplies) ? raw.supplies : [])
     .map(supplyOf)
     .filter((x): x is SalesConfirmSupply => x !== null);
@@ -332,7 +383,7 @@ export function normalizeSalesConfirm(raw: unknown): NormalizeResult {
       ver: Math.trunc(verRaw),
       type: str(raw.type),
       term: str(raw.term),
-      savedAt: toIso(raw.savedAt),
+      savedAt,
       savedBy: str(raw.savedBy),
       salesRep: str(raw.sales),
       company: str(raw.company),
@@ -349,6 +400,14 @@ export function normalizeSalesConfirm(raw: unknown): NormalizeResult {
       leaseNo: str(raw.leaseNo),
       reason: str(raw.reason),
       print: printOf(raw),
+      renderer,
+      formDoc,
+      salesStatus,
+      salesDeleted,
+      deletedAt,
+      deletedBy: str(raw.deletedBy),
+      createdAt: toIso(raw.createdAt),
+      createdBy: str(raw.createdBy),
     },
   };
 }

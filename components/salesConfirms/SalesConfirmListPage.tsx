@@ -27,7 +27,8 @@ import { addDays, digitsOnly, fmtDate, kstToday, weekRange } from './format';
 import ImportStatusBar from './ImportStatusBar';
 import SalesConfirmTable, { type SheetColumnState } from './SalesConfirmTable';
 
-const INTERVAL_MS = 3 * 60 * 1000;
+/** 자동 가져오기 간격(화면이 보일 때만) — 설계 E2(2026-11-27): 3분 → 1분. 겹침 막기 60초는 서버(importer)가 그대로 */
+const INTERVAL_MS = 60 * 1000;
 const COMPARE_KEY = 'firstoa-it.sales-confirm-sheet-compare';
 
 type StatusFilter = 'default' | 'all' | SalesConfirmStatus;
@@ -85,7 +86,7 @@ function matchSearch(row: SalesConfirmListRow, q: string): boolean {
 
 /**
  * 영업 확인서 목록 화면(1단계). page.tsx 가 initial 로 저장된 목록을 건네고,
- * 이 화면이 열려 있는 동안 영업 웹앱에서 가져오기(열 때 1번 · 화면이 보이면 3분마다 · 🔄 · ⋯)를 API 라우트로 부름.
+ * 이 화면이 열려 있는 동안 영업 웹앱에서 가져오기(열 때 1번 · 화면이 보이면 1분마다 · 🔄 · ⋯)를 API 라우트로 부름.
  * 영업 웹앱이 안 돼도 저장된 목록은 그대로 보임(띠에만 이유).
  */
 export default function SalesConfirmListPage({ initial }: { initial: SalesConfirmListResult }) {
