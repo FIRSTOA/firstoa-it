@@ -9,6 +9,8 @@ import { listPrepEvents, type PrepEventRow } from '@/app/shipment-prep/actions';
 import { listConfirmDocs } from '@/app/confirmForm/sheetActions';
 import { summarizeReview } from '@/lib/billingAllocation';
 import { buildContractsOverview } from '@/lib/contracts/clients';
+import { nextBusinessDay } from '@/lib/businessDay';
+import { readDeliveryModes } from '@/lib/salesConfirms/listQuery';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import {
@@ -50,13 +52,7 @@ function fmtYmd(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** 다음 영업일(주말 건너뜀) — 출고 준비 화면과 같은 규칙: 오늘 준비하는 건 다음 영업일 출고분 */
-export function nextBusinessDay(ymd: string): string {
-  const d = parseYmd(ymd);
-  do d.setUTCDate(d.getUTCDate() + 1);
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
-  return fmtYmd(d);
-}
+// 다음 영업일은 lib/businessDay.ts(순수 — 확인서 목록 화면도 같이 씀)
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -480,14 +476,20 @@ export async function loadSalesConfirmCard(today: string): Promise<WorkCard> {
     let isNew = 0;
     let urgent = 0;
     let changed = 0;
+    const urgentIds: string[] = [];
     for (const c of confirms) {
       const w = work.get(c.id);
       const status = w?.status || '접수';
       if (status === '출고' || status === '취소') continue;
       if (!w || !w.first_opened_at) isNew++;
-      if (c.delivery_date && c.delivery_date >= today && c.delivery_date <= target && (status === '접수' || status === '준비중')) urgent++;
+      if (c.delivery_date && c.delivery_date >= today && c.delivery_date <= target && (status === '접수' || status === '준비중')) urgentIds.push(c.id);
       const ver = c.ver ?? 0;
       if (w && salesChangedSince(w.seen_ver, ver)) changed++;
+    }
+    // 직송(매입처 → 고객사, 우리가 준비 안 함)은 "준비 안 끝남"에서 뺌(4-0 F29). 칸을 못 읽으면 빼지 않고 센다(로그에 code).
+    if (urgentIds.length) {
+      const modes = await readDeliveryModes(supabase, urgentIds);
+      urgent = urgentIds.filter((id) => !modes.map.get(id)?.directShip).length;
     }
     return {
       key: 'salesConfirm',

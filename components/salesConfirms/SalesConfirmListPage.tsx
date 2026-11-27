@@ -20,11 +20,13 @@ import {
   type SalesConfirmListResult,
   type SalesConfirmListRow,
   type SalesConfirmStatus,
+  type SalesListGroup,
   type SalesImportRouteResult,
   type SalesImportTrigger,
   type SalesWorkSaveResult,
   type SheetOnlyRow,
 } from '@/lib/salesConfirms/types';
+import { nextBusinessDay } from '@/lib/businessDay';
 import { addDays, digitsOnly, fmtDate, kstToday, weekRange } from './format';
 import ImportStatusBar from './ImportStatusBar';
 import SalesConfirmTable, { type SheetColumnState } from './SalesConfirmTable';
@@ -37,10 +39,19 @@ const COMPARE_KEY = 'firstoa-it.sales-confirm-sheet-compare';
 type StatusFilter = 'default' | 'all' | 'deleted' | SalesConfirmStatus;
 type DateFilter = 'all' | 'today' | 'tomorrow' | 'week' | 'past';
 /**
- * 목록 위 두 항목(2026-11-27 사용자: 판매·철수·이전은 출고 준비가 아니니 "별도의 항목으로만 우선 보이게").
- * 'ship' = 출고 준비 확인서(납품·교체·유지보수·소프트웨어, 기본) · 'other' = 철수·이전·판매(isOtherSalesType)
+ * 목록 위 세 항목(2026-11-27 사용자: 판매·철수·이전은 출고 준비가 아니니 "별도의 항목으로만", 직송도 따로).
+ * 'ship' = 출고 준비 확인서(납품·교체·유지보수·소프트웨어, 기본) · 'direct' = 직송(매입처 → 고객사, 우리를 안 거침) · 'other' = 철수·이전·판매
  */
-type ListGroup = 'ship' | 'other';
+type ListGroup = SalesListGroup;
+/** 날짜 밖 소식 거르기(F27) — 새로 · 영업에서 수정됨 · 영업에서 지웠는데 준비 중 */
+type NewsFilter = 'new' | 'changed' | 'deleted';
+/** 숫자 카드를 눌러 거르기 — 준비 남음 / 준비 완료 / 전체 */
+type CardFilter = 'all' | 'left' | 'done';
+
+const LEFT_STATUSES: readonly string[] = ['접수', '준비중', '보류'];
+const DONE_STATUSES: readonly string[] = ['준비완료', '출고'];
+/** 영업에서 지웠는데 IT가 손댄(준비 중) 처리여부 */
+const TOUCHED_STATUSES: readonly string[] = ['준비중', '준비완료', '보류'];
 
 const DATE_FILTERS: { key: DateFilter; label: string }[] = [
   { key: 'all', label: '전체' },
@@ -83,6 +94,59 @@ function isSalesDeletedRow(row: SalesConfirmListRow): boolean {
 /** 따로 보는 종류(판매·철수·이전) — 서버 값이 없으면 종류 이름으로 */
 function isOtherRow(row: SalesConfirmListRow): boolean {
   return row.other ?? isOtherSalesType(row.type);
+}
+
+function groupOf(row: SalesConfirmListRow): ListGroup {
+  if (isOtherRow(row)) return 'other';
+  return row.directShip ? 'direct' : 'ship';
+}
+
+/** 지역 순 — 수도권A→E(일정 시간 9·12·15·18·21시 순), 그 밖 지역, 지역 없음은 맨 뒤 */
+function regionRank(region: string): number {
+  const m = /^수도권\s*([A-Ea-e])/.exec(region.trim());
+  if (m) return m[1].toUpperCase().charCodeAt(0) - 65;
+  return region.trim() ? 10 : 11;
+}
+
+function comparePrep(a: SalesConfirmListRow, b: SalesConfirmListRow): number {
+  const ra = regionRank(a.region || '');
+  const rb = regionRank(b.region || '');
+  if (ra !== rb) return ra - rb;
+  if ((a.region || '') !== (b.region || '')) return (a.region || '').localeCompare(b.region || '', 'ko');
+  const c = (a.company || '').localeCompare(b.company || '', 'ko');
+  return c !== 0 ? c : (a.docNo || '').localeCompare(b.docNo || '', 'ko', { numeric: true });
+}
+
+/** 준비하는 날 보기의 처리여부 — 기본은 영업에서 지운 건·취소를 뺌(고르면 그것만/전체) */
+function matchPrepStatus(row: SalesConfirmListRow, f: StatusFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'deleted') return isSalesDeletedRow(row);
+  if (f !== 'default') return row.status === f;
+  return !isSalesDeletedRow(row) && row.status !== '취소';
+}
+
+/** 날짜 밖 소식 셈 — exceptDate 납품분은 뺌('' 이면 전부). 기본 보기에서 숨는 건은 안 셈 */
+function countNews(rows: SalesConfirmListRow[], exceptDate: string, today: string) {
+  let fresh = 0;
+  let changed = 0;
+  let deleted = 0;
+  for (const r of rows) {
+    if (exceptDate && r.deliveryDate === exceptDate) continue;
+    if (isSalesDeletedRow(r)) {
+      if (TOUCHED_STATUSES.includes(r.status)) deleted += 1;
+      continue;
+    }
+    if (isHiddenByDefault(r, today)) continue;
+    if (r.isNew) fresh += 1;
+    if (r.salesChanged) changed += 1;
+  }
+  return { fresh, changed, deleted };
+}
+
+function matchNews(row: SalesConfirmListRow, f: NewsFilter): boolean {
+  if (f === 'deleted') return isSalesDeletedRow(row) && TOUCHED_STATUSES.includes(row.status);
+  if (isSalesDeletedRow(row)) return false;
+  return f === 'new' ? row.isNew : !!row.salesChanged;
 }
 
 function matchStatus(row: SalesConfirmListRow, f: StatusFilter, today: string): boolean {
@@ -128,6 +192,10 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   // 지역(영업 웹앱 수도권A~E — 배송 동선) 거르기
   const [regionF, setRegionF] = useState('all');
   const [dateF, setDateF] = useState<DateFilter>('all');
+  // 준비하는 날(출고 준비 리스트와 같음) — 'YYYY-MM-DD', '' = 전체. 브라우저에 안 남기고 늘 오늘로 시작
+  const [prepDate, setPrepDate] = useState<string>(() => kstToday());
+  const [cardF, setCardF] = useState<CardFilter>('all');
+  const [newsF, setNewsF] = useState<NewsFilter | null>(null);
   const [procF, setProcF] = useState('all'); // 'all' | 'none' | 이름
   const [q, setQ] = useState('');
 
@@ -356,13 +424,35 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   // ───────── 보이는 줄 계산 ─────────
   const today = useMemo(() => kstToday(nowMs), [nowMs]);
 
-  // 두 항목 나누기 — 아래 칩·숫자·필터는 고른 항목 안에서만
+  // 세 항목 나누기 — 아래 칩·숫자·필터는 고른 항목 안에서만
   const groupCounts = useMemo(() => {
-    let other = 0;
-    for (const r of rows) if (isOtherRow(r)) other += 1;
-    return { ship: rows.length - other, other };
+    const c = { ship: 0, direct: 0, other: 0 };
+    for (const r of rows) c[groupOf(r)] += 1;
+    return c;
   }, [rows]);
-  const groupRows = useMemo(() => rows.filter((r) => isOtherRow(r) === (group === 'other')), [rows, group]);
+  const groupRows = useMemo(() => rows.filter((r) => groupOf(r) === group), [rows, group]);
+
+  // 준비하는 날 보기(출고 준비 확인서 항목에서 날짜를 골랐을 때) — 그날 납품분 = 고른 날의 다음 영업일
+  const prepMode = group === 'ship' && prepDate !== '';
+  const target = prepMode ? nextBusinessDay(prepDate) : '';
+  // 숫자 카드 범위: 그날 납품분에서 영업에서 지운 건·취소를 뺀 것(직송·철수·이전·판매는 항목이 달라 이미 빠짐)
+  const prepScope = useMemo(
+    () => (prepMode ? groupRows.filter((r) => r.deliveryDate === target && !isSalesDeletedRow(r) && r.status !== '취소') : []),
+    [prepMode, groupRows, target],
+  );
+  const prepLeft = useMemo(() => prepScope.filter((r) => LEFT_STATUSES.includes(r.status)).length, [prepScope]);
+  const prepDone = useMemo(() => prepScope.filter((r) => DONE_STATUSES.includes(r.status)).length, [prepScope]);
+  // 그날 납품이지만 직송이라 여기서 빠진 건수(안내용)
+  const directOnTarget = useMemo(
+    () =>
+      prepMode
+        ? rows.filter((r) => groupOf(r) === 'direct' && r.deliveryDate === target && !isSalesDeletedRow(r) && r.status !== '취소').length
+        : 0,
+    [prepMode, rows, target],
+  );
+  // 날짜 밖 소식(F27): 준비하는 날 보기엔 그날 납품이 아닌 것만, 전체 보기 칩엔 전부
+  const newsOutside = useMemo(() => countNews(groupRows, target, today), [groupRows, target, today]);
+  const newsAll = useMemo(() => countNews(groupRows, '', today), [groupRows, today]);
   const deletedCount = useMemo(() => groupRows.filter(isSalesDeletedRow).length, [groupRows]);
 
   const typeOptions = useMemo(() => {
@@ -385,22 +475,39 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
   }, [groupRows, meta.people]);
 
   const visible = useMemo(() => {
-    return groupRows.filter((r) => {
-      if (!matchStatus(r, statusF, today)) return false;
+    const list = groupRows.filter((r) => {
+      if (prepMode) {
+        if (r.deliveryDate !== target) return false;
+        if (!matchPrepStatus(r, statusF)) return false;
+        if (cardF === 'left' && !LEFT_STATUSES.includes(r.status)) return false;
+        if (cardF === 'done' && !DONE_STATUSES.includes(r.status)) return false;
+      } else {
+        if (!matchStatus(r, statusF, today)) return false;
+        if (!matchDate(r, dateF, today)) return false;
+        if (newsF && !matchNews(r, newsF)) return false;
+      }
       if (typeF !== 'all' && r.type !== typeF) return false;
       if (regionF !== 'all' && (r.region || '') !== regionF) return false;
-      if (!matchDate(r, dateF, today)) return false;
       if (procF === 'none' && r.processors.length > 0) return false;
       if (procF !== 'all' && procF !== 'none' && !r.processors.includes(procF)) return false;
       return matchSearch(r, q);
     });
-  }, [groupRows, statusF, typeF, regionF, dateF, procF, q, today]);
+    // 준비하는 날 보기는 지역 순(수도권A→E, 그 밖·없음은 뒤) → 상호
+    return prepMode ? [...list].sort(comparePrep) : list;
+  }, [groupRows, prepMode, target, statusF, cardF, newsF, typeF, regionF, dateF, procF, q, today]);
 
   // 화면을 그릴 때마다 맞춰 둠 — 열 때 비교(effect)가 첫 줄 목록을 바로 쓰게
   visibleIdsRef.current = visible.map((r) => r.id);
 
   const filtersChanged =
-    statusF !== 'default' || typeF !== 'all' || regionF !== 'all' || dateF !== 'all' || procF !== 'all' || q.trim() !== '';
+    statusF !== 'default' ||
+    typeF !== 'all' ||
+    regionF !== 'all' ||
+    (!prepMode && dateF !== 'all') ||
+    (prepMode && cardF !== 'all') ||
+    (!prepMode && newsF !== null) ||
+    procF !== 'all' ||
+    q.trim() !== '';
 
   /** 항목을 바꾸면 그 항목에 없을 수 있는 구분·지역 칩은 풂(다른 필터는 그대로) */
   function changeGroup(next: ListGroup) {
@@ -408,6 +515,8 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     setGroup(next);
     setTypeF('all');
     setRegionF('all');
+    setCardF('all');
+    setNewsF(null);
   }
 
   function clearFilters() {
@@ -415,8 +524,26 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
     setTypeF('all');
     setRegionF('all');
     setDateF('all');
+    setCardF('all');
+    setNewsF(null);
     setProcF('all');
     setQ('');
+  }
+
+  /** 준비하는 날 바꾸기 — 숫자 카드·소식 거르기는 풂(그날 기준이 바뀌므로) */
+  function pickPrepDate(v: string) {
+    setPrepDate(v);
+    setCardF('all');
+    setNewsF(null);
+  }
+
+  /** 날짜 밖 소식 [보기] — 전체 보기로 + 그 거르기(처리여부·날짜 칩은 기본으로) */
+  function showNews(f: NewsFilter) {
+    setPrepDate('');
+    setCardF('all');
+    setStatusF('default');
+    setDateF('all');
+    setNewsF(f);
   }
 
   // ───────── 줄 바꾸기 ─────────
@@ -490,8 +617,17 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
 
   // 시트 비교는 출고 준비 확인서에서만(철수·이전·판매는 예전 시트와 맞출 게 없음)
   const isOtherGroup = group === 'other';
-  const showSheet = compare && !isPhone && !isOtherGroup;
-  const groupLabel = isOtherGroup ? '철수·이전·판매' : '출고 준비 확인서';
+  const isDirectGroup = group === 'direct';
+  const isShipGroup = group === 'ship';
+  const showSheet = compare && !isPhone && isShipGroup;
+  const groupLabel = isOtherGroup ? '철수·이전·판매' : isDirectGroup ? '직송' : '출고 준비 확인서';
+  const targetLabel = fmtDate(target);
+  const newsParts: { key: NewsFilter; label: string; n: number }[] = [
+    { key: 'new', label: '새 확인서', n: newsOutside.fresh },
+    { key: 'changed', label: '영업에서 수정됨', n: newsOutside.changed },
+    { key: 'deleted', label: '영업에서 지웠는데 준비 중', n: newsOutside.deleted },
+  ];
+  const newsShown = newsParts.filter((p) => p.n > 0);
 
   // ───────── 그리기 ─────────
   return (
@@ -532,6 +668,16 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
             </button>
             <button
               type="button"
+              className={`sc-group-btn direct${group === 'direct' ? ' on' : ''}`}
+              aria-pressed={group === 'direct'}
+              onClick={() => changeGroup('direct')}
+              title="우리를 안 거치고 매입처에서 고객사로 바로 가는 건 — 출고 준비 숫자에서 빠져요"
+            >
+              <span>직송</span>
+              <b className="sc-group-n">{groupCounts.direct}</b>
+            </button>
+            <button
+              type="button"
               className={`sc-group-btn other${group === 'other' ? ' on' : ''}`}
               aria-pressed={group === 'other'}
               onClick={() => changeGroup('other')}
@@ -547,6 +693,94 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 철수·이전·판매 확인서는 출고 준비 대상이 아니라 여기에 따로 모아 보여 줘요(자산번호·시리얼·출력 칸 없음). 처리여부·처리자는 바꿀 수 있어요.
               </span>
             </div>
+          )}
+          {isDirectGroup && (
+            <div className="ct-band muted sc-other-note" role="note">
+              <span>우리를 안 거치고 매입처에서 바로 가는 건 — 출고 준비 숫자에서 빠져요. 눌러서 열면 받은 시리얼·자산번호를 적어 둘 수 있어요.</span>
+            </div>
+          )}
+
+          {isShipGroup && (
+            <>
+              {prepMode && (
+                <div className="sc-kpis">
+                  <button
+                    type="button"
+                    className={`sc-kpi bad${cardF === 'left' ? ' on' : ''}`}
+                    aria-pressed={cardF === 'left'}
+                    onClick={() => {
+                      setStatusF('default');
+                      setCardF(cardF === 'left' ? 'all' : 'left');
+                    }}
+                  >
+                    <div className="sc-kpi-label">🚨 준비 남음</div>
+                    <div className="sc-kpi-v">
+                      {prepLeft}
+                      <small>건</small>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`sc-kpi good${cardF === 'done' ? ' on' : ''}`}
+                    aria-pressed={cardF === 'done'}
+                    onClick={() => {
+                      setStatusF('default');
+                      setCardF(cardF === 'done' ? 'all' : 'done');
+                    }}
+                  >
+                    <div className="sc-kpi-label">✅ 준비 완료</div>
+                    <div className="sc-kpi-v">
+                      {prepDone}
+                      <small>건</small>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className={`sc-kpi${cardF === 'all' ? ' on' : ''}`}
+                    aria-pressed={cardF === 'all'}
+                    onClick={() => {
+                      setStatusF('default');
+                      setCardF('all');
+                    }}
+                  >
+                    <div className="sc-kpi-label">전체</div>
+                    <div className="sc-kpi-v">
+                      {prepScope.length}
+                      <small>건</small>
+                    </div>
+                  </button>
+                </div>
+              )}
+
+              <div className="panel sc-prepday">
+                <span className="sc-prepday-label">준비하는 날</span>
+                <input type="date" value={prepDate} aria-label="준비하는 날" onChange={(e) => pickPrepDate(e.target.value)} />
+                <button type="button" className={`chip${prepDate === today ? ' active' : ''}`} onClick={() => pickPrepDate(today)}>
+                  오늘
+                </button>
+                <button type="button" className={`chip${!prepDate ? ' active' : ''}`} onClick={() => pickPrepDate('')}>
+                  전체
+                </button>
+                {prepMode && <span className="sc-prepday-to">→ {targetLabel} 납품분</span>}
+                {!prepMode && <span className="sc-prepday-to">지금 목록 그대로 보고 있어요(날짜를 고르면 그날 준비할 것만)</span>}
+              </div>
+
+              {prepMode && newsShown.length > 0 && (
+                <div className="ct-band warn sc-news" role="status">
+                  <span className="sc-news-label">다른 날짜 —</span>
+                  <div className="sc-news-parts">
+                    {newsShown.map((p) => (
+                      <span key={p.key} className="sc-news-part">
+                        {p.label} <b>{p.n}</b>
+                        <button type="button" className="btn btn-ghost sc-news-btn" onClick={() => showNews(p.key)}>
+                          보기
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           <div className="panel sc-filters">
@@ -564,13 +798,28 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 <span className="filter-label">처리여부</span>
                 <div className="chip-group">
                   <button type="button" className={`chip${statusF === 'default' ? ' sc-chip-base' : ''}`} onClick={() => setStatusF('default')}>
-                    기본 (안 끝난 건)
+                    {prepMode ? '기본 (취소 빼고)' : '기본 (안 끝난 건)'}
                   </button>
-                  <button type="button" className={`chip${statusF === 'all' ? ' active' : ''}`} onClick={() => setStatusF('all')}>
+                  <button
+                    type="button"
+                    className={`chip${statusF === 'all' ? ' active' : ''}`}
+                    onClick={() => {
+                      setStatusF('all');
+                      setCardF('all');
+                    }}
+                  >
                     전체
                   </button>
                   {SALES_CONFIRM_STATUSES.map((s) => (
-                    <button key={s} type="button" className={`chip${statusF === s ? ' active' : ''}`} onClick={() => setStatusF(s)}>
+                    <button
+                      key={s}
+                      type="button"
+                      className={`chip${statusF === s ? ' active' : ''}`}
+                      onClick={() => {
+                        setStatusF(s);
+                        setCardF('all');
+                      }}
+                    >
                       {s}
                     </button>
                   ))}
@@ -585,18 +834,41 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                       영업에서 지움 {deletedCount}
                     </button>
                   )}
+                  {!prepMode &&
+                    isShipGroup &&
+                    (
+                      [
+                        { key: 'new', label: '새로', n: newsAll.fresh },
+                        { key: 'changed', label: '영업에서 수정됨', n: newsAll.changed },
+                        { key: 'deleted', label: '지웠는데 준비 중', n: newsAll.deleted },
+                      ] as { key: NewsFilter; label: string; n: number }[]
+                    )
+                      .filter((p) => p.n > 0 || newsF === p.key)
+                      .map((p) => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          className={`chip${newsF === p.key ? ' active' : ''}`}
+                          aria-pressed={newsF === p.key}
+                          onClick={() => setNewsF(newsF === p.key ? null : p.key)}
+                        >
+                          {p.label} {p.n}
+                        </button>
+                      ))}
                 </div>
               </div>
-              <div className="filter-row">
-                <span className="filter-label">납품일</span>
-                <div className="chip-group">
-                  {DATE_FILTERS.map((d) => (
-                    <button key={d.key} type="button" className={`chip${dateF === d.key ? ' active' : ''}`} onClick={() => setDateF(d.key)}>
-                      {d.label}
-                    </button>
-                  ))}
+              {!prepMode && (
+                <div className="filter-row">
+                  <span className="filter-label">납품일</span>
+                  <div className="chip-group">
+                    {DATE_FILTERS.map((d) => (
+                      <button key={d.key} type="button" className={`chip${dateF === d.key ? ' active' : ''}`} onClick={() => setDateF(d.key)}>
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
               {typeOptions.length > 0 && (
                 <div className="filter-row">
                   <span className="filter-label">구분</span>
@@ -648,7 +920,14 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
 
           <div className="count-row sc-toolbar">
             <span>
-              <b>{visible.length}</b>건 보임{groupRows.length !== visible.length ? ` (${groupLabel} ${groupRows.length}건 중)` : ''}
+              <b>{visible.length}</b>건 보임
+              {prepMode
+                ? visible.length !== prepScope.length
+                  ? ` (${targetLabel} 납품분 ${prepScope.length}건 중)`
+                  : ''
+                : groupRows.length !== visible.length
+                  ? ` (${groupLabel} ${groupRows.length}건 중)`
+                  : ''}
               {meta.rangeLabel ? <span className="sc-range"> · {meta.rangeLabel}</span> : null}
               {reloading ? <span className="sc-range"> · 새로 읽는 중…</span> : null}
             </span>
@@ -658,7 +937,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
               </button>
             )}
             <span className="sc-toolbar-right">
-              {!isOtherGroup && (
+              {isShipGroup && (
                 <button
                   type="button"
                   className={`chip sc-pc-only${compare ? ' active' : ''}`}
@@ -696,6 +975,7 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 people={meta.people}
                 today={today}
                 other={isOtherGroup}
+                direct={isDirectGroup}
                 showSheet={showSheet}
                 sheet={sheet}
                 busyIds={busyIds}
@@ -711,14 +991,38 @@ export default function SalesConfirmListPage({ initial }: { initial: SalesConfir
                 <div className="sc-empty-sub">영업 웹앱이 보내기 시작하면 여기에 따로 모여요(출고 준비 확인서 목록에는 안 섞여요).</div>
               </div>
             )}
-            {groupRows.length === 0 && !isOtherGroup && (
+            {groupRows.length === 0 && isDirectGroup && (
+              <div className="empty-state">
+                <div>📭</div>
+                <div>직송 확인서가 없어요.</div>
+                <div className="sc-empty-sub">영업 확인서에서 위탁사가 있고 위탁·직송이 &lsquo;직송&rsquo;인 건이 여기에 따로 모여요.</div>
+              </div>
+            )}
+            {groupRows.length === 0 && isShipGroup && (
               <div className="empty-state">
                 <div>📭</div>
                 <div>{meta.hasKey ? '아직 가져온 영업 확인서가 없어요.' : '영업 웹앱과 아직 연결되지 않아 가져온 확인서가 없어요.'}</div>
                 {meta.hasKey && <div className="sc-empty-sub">영업 웹앱에서 IT 확인서를 저장하면 여기에 나와요. 위의 [🔄 새로고침]을 눌러 보세요.</div>}
               </div>
             )}
-            {groupRows.length > 0 && visible.length === 0 && (
+            {prepMode && groupRows.length > 0 && visible.length === 0 && prepScope.length === 0 && !filtersChanged && (
+              <div className="empty-state">
+                <div>🗓️</div>
+                <div>{targetLabel} 납품할 출고 준비 확인서가 없어요.</div>
+                {directOnTarget > 0 && (
+                  <div className="sc-empty-sub">
+                    직송 {directOnTarget}건은 우리가 준비하지 않아 여기서 빠졌어요.{' '}
+                    <button type="button" className="sc-link" onClick={() => changeGroup('direct')}>
+                      직송 보기
+                    </button>
+                  </div>
+                )}
+                <button type="button" className="btn btn-ghost sc-retry" onClick={() => pickPrepDate('')}>
+                  전체 보기
+                </button>
+              </div>
+            )}
+            {groupRows.length > 0 && visible.length === 0 && !(prepMode && prepScope.length === 0 && !filtersChanged) && (
               <div className="empty-state">
                 <div>🔍</div>
                 <div>조건에 맞는 확인서가 없어요. 필터를 바꿔 보세요.</div>

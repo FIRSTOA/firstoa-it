@@ -15,6 +15,7 @@ import {
   SALES_IMPORT_STATE_TABLE,
   createAdminClient,
 } from '@/lib/supabase/server';
+import { deliveryModeFromPayload } from './deliveryMode';
 import { regionWithGuess } from './prepMatch';
 import { buildSlotLines, recheckSlotCount, slotItems, slotProgress, toSalesItems, unitRowFromDb } from './slots';
 import {
@@ -394,12 +395,63 @@ async function readDeletedInfo(supabase: Supa, ids: string[]): Promise<Map<strin
   return out;
 }
 
+/**
+ * 직송 판정용 세 칸(consign·shipType·head)만 — payload 통째로 안 읽음(F28). 납품은 맨 위, 교체·유지보수·소프트웨어는 doc 안이라 둘 다.
+ * 못 읽으면 빈 맵(= 직송 아님으로 보임) — 목록은 뜨고 로그엔 code 만. `failed` 로 알려 줘 화면이 필요하면 안내할 수 있음.
+ * 홈 숫자도 같이 씀(export).
+ */
+export async function readDeliveryModes(
+  supabase: Supa,
+  ids: string[],
+): Promise<{ map: Map<string, { directShip: boolean; consignName: string }>; failed: boolean }> {
+  const map = new Map<string, { directShip: boolean; consignName: string }>();
+  for (const part of chunks(ids, CHUNK)) {
+    const { data, error } = await supabase
+      .from(SALES_CONFIRMS_TABLE)
+      .select(
+        'id,t_consign:payload->>consign,t_ship:payload->>shipType,t_head:payload->>head,d_consign:payload->doc->>consign,d_ship:payload->doc->>shipType,d_head:payload->doc->>head',
+      )
+      .in('id', part);
+    if (error) {
+      console.warn('[sales-confirms] 직송 칸 읽기 실패', (error as { code?: string }).code ?? 'unknown');
+      return { map, failed: true };
+    }
+    type R = { id: string; t_consign: unknown; t_ship: unknown; t_head: unknown; d_consign: unknown; d_ship: unknown; d_head: unknown };
+    for (const r of (data ?? []) as unknown as R[]) {
+      // doc 에 위탁사가 있으면 doc 쪽, 아니면 맨 위(deliveryModeFromPayload 와 같은 고르기)
+      const useDoc = asStr(r.d_consign) !== '';
+      map.set(
+        r.id,
+        deliveryModeFromPayload(
+          useDoc
+            ? { doc: { consign: r.d_consign, shipType: r.d_ship, head: r.d_head } }
+            : { consign: r.t_consign, shipType: r.t_ship, head: r.t_head },
+        ),
+      );
+    }
+  }
+  return { map, failed: false };
+}
+
 async function rowsFor(supabase: Supa, confirms: ConfirmDbRow[]): Promise<SalesConfirmListRow[]> {
   const ids = confirms.map((c) => c.id);
   const deletedIds = confirms.filter((c) => c.sales_state === SALES_STATE_DELETED).map((c) => c.id);
-  const [work, units, deleted] = await Promise.all([readWork(supabase, ids), readUnits(supabase, ids), readDeletedInfo(supabase, deletedIds)]);
+  // 따로 보는 종류(판매·철수·이전)는 직송 판정 대상이 아님
+  const modeIds = confirms.filter((c) => !isOtherSalesType(c.type)).map((c) => c.id);
+  const [work, units, deleted, modes] = await Promise.all([
+    readWork(supabase, ids),
+    readUnits(supabase, ids),
+    readDeletedInfo(supabase, deletedIds),
+    readDeliveryModes(supabase, modeIds),
+  ]);
   const flags: ReadFlags = { unitsReady: units.unitsReady, printedReady: work.printedReady };
-  return confirms.map((c) => buildRow(c, work.map.get(c.id), units.map.get(c.id) ?? [], flags, deleted.get(c.id)));
+  return confirms.map((c) => {
+    const row = buildRow(c, work.map.get(c.id), units.map.get(c.id) ?? [], flags, deleted.get(c.id));
+    const mode = modes.map.get(c.id);
+    row.directShip = !row.other && !!mode?.directShip;
+    row.consignName = mode?.consignName ?? '';
+    return row;
+  });
 }
 
 /** 시트 비교용: 고른 id 의 목록 줄(payload 없음) */

@@ -951,6 +951,13 @@ function DetailBody({ initial }: { initial: SalesConfirmDetailData }) {
           )}
         </div>
       )}
+      {data.directShip && (
+        <div className="ct-band muted sc-direct-band" role="note">
+          <span>
+            <b>직송</b> — 매입처 {data.consignName || '(이름 없음)'} (우리 출고 준비 없음)
+          </span>
+        </div>
+      )}
       {isOther && (
         <div className="ct-band muted" role="note">
           <span>철수·이전·판매 확인서는 지금은 보기만 해요(출고 준비 대상이 아니에요).</span>

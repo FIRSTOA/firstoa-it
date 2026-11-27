@@ -3,6 +3,15 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "14c5a7689e",
+    "date": "2026-11-27",
+    "time": "14:34",
+    "subject": "영업 확인서 기기 칸 · 같은 기기인데 \"영업이 요청한 것과 달라요\"가 뜨던 것 고침 + 자산번호로 출고사양 자동 채우기 — 사용자 신고(교체 후 기기에 자산번호 → IT재고 \"조립PC / 데스크탑\" 이 영업 \"조립 / A5고사데\" 와 다르다고 확인 창, 출고사양 CPU·RAM·SSD 는 안 채워짐) · specCompare: 제조사 makerKey(조립=조립PC, 삼성=삼성전자=SAMSUNG, LG=엘지전자 — 회사 꼬리·다른 이름 무시), 모델명은 한쪽이 종류 이름뿐(\"데스크탑\"·\"노트북\")이면 비교 안 함·6글자 이상 포함이면 같음(NT751XHD ⊂ NT751XHD-KR735), SSD·HDD 7% 안 같은 급(500=512·240=256, RAM 은 정확히), CPU \"세대\" 꼬리 무시 — 서버 확인 창·목록 다시 확인 필요·출력 강조가 모두 이 한 함수 · 새 순수 파일 stockSpec.ts specFromStockLabel(IT재고 사양 한 칸 \"CPU/세대/RAM/SSD/HDD/그래픽\" → 칸별, 조각 5·6개 + CPU 꼴일 때만, 모호하면 안 채움) · DeviceSlotCard 자산번호 조회: 출고사양 빈 칸만 채움, 영업과 같은 제조사·종류 이름 모델은 안 채움(= 영업 요청 그대로) · CLAUDE.md·설명서·releases",
+    "crew": [
+      "qa-checker"
+    ]
+  },
+  {
     "hash": "e8b64c1de3",
     "date": "2026-11-27",
     "time": "14:02",

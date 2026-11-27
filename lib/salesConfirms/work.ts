@@ -20,6 +20,7 @@ import {
   createAdminClient,
 } from '@/lib/supabase/server';
 import { guessCompany, isItPrepTarget, isPrepDone, isPrepInProgress, isPrepOverhaul, parseEventTitle, type PrepChecks } from '@/lib/shipmentPrep';
+import { deliveryModeFromPayload } from './deliveryMode';
 import { salesChangeLines } from './diff';
 import type { ItemKind } from './itemKind';
 import { isMissingSalesColumn } from './listQuery';
@@ -692,6 +693,15 @@ export async function loadSalesConfirmDetail(id: string, actorRaw: string): Prom
       progress: slotProgress(lines),
       assetElsewhere,
       notices,
+      ...detailDeliveryMode(confirm, c.payload, other),
     },
   };
+}
+
+/** 4-0: 직송 판정 — formDoc(정규화된 doc)으로, 없으면(옛 원문) payload 맨 위 칸으로. 따로 보는 종류는 직송 아님 */
+function detailDeliveryMode(confirm: NormalizedSalesConfirm, payload: unknown, other: boolean): { directShip: boolean; consignName: string } {
+  if (other) return { directShip: false, consignName: '' };
+  const fromDoc = deliveryModeFromPayload({ doc: confirm.formDoc });
+  if (fromDoc.consignName) return fromDoc;
+  return deliveryModeFromPayload(payload);
 }

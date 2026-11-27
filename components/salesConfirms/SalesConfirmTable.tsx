@@ -32,6 +32,8 @@ interface Props {
    * 처리여부·처리자 바꾸기는 그대로.
    */
   other?: boolean;
+  /** 직송 목록(참고용 — 줄에 매입처는 row.directShip 으로 그림) */
+  direct?: boolean;
   /** 📄 시트와 비교 를 켰는지(PC 만 — 핸드폰에선 칸이 숨음) */
   showSheet: boolean;
   sheet: SheetColumnState;
@@ -207,6 +209,11 @@ function Row({
         <Link href={salesConfirmHref(row.id)} className="ct-name-btn sc-name sc-name-link" onClick={stop}>
           {row.company || '(상호 없음)'}
         </Link>
+        {row.directShip && (
+          <div className="sc-consign" title="우리를 안 거치고 매입처에서 고객사로 바로 가는 건이에요">
+            직송 · 매입처 {row.consignName || '(이름 없음)'}
+          </div>
+        )}
         {(isNew || row.salesChanged || row.salesState || printed || recheck > 0) && (
           <div className="sc-flags">
             {isNew && <span className="sc-pill sc-pill-new">새로</span>}

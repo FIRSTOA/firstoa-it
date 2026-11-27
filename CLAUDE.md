@@ -158,7 +158,13 @@
   - **판매·철수·이전 = "따로 보기"(2026-11-27 사용자: 받되 출고 준비가 아니니 별도 항목으로만)**: `isOtherSalesType(type)`(출고 준비 종류 SALES_SHIP_TYPES 밖이면 전부)
     → 목록 별도 칩, 기기 칸·IT 출력·홈 숫자 없음, 상세는 영업 값 + `영업 원본 보기`(영업 실시간 HTML 만 — 사본 없음). normalize 는 renderer null·`otherRenderer`(sale·pull·move)·
     formDoc null(판매 doc 의 items[].cost 매입가가 브라우저로 안 가게 — ①② payload 원문엔 남으니 payload 를 화면에 보내는 코드를 만들면 거를 것).
-    영업 export 에 아직 없음 — 영업에 추가 요청(설계 §11 7번).
+    영업이 export 에 추가함(영업 커밋 391dfbb — 영업 클라우드 배포 뒤 적용). 철수·이전 items 엔 asset·sn·leaseNo, 판매 cost 는 영업이 빼고 보냄.
+  - **4단계(출고 준비 리스트와 함께 — 설계 `docs/tasks/2026-11-27-sales-confirm-prep-merge.md` F1~F30, 사용자 답 Q1~Q5 전부 추천안)**:
+    두 메뉴 그대로 두고 이어 붙임 · 기기·체크는 확인서가 원본, 준비중·완료는 출고 준비 단추가 원본 · 네이버 일정은 앱이 안 만듦(없으면 알림만) · SQL 없음(③ prep_event_id·link_source).
+    **4-0 오늘 준비할 것·직송**: 목록 맨 위 "준비하는 날" 줄(기본 오늘 → `lib/businessDay.ts` `nextBusinessDay` — 홈·출고 준비 화면과 같은 결과, 주말만 건너뜀),
+    그날 납품분 지역 A→E 순 + 숫자 카드 3개, 목록 위 항목 `출고 준비 확인서`·`직송`·`철수·이전·판매`. **직송 판정 = `deliveryMode.ts` `isDirectShip`**(영업 statusDeliverer 와 같음 —
+    위탁사 consign 이 있고 shipType '직송', 비면 head 에 '직송') — 목록은 payload 의 세 칸만(`readDeliveryModes`), 직송은 오늘 준비할 것·숫자 카드·홈 "준비 안 끝남"에서 빠짐, 상세는 그대로(띠만).
+    출고 준비 리스트의 제목 키워드 직송 거르기(`DIRECT_DELIVERY_KEYWORDS`)는 안 바꿈(F30).
   - ver 0~2147483647 밖·`\u0000` 든 건은 그 건만 건너뜀(묶음 실패 방지). 일부만 모양이 다르면 나머지 반영 + 'bad_shape' 주황 띠.
 - **표**(`supabase/sales_confirms_schema.sql`, 칸 이름은 `lib/salesConfirms/types.ts` 맨 위 주석이 기준): ①② 영업 원본 = **importer.ts 만 씀**,
   ③ work·④ units = IT 값 = 화면 액션만 씀. **가져오기 코드(normalize·source·importer·route)는 ③④ 표 이름을 import 도 하지 말 것**(IT 값 덮어쓰기를 구조로 막음).

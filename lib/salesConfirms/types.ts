@@ -528,7 +528,15 @@ export interface SalesConfirmListRow {
   salesDeletedBy?: string;
   /** 따로 보는 종류(판매·철수·이전 — isOtherSalesType(type)) — 목록이 칩으로 나눔 */
   other?: boolean;
+  // ── 4-0(2026-11-27 사용자: 오늘 준비할 것 · 직송 따로 — 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md F25~F30) ──
+  /** 직송(매입처 → 고객사, 우리를 안 거침) — deliveryMode.isDirectShip(영업 consign·shipType·head). 목록 '직송' 항목, 오늘 준비할 것·숫자 카드·홈에서 빠짐 */
+  directShip?: boolean;
+  /** 위탁사(매입처) 이름 — 직송·위탁 건만, 아니면 '' */
+  consignName?: string;
 }
+
+/** 목록 위 항목(F29) — 출고 준비 확인서 · 직송 · 철수·이전·판매 */
+export type SalesListGroup = 'ship' | 'direct' | 'other';
 
 export interface SalesConfirmListData {
   rows: SalesConfirmListRow[];
@@ -751,6 +759,9 @@ export interface SalesConfirmDetailData {
   assetElsewhere?: Record<string, { confirmId: string; docNo: string; company: string }[]>;
   /** 일부를 못 읽었을 때의 쉬운 말(처리자 명단·체크리스트·출고 준비 후보·같은 자산번호·판 비교) — 화면은 주황 한 줄씩(실패를 삼키지 않음) */
   notices?: string[];
+  /** 4-0: 직송(F28 — formDoc 으로 같은 판정)·위탁사 이름. 상세는 그대로 열림(사용자 결정 Q5), 위에 "직송 — 매입처 ○○" 띠 */
+  directShip?: boolean;
+  consignName?: string;
 }
 
 /** 기기 칸 저장 결과(saveSalesUnit·applyLineValues·ackUnitDiffs·moveOrphanUnit·deleteOrphanUnit) */
