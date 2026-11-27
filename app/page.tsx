@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import InventoryPage from '@/components/InventoryPage';
+import InventoryReadWarning from '@/components/InventoryReadWarning';
 import PageLoading from '@/components/PageLoading';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
@@ -8,6 +9,7 @@ import type { AssetPurchaseInfo } from '@/lib/billing';
 import { DATA_SOURCE } from '@/lib/dataSource';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
 import { loadStocktakeConfirmations } from '@/lib/inventory/stocktakeConfirmations';
+import type { TabReadFailure } from '@/lib/stocktake';
 import { getInventorySpreadsheetUrl } from '@/lib/spreadsheetLink';
 import { ASSETS_TABLE, createAdminClient, isSupabaseConfigured } from '@/lib/supabase/server';
 import { rowToAsset, type Asset, type AssetRow } from '@/lib/types';
@@ -32,11 +34,15 @@ function applyPurchaseInfoOverlay(items: Asset[], overlay: Map<string, AssetPurc
   });
 }
 
-/** 재고 원본(구글시트 5개 탭 또는 Supabase)을 읽습니다. 실패하면 화면에 보여 줄 안내를 돌려줍니다. */
-async function loadItems(): Promise<{ items: Asset[] } | { error: string }> {
+/**
+ * 재고 원본(구글시트 5개 탭 또는 Supabase)을 읽습니다. 실패하면 화면에 보여 줄 안내를 돌려줍니다.
+ * 시트는 5탭 한 번에 읽기 — 못 읽은 탭은 failed(목록 위 띠로 알림, 예전엔 그 탭이 말없이 빠졌음).
+ */
+async function loadItems(): Promise<{ items: Asset[]; failed: TabReadFailure[] } | { error: string }> {
   if (DATA_SOURCE === 'sheets') {
     try {
-      return { items: await listAllAssets() };
+      const read = await listAllAssets();
+      return { items: read.assets, failed: read.failed };
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
     }
@@ -48,7 +54,7 @@ async function loadItems(): Promise<{ items: Asset[] } | { error: string }> {
     .order('created_at', { ascending: false })
     .order('seq', { ascending: true });
   if (error) return { error: error.message };
-  return { items: ((data ?? []) as AssetRow[]).map(rowToAsset) };
+  return { items: ((data ?? []) as AssetRow[]).map(rowToAsset), failed: [] };
 }
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ asset?: string }> }) {
@@ -85,12 +91,15 @@ async function InventoryContent({ initialAssetId }: { initialAssetId: string | n
   }
 
   return (
-    <InventoryPage
-      items={applyPurchaseInfoOverlay(loaded.items, overlay)}
-      dataSource={DATA_SOURCE}
-      spreadsheetUrl={getInventorySpreadsheetUrl()}
-      stocktakeConfirmations={stocktakeConfirmations}
-      initialAssetId={initialAssetId}
-    />
+    <>
+      <InventoryReadWarning failed={loaded.failed} consequence="이 화면의 목록·대수가 모자랄 수 있어요." />
+      <InventoryPage
+        items={applyPurchaseInfoOverlay(loaded.items, overlay)}
+        dataSource={DATA_SOURCE}
+        spreadsheetUrl={getInventorySpreadsheetUrl()}
+        stocktakeConfirmations={stocktakeConfirmations}
+        initialAssetId={initialAssetId}
+      />
+    </>
   );
 }

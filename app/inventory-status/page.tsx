@@ -2,10 +2,12 @@ import { Suspense } from 'react';
 import { listSafetyStock } from '@/app/inventoryStatus/actions';
 import { listAllAssetsUnified } from '@/app/stocktake/actions';
 import InventoryStatusPage from '@/components/inventoryStatus/InventoryStatusPage';
+import InventoryReadWarning from '@/components/InventoryReadWarning';
 import PageLoading from '@/components/PageLoading';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
 import { loadStocktakeConfirmations } from '@/lib/inventory/stocktakeConfirmations';
+import { failAllTabs } from '@/lib/inventory/tabRead';
 import { isSupabaseConfigured } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -34,10 +36,19 @@ export default async function Page() {
 }
 
 async function InventoryStatusContent() {
-  const [assets, stocktakeConfirmations, safetyStock] = await Promise.all([
-    listAllAssetsUnified().catch(() => []),
+  const [read, stocktakeConfirmations, safetyStock] = await Promise.all([
+    // 못 읽은 탭은 read.failed 로 옴 — 예전 .catch(() => []) 처럼 빈 현황판을 말없이 보여 주지 않고 위 띠로 알림
+    listAllAssetsUnified().catch((err: unknown) => ({
+      assets: [],
+      failed: failAllTabs(null, err instanceof Error ? err.message : String(err)),
+    })),
     loadStocktakeConfirmations(),
     listSafetyStock(),
   ]);
-  return <InventoryStatusPage assets={assets} stocktakeConfirmations={stocktakeConfirmations} safetyStock={safetyStock} />;
+  return (
+    <>
+      <InventoryReadWarning failed={read.failed} consequence="현황판의 대수가 모자랄 수 있어요." />
+      <InventoryStatusPage assets={read.assets} stocktakeConfirmations={stocktakeConfirmations} safetyStock={safetyStock} />
+    </>
+  );
 }

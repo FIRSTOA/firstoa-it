@@ -1,9 +1,11 @@
 import 'server-only';
 import { columnLetter, getSheetsClient, isGoogleServiceAccountConfigured } from '@/lib/googleAuth';
+import { describeSheetReadError, mergeTabReads, type TabReadFailure } from '@/lib/stocktake';
 import { CATEGORIES, type Asset } from '@/lib/types';
 import { logAssetMovement } from './movements';
 import { parseGubunAndSpec_ } from './specClassification';
 import { deriveIsNew, deriveMalicious, parseLocationStatus_ } from './status';
+import { failAllTabs, isQuotaFailure, type InventoryRead } from './tabRead';
 
 // parseGubunAndSpec_(구분→사양등급 분류)은 원본 대시보드도 이 두 카테고리에만 적용합니다.
 const SPEC_CLASSIFIED_CATEGORIES = new Set(['노트북', '데스크탑']);
@@ -250,6 +252,26 @@ function mapRowToAsset(row: unknown[], header: HeaderMap, category: string): Ass
 }
 
 /**
+ * 탭 하나의 값(values[0] = 1행 머리줄, 시트 그대로)을 Asset[] 과 쓰기용 자산번호→행 번호 색인으로 바꿉니다.
+ * 탭별 읽기(listAssetsFromSheet)와 5탭 한 번에 읽기(listAllAssets)가 이 함수 하나를 같이 써서 목록·색인이 똑같음.
+ * 색인은 buildCache와 같은 규칙 — 같은 번호가 여러 줄이면 마지막 줄.
+ */
+function parseTabValues(category: string, tab: string, values: unknown[][]): { assets: Asset[]; index: SheetCache } {
+  const header = buildHeaderMap(tab, (values[0] ?? []).map((v) => String(v ?? '')));
+
+  const rowByAssetId = new Map<string, number>();
+  const assets: Asset[] = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const id = cell(row, header.assetIdCol);
+    if (!id) continue;
+    rowByAssetId.set(id, i + 1); // values[0]이 1행(머리줄)
+    assets.push(mapRowToAsset(row, header, category));
+  }
+  return { assets, index: { header, rowByAssetId, builtAt: Date.now() } };
+}
+
+/**
  * 카테고리 하나의 시트를 전부 읽어 Asset[] 로 변환합니다.
  * 머리줄과 데이터를 한 번에 읽습니다(예전엔 머리줄 → 자산번호 열 → 전체를 차례로 세 번 읽어서
  * 서버가 새로 뜬 직후 탭마다 1.5~2초씩 걸렸음). 읽은 김에 쓰기용 자산번호→행 번호 색인도
@@ -263,35 +285,59 @@ export async function listAssetsFromSheet(category: string): Promise<Asset[]> {
     spreadsheetId: requireSheetId(),
     range: tab,
   });
-  const values = res.data.values ?? [];
-  const header = buildHeaderMap(tab, (values[0] ?? []).map((v) => String(v ?? '')));
-
-  const rowByAssetId = new Map<string, number>();
-  const assets: Asset[] = [];
-  for (let i = 1; i < values.length; i++) {
-    const row = values[i];
-    const id = cell(row, header.assetIdCol);
-    if (!id) continue;
-    rowByAssetId.set(id, i + 1); // values[0]이 1행(머리줄)
-    assets.push(mapRowToAsset(row, header, category));
-  }
-  cacheByCategory.set(category, { header, rowByAssetId, builtAt: Date.now() });
+  const { assets, index } = parseTabValues(category, tab, res.data.values ?? []);
+  cacheByCategory.set(category, index);
   return assets;
 }
 
-/** 5개 시트를 전부 읽어 하나의 목록으로 합칩니다. 한 시트가 실패해도 나머지는 반환합니다. */
-export async function listAllAssets(): Promise<Asset[]> {
-  const results = await Promise.all(
-    CATEGORIES.map(async (category) => {
-      try {
-        return await listAssetsFromSheet(category);
-      } catch (err) {
-        console.error(`[inventory] "${category}" 시트 조회 실패:`, err);
-        return [];
-      }
-    }),
-  );
-  return results.flat();
+function logTabFailures(merged: { items: Asset[]; failed: TabReadFailure[] }): InventoryRead {
+  for (const f of merged.failed) console.error(`[inventory] IT재고 "${f.tab}" 탭 읽기 실패:`, f.status ?? '-', f.message);
+  return { assets: merged.items, failed: merged.failed };
+}
+
+/**
+ * IT재고 5개 탭을 읽어 하나의 목록으로 합칩니다(순서 = CATEGORIES, 탭 안은 시트 줄 순서).
+ * 읽기는 batchGet 한 번(= 구글 읽기 1회 — 예전엔 탭마다 1회씩 5회, 서비스계정 분당 60회를 앱 전체가 같이 씀).
+ * 응답을 탭별 머리줄+데이터로 나눠 탭별 읽기와 같은 parseTabValues 에 넣고, 쓰기용 행 번호 색인도 탭마다 갈아 둡니다.
+ *
+ * 못 읽은 탭은 빈 목록으로 숨기지 않고 failed 로 같이 돌려줍니다(예전엔 조용히 [] → 대수·위치가 말없이 빠졌음,
+ * 2026-11-27 실재고 조사 신고). 화면은 lib/inventory/tabRead.ts inventoryReadWarning 으로 주황 띠.
+ * - 한 탭 범위가 잘못되면(탭 이름이 바뀜 등) batchGet 전체가 실패하므로, 그땐 탭별 읽기로 한 번 되돌아가 어느 탭인지 가림.
+ * - 읽기 한도(429)로 실패했으면 되돌아가지 않고 다섯 탭 모두 실패로 — 탭별 5회도 똑같이 막히고 한도만 더 씀.
+ */
+export async function listAllAssets(): Promise<InventoryRead> {
+  const tabs = CATEGORIES.map((category) => requireTab(category));
+  let valueRanges: { values?: unknown[][] | null }[];
+  try {
+    const res = await getSheetsClient().spreadsheets.values.batchGet({
+      spreadsheetId: requireSheetId(),
+      ranges: tabs, // listAssetsFromSheet 의 range 와 같은 글자(탭 이름 그대로 = 시트 전체)
+    });
+    valueRanges = res.data.valueRanges ?? [];
+  } catch (err) {
+    const { status, message } = describeSheetReadError(err);
+    if (isQuotaFailure({ status, message })) {
+      console.error('[inventory] IT재고 5탭 한 번에 읽기 실패(읽기 한도 — 탭별로 다시 읽지 않음):', status ?? '-', message);
+      return { assets: [], failed: failAllTabs(status, message) };
+    }
+    console.error('[inventory] IT재고 5탭 한 번에 읽기 실패 — 탭별로 다시 읽어요:', status ?? '-', message);
+    const settled = await Promise.allSettled(CATEGORIES.map((category) => listAssetsFromSheet(category)));
+    return logTabFailures(mergeTabReads<Asset>(CATEGORIES, settled));
+  }
+
+  // 응답 valueRanges 는 요청한 ranges 와 같은 순서(구글 API 약속). 탭 하나의 머리줄이 깨져도 그 탭만 실패.
+  const settled = CATEGORIES.map((category, i): PromiseSettledResult<Asset[]> => {
+    try {
+      const range = valueRanges[i];
+      if (!range) throw new Error('한 번에 읽은 결과에 이 탭이 없어요');
+      const { assets, index } = parseTabValues(category, tabs[i], range.values ?? []);
+      cacheByCategory.set(category, index);
+      return { status: 'fulfilled', value: assets };
+    } catch (reason) {
+      return { status: 'rejected', reason };
+    }
+  });
+  return logTabFailures(mergeTabReads<Asset>(CATEGORIES, settled));
 }
 
 // O열(0-based 14, 즉 A~O 15개 컬럼)까지만 앱이 씁니다. 그 뒤(담당자/OS/CPU/메인보드/메모리/

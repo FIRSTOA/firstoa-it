@@ -89,8 +89,9 @@ export default function AssetLifecycleLookup({ initialQuery = '', asSheetUrl }: 
           </div>
           <div style={{ fontSize: '12px', color: 'var(--ink-400)', marginBottom: '10px' }}>
             시리얼 {data.serials.join(', ') || '-'}
-            {!data.asset && ' · IT재고 목록에는 없는 자산번호예요'}
+            {!data.asset && !data.inventoryWarning && ' · IT재고 목록에는 없는 자산번호예요'}
           </div>
+          {data.inventoryWarning && <div className="ct-band warn">⚠️ {data.inventoryWarning}</div>}
 
           <div className="detail-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
             <Card label="입고일" value={data.receivedDate || '기록 없음'} sub={data.receivedSource || '앱 입고 대장에 기록이 없어요'} />

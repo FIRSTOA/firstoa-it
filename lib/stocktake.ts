@@ -165,7 +165,8 @@ export type TabReadFailure = { tab: string; status: number | null; message: stri
 
 /**
  * IT재고 탭별 읽기 결과(Promise.allSettled, tabs 와 같은 순서)를 합치고, 못 읽은 탭은 따로 돌려줍니다.
- * lib/inventory/sheets.ts 의 listAllAssets 는 못 읽은 탭을 빈 목록으로 바꿔 조용히 넘어가는데, 실재고 조사에선
+ * (2026-11-27부터 lib/inventory/sheets.ts listAllAssets 도 이 함수로 못 읽은 탭을 돌려줌.) 예전 listAllAssets 는
+ * 못 읽은 탭을 빈 목록으로 바꿔 조용히 넘어갔는데, 실재고 조사에선
  * 그게 ① 그 탭 장비가 빠진 조사 목록(시작할 때 한 번 만들어 그대로 저장됨) ② "남은 선반 위치"가 빠지거나 텅 빔
  * 이 됐음(2026-11-27 신고). 구글 읽기 한도(서비스계정 분당 60회, 앱 전체가 같이 씀)에 걸리면 429 로 탭 몇 개만
  * 실패하는 일이 실제로 생깁니다. 결과가 없는 탭도 실패로 셉니다(빠졌는데 성공으로 보이지 않게).

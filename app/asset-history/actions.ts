@@ -5,6 +5,7 @@ import { computeRentalTerm, groupRentalRows, rowToBillingLine, sumConfirmedBilli
 import { assignedRentalRowsForAsset } from '@/lib/billingAllocation';
 import { parseKoreanWon } from '@/lib/currency';
 import { getAssetFromSheets, isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
+import { inventoryReadWarning } from '@/lib/inventory/tabRead';
 import { rowToReceiving, type ReceivingRow } from '@/lib/receiving';
 import {
   ASSET_PURCHASE_INFO_TABLE,
@@ -45,6 +46,8 @@ export type AssetLifecycle = {
   contractTotal: number;
   asRecords: AsRecord[];
   asError: string;
+  /** IT재고 시트를 (일부) 못 읽어 asset 이 비었을 수 있을 때 쉬운 말 한 줄('' = 문제 없음) */
+  inventoryWarning: string;
 };
 
 export type LifecycleResult = { ok: true; data: AssetLifecycle } | { ok: false; error: string };
@@ -59,17 +62,21 @@ export async function getAssetLifecycle(rawQuery: string): Promise<LifecycleResu
 
   const supabase = createAdminClient();
 
-  // 1) IT재고 시트 — 자산번호로 먼저, 없으면 시리얼로.
+  // 1) IT재고 시트 — 자산번호로 먼저, 없으면 시리얼로(5탭 한 번에 읽기 1회).
+  // 못 읽었으면 "IT재고에 없는 자산"으로 보이지 않게 inventoryWarning 으로 알림(예전엔 로그만 남기고 없는 것처럼 보였음).
   let asset: Asset | null = null;
+  let inventoryWarning = '';
   if (isInventorySheetConfigured()) {
     try {
       asset = await getAssetFromSheets(query);
       if (!asset) {
-        const all = await listAllAssets();
-        asset = all.find((a) => a.serialNo.trim().toUpperCase() === query) ?? null;
+        const read = await listAllAssets();
+        asset = read.assets.find((a) => a.serialNo.trim().toUpperCase() === query) ?? null;
+        if (!asset) inventoryWarning = inventoryReadWarning(read.failed, '그 탭에 있는 자산이면 현재 위치·상태가 안 보일 수 있어요.');
       }
     } catch (err) {
-      console.error('[lifecycle] IT재고 조회 실패:', err);
+      console.error('[lifecycle] IT재고 조회 실패:', err instanceof Error ? err.message : err);
+      inventoryWarning = 'IT재고 시트를 못 읽었어요(구글시트 읽기 한도일 수 있어요) — 1분쯤 뒤 다시 조회해 주세요. 현재 위치·상태가 안 보일 수 있어요.';
     }
   }
 
@@ -210,6 +217,7 @@ export async function getAssetLifecycle(rawQuery: string): Promise<LifecycleResu
       contractTotal: rentalsOut.reduce((sum, r) => sum + (r.contractTotal ?? 0), 0),
       asRecords,
       asError,
+      inventoryWarning,
     },
   };
 }

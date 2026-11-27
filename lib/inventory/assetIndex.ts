@@ -1,7 +1,8 @@
 import 'server-only';
 import { unstable_cache } from 'next/cache';
-import { CATEGORIES } from '@/lib/types';
-import { listAssetsFromSheet } from './sheets';
+import type { Asset } from '@/lib/types';
+import { listAllAssets } from './sheets';
+import { isQuotaFailure } from './tabRead';
 
 /**
  * 자산번호 → 핵심 정보(시리얼·모델·사양·구분) 색인. IT재고 5개 탭을 매번 읽으면 구글시트
@@ -18,29 +19,25 @@ export type AssetBrief = {
   gubun: string; // 구분(예: I5고사노)
 };
 
-function isQuota(err: unknown): boolean {
-  const e = err as { code?: number; status?: number; message?: string };
-  return e?.code === 429 || e?.status === 429 || /quota/i.test(e?.message ?? '');
-}
-
-async function readTab(category: string) {
+/**
+ * 5탭 한 번에 읽기(listAllAssets — 구글 읽기 1회, 예전엔 탭마다 1회). 못 읽은 탭이 전부 읽기 한도(429)면
+ * 4초·8초 뒤 두 번까지 다시(예전 탭별 재시도와 같은 간격), 그래도 못 읽었거나 다른 이유면 throw(빈 결과를 캐시하지 않게).
+ */
+async function readAllTabs(): Promise<Asset[]> {
   for (let attempt = 0; ; attempt++) {
-    try {
-      return await listAssetsFromSheet(category);
-    } catch (err) {
-      if (attempt < 2 && isQuota(err)) {
-        await new Promise((r) => setTimeout(r, 4000 * (attempt + 1)));
-        continue;
-      }
-      throw err;
+    const read = await listAllAssets();
+    if (read.failed.length === 0) return read.assets;
+    if (attempt < 2 && read.failed.every(isQuotaFailure)) {
+      await new Promise((r) => setTimeout(r, 4000 * (attempt + 1)));
+      continue;
     }
+    throw new Error(`IT재고 ${read.failed.map((f) => f.tab).join('·')} 탭을 못 읽었어요: ${read.failed[0].message}`);
   }
 }
 
 async function buildIndex(): Promise<Record<string, AssetBrief[]>> {
-  const lists = await Promise.all(CATEGORIES.map(readTab));
   const out: Record<string, AssetBrief[]> = {};
-  for (const a of lists.flat()) {
+  for (const a of await readAllTabs()) {
     const id = a.assetId.trim().toUpperCase();
     if (!id) continue;
     (out[id] ??= []).push({

@@ -280,6 +280,9 @@
 - Vercel 함수 지역은 서울(`vercel.json` `regions: ["icn1"]`) — Supabase가 서울이라. 기본값(미국 iad1)이면 DB 한 번에 0.4~0.6초씩 더 걸림.
 - 구글시트(IT재고 5개 탭·소모품) 읽은 결과는 **보관(캐시)하지 않음** — 사람이 시트에서 직접 고친 게 바로 보여야 해서(사용자 결정). 대신:
   - 탭당 한 번에 읽음(`listAssetsFromSheet`가 머리줄+데이터 한 번, 읽은 김에 쓰기용 행 번호 색인도 갱신).
+  - **IT재고 5탭 = `listAllAssets` batchGet 1회**(2026-11-27 사용자 결정 — 분당 60회 한도), 반환 `{assets, failed}`(`listAllAssetsUnified`도 같음) → 화면은 `InventoryReadWarning` 띠
+    (일부 탭 실패 주황·전부 빨강 + 🔄 다시 읽기). 해석은 `parseTabValues` 하나(색인도 같이). 429 면 탭별로 되돌아가지 않음(한도만 더 씀), 그 밖의 실패(400 등)는 탭별 읽기로 한 번.
+    **못 읽은 탭을 조용히 빈 목록으로 바꾸지 말 것**(`lib/inventory/tabRead.ts` — 실재고 조사 TabReadFailure 와 같은 모양).
   - 시트가 본문인 화면(IT 재고 리스트·재고 현황판·소모품)은 `<Suspense fallback={<PageLoading/>}>`로 틀부터 띄움.
   - 시트가 보조인 화면(입고·판매 등)은 Promise 그대로 넘기고 `useStreamedValue`로 도착하면 채움.
   - **서버 액션에서 revalidatePath 를 부르는 화면의 page 에는 시트 읽기를 두지 말 것** — Next 15 는 액션 안 revalidate 때 page 를 통째로 다시 그려 시트 5탭을 또 읽음.

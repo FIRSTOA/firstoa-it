@@ -21,6 +21,7 @@ import {
 } from '@/lib/billingAllocation';
 import type { AllocationReview } from '@/lib/billingAllocationTypes';
 import { listAllAssets } from '@/lib/inventory/sheets';
+import { failedEveryTab, inventoryReadWarning } from '@/lib/inventory/tabRead';
 import {
   ASSET_PURCHASE_INFO_TABLE,
   BILLING_LINES_TABLE,
@@ -387,16 +388,21 @@ export async function clearRentalAllocation(
   }
 }
 
-/** IT재고 시리얼 일치 — 버튼을 눌렀을 때만, 호출당 시트 읽기 1회(listAllAssets) */
+/**
+ * IT재고 시리얼 일치 — 버튼을 눌렀을 때만, 호출당 listAllAssets 1번(5탭 한 번에 읽기 = 구글 읽기 1회).
+ * 못 읽은 탭이 있으면 warning(그 탭 시리얼은 못 찾음 — 화면이 알림에 덧붙임), 전부 못 읽으면 오류.
+ */
 export async function suggestFromInventory(
   serials: string[],
-): Promise<{ ok: true; matches: Record<string, string[]> } | { ok: false; error: string }> {
+): Promise<{ ok: true; matches: Record<string, string[]>; warning: string } | { ok: false; error: string }> {
   const wanted = (Array.isArray(serials) ? serials : [])
     .map((s) => ({ raw: s, norm: String(s ?? '').trim().toUpperCase() }))
     .filter((s) => s.norm.length >= 4 && s.norm !== '-');
-  if (wanted.length === 0) return { ok: true, matches: {} };
+  if (wanted.length === 0) return { ok: true, matches: {}, warning: '' };
   try {
-    const assets = await listAllAssets();
+    const read = await listAllAssets();
+    if (failedEveryTab(read.failed)) return { ok: false, error: inventoryReadWarning(read.failed, '') };
+    const assets = read.assets;
     const byNorm = new Map<string, Set<string>>();
     for (const a of assets) {
       const norm = a.serialNo.trim().toUpperCase();
@@ -410,7 +416,7 @@ export async function suggestFromInventory(
       const found = byNorm.get(norm);
       if (found) matches[raw] = [...found];
     }
-    return { ok: true, matches };
+    return { ok: true, matches, warning: inventoryReadWarning(read.failed, '그 탭에 있는 장비의 시리얼은 못 찾았어요.') };
   } catch (err) {
     return { ok: false, error: `IT재고를 읽지 못했어요: ${errText(err)}` };
   }

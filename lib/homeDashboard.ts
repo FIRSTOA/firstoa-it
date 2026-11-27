@@ -14,6 +14,7 @@ import { readDeliveryModes } from '@/lib/salesConfirms/listQuery';
 import { readConfirmPrepBadges } from '@/lib/salesConfirms/prepLink';
 import { getSheetsClient } from '@/lib/googleAuth';
 import { isInventorySheetConfigured, listAllAssets } from '@/lib/inventory/sheets';
+import { failedEveryTab, inventoryReadShortWarning } from '@/lib/inventory/tabRead';
 import {
   SALES_STATE_DELETED,
   importStateFromRow,
@@ -347,12 +348,18 @@ export async function loadInventoryCard(): Promise<WorkCard> {
   const href = '/';
   if (!isInventorySheetConfigured()) return errorCard('inventory', 'IT 재고', '🖥️', href, '재고 시트 설정이 필요해요.');
   try {
-    const items = await listAllAssets();
+    const read = await listAllAssets();
+    // 다섯 탭 다 못 읽으면 숫자 대신 "못 읽었어요"(0대로 보이지 않게), 일부만이면 숫자는 보여 주고 한 줄 경고(주황)
+    if (failedEveryTab(read.failed)) {
+      return errorCard('inventory', 'IT 재고', '🖥️', href, inventoryReadShortWarning(read.failed));
+    }
+    const items = read.assets;
     const count = (s: string) => items.filter((a) => a.status === s).length;
     const ready = count('상품화완료');
     const prepping = count('상품화준비중');
     const repair = count('수리중');
     const malicious = items.filter((a) => a.malicious).length;
+    const partial = read.failed.length > 0;
     return {
       key: 'inventory',
       title: 'IT 재고',
@@ -364,8 +371,14 @@ export async function loadInventoryCard(): Promise<WorkCard> {
         { label: '수리중', value: repair, tone: repair ? 'warn' : undefined },
         { label: '임대중', value: count('임대중') },
       ],
-      alert: repair ? `수리중 ${repair}대` : malicious ? `악성 표시 ${malicious}대` : null,
-      tone: repair ? 'warn' : 'good',
+      alert: partial
+        ? inventoryReadShortWarning(read.failed)
+        : repair
+          ? `수리중 ${repair}대`
+          : malicious
+            ? `악성 표시 ${malicious}대`
+            : null,
+      tone: partial || repair ? 'warn' : 'good',
     };
   } catch (err) {
     return errorCard('inventory', 'IT 재고', '🖥️', href, errMsg(err));

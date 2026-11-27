@@ -3,6 +3,31 @@
 export type CommitEntry = { hash: string; date: string; time: string; subject: string; crew: string[] };
 export const COMMIT_LOG: CommitEntry[] = [
   {
+    "hash": "4203de74bc",
+    "date": "2026-11-27",
+    "time": "15:28",
+    "subject": "확인서 ↔ 출고 준비 리스트 4-1 · 두 화면 짝짓기·서로 보이기 — 4단계 설계 docs/tasks/2026-11-27-sales-confirm-prep-merge.md F1~F8(사용자 답: 두 메뉴 이어 붙이기·네이버 일정은 앱이 안 만듦·자동 연결은 제목·날짜 다 같을 때만) · 짝 규칙 prepLinkRules.ts(순수 — 확실 = 영업 제목 줄과 일정 제목 IT/ 뒤·날짜 같음, 후보 = 상호·±1일·구분·지역, 약한 후보 ±3일, 예전 prepMatch 버그 고침: 유지보수·소프트웨어가 일정과 안 맞던 것·상호를 칸 위치로 뽑던 것), 일정 하나에 확인서 여럿 허용(taken 규칙 뺌) · prepLink.ts(server-only — ③ prep_event_id·link_source 만 씀, 화면 열기만으론 안 씀) · 액션 prepLinkActions.ts(연결·풀기·다시 찾기·배지) · 확인서 상세 \"출고 준비\" 상자(PrepLinkPanel — PrepHintBox 대체), 목록 📋 출고 일정 표시·\"출고 일정 없음 n\" 칩, 출고 준비 카드 📋 확인서 배지·고르기 팝업(PrepConfirmBadge, 같은 일정 묶음이면 60초 동기화 때 안 다시 읽음), /shipment-prep?event= 로 그 일정 강조, 홈 \"다음 영업일 출고 일정 없음 n\" · 복제본 정리는 ③ 연결도 기록으로 셈(연결된 앱 줄 안 지움 — integration-rules 통과) · 출고 준비 쪽 준비 단추·태그·완료 보고·카톡·재고 코드 변경 없음 · 설명서 sales-prep 꼭지·shipment-prep 한 줄, releases(4-1·실재고 조사), CLAUDE.md(속도 절 실재고 조사 규칙·4-1)",
+    "crew": [
+      "developer",
+      "ui-designer",
+      "qa-checker",
+      "integration-rules",
+      "deploy-check"
+    ]
+  },
+  {
+    "hash": "7f30586732",
+    "date": "2026-11-27",
+    "time": "15:28",
+    "subject": "실재고 조사 · 장비·남은 위치가 빠지던 것 고침 · 선반 단위 — 사용자 신고(\"조사할 때 재고가 안 나타남\", \"위치조사 후 종료하면 아직 조사 전인 위치가 안 뜸\") · 원인: 조사 화면 page 가 IT재고 5탭을 읽는데 [확인]·[조사 종료] 액션의 revalidatePath 가 page 를 통째로 다시 그려 확인 1번 = 시트 5회 → 분당 60회 한도 초과, 못 읽은 탭은 listAllAssets 가 조용히 빈 목록 → 조사 목록이 장비가 빠진 채 저장되고 남은 위치가 비었음(10-15 4568a7d 부터) · page 에서 시트 안 읽음(위치 목록은 loadStocktakeLocations/useStocktakeLocations 로 필요할 때만, 못 읽으면 빨간 줄 + 다시 읽기), 조사 시작은 탭 하나라도 못 읽으면 거절(mergeTabReads) · 선반 단위(사용자 결정 — shelfKeyOf: B1 = B1수리중 = B1 (수리중), B10·B1-2 다름, 원래 위치 이름은 results[].location, 같은 선반이면 시트 위치 안 고침) · 시트 읽기 실패를 \"없음\"으로 안 봄(lookupInventory found/missing/error — 신규등록 오분류로 중복 줄 생기던 것, 새 줄 만들기 직전 5탭 재조회) · 조사 표 1000줄 잘림 대비(readAllStocktakePages — 목록·실재고체크완료 배지·현황판 2차 검증, 목록은 요약만 보내 가벼움) · 오늘 끝낸 위치는 DB 에서 거름 · 설명서 stock.ts FAQ",
+    "crew": [
+      "debugger",
+      "qa-checker",
+      "integration-rules",
+      "deploy-check"
+    ]
+  },
+  {
     "hash": "729bf3a6b3",
     "date": "2026-11-27",
     "time": "14:43",

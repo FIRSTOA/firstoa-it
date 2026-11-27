@@ -1,7 +1,9 @@
+import InventoryReadWarning from '@/components/InventoryReadWarning';
 import SalesPage from '@/components/sales/SalesPage';
 import SetupGuide from '@/components/SetupGuide';
 import Shell from '@/components/Shell';
 import { listAllAssetsUnified } from '@/app/stocktake/actions';
+import { failAllTabs } from '@/lib/inventory/tabRead';
 import { rowToSale, type SaleRow } from '@/lib/sales';
 import type { Asset } from '@/lib/types';
 import { createAdminClient, isSupabaseConfigured, SALES_TABLE } from '@/lib/supabase/server';
@@ -19,9 +21,13 @@ export default async function Page() {
 
   // "재고에서 판매로 표시된 자산"은 IT재고 시트 5개 탭을 읽어야 해서 느립니다. 기다리지 않고
   // 판매 기록부터 보낸 뒤, 도착하면 그 칸만 채웁니다(useStreamedValue).
-  const soldFromInventory = listAllAssetsUnified()
-    .then((all) => all.filter((a) => a.status === '판매'))
-    .catch(() => [] as Asset[]);
+  // 읽기는 한 번 — 못 읽은 탭은 위 띠로 알림(예전엔 말없이 빈 목록).
+  const inventoryRead = listAllAssetsUnified().catch((err: unknown) => ({
+    assets: [] as Asset[],
+    failed: failAllTabs(null, err instanceof Error ? err.message : String(err)),
+  }));
+  const soldFromInventory = inventoryRead.then(({ assets }) => assets.filter((a) => a.status === '판매'));
+  const inventoryFailed = inventoryRead.then(({ failed }) => failed);
 
   const supabase = createAdminClient();
   const { data, error } = await supabase
@@ -42,6 +48,7 @@ export default async function Page() {
 
   return (
     <Shell activeMenu="판매리스트" title="💰 판매 리스트" note="IT재고와 별도로 관리하는 판매 기록">
+      <InventoryReadWarning failed={inventoryFailed} consequence="'재고에서 판매로 표시된 자산'이 모자랄 수 있어요(판매 기록은 그대로예요)." />
       <SalesPage entries={entries} soldFromInventory={soldFromInventory} />
     </Shell>
   );

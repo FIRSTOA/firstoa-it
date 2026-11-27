@@ -213,7 +213,11 @@ export default function BillingAllocationView({ mode, review, search, onSearchCh
         add[g.rentalSheetRow] = ids.map((assetId) => ({ assetId, source: 'inventory_serial', detail: 'IT재고에서 같은 시리얼을 찾음' }));
       }
       setExtra((prev) => ({ ...prev, ...add }));
-      onToast(found > 0 ? `${found}건에서 IT재고 추천을 찾았어요.` : 'IT재고에서 같은 시리얼을 찾지 못했어요.');
+      // 못 읽은 탭이 있으면 "못 찾음"이 진짜 없는 건지 모르므로 이유를 같이(r.warning)
+      onToast(
+        (found > 0 ? `${found}건에서 IT재고 추천을 찾았어요.` : 'IT재고에서 같은 시리얼을 찾지 못했어요.') +
+          (r.warning ? ` ⚠️ ${r.warning}` : ''),
+      );
     } catch {
       onToast('IT재고를 읽지 못했어요. 잠시 뒤 다시 해 주세요.');
     } finally {

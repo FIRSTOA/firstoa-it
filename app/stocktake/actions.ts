@@ -3,12 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { createAsset, updateAsset } from '@/app/actions';
 import { DATA_SOURCE } from '@/lib/dataSource';
-import { getAssetFromSheets, listAllAssets, listAssetsFromSheet } from '@/lib/inventory/sheets';
+import { getAssetFromSheets, listAllAssets } from '@/lib/inventory/sheets';
+import { isQuotaFailure, type InventoryRead } from '@/lib/inventory/tabRead';
 import {
   buildInitialResults,
   describeSheetReadError,
   isSameShelf,
-  mergeTabReads,
   rowToStocktakeSession,
   shelfKeyOf,
   shelfLocationsFrom,
@@ -28,27 +28,28 @@ function toMessage(error: { code?: string; message: string }): string {
   return `저장에 실패했어요: ${error.message}`;
 }
 
-/** DATA_SOURCE에 맞는 쪽에서 전체 자산을 읽습니다 (app/page.tsx와 동일한 분기). */
-export async function listAllAssetsUnified(): Promise<Asset[]> {
+/**
+ * DATA_SOURCE에 맞는 쪽에서 전체 자산을 읽습니다 (app/page.tsx와 동일한 분기).
+ * 시트 모드는 5탭 한 번에 읽기(listAllAssets — 읽기 1회) — 못 읽은 탭은 failed 로 같이 옴(화면이 주황 띠로 알림).
+ * Supabase 모드는 탭이 없으니 failed 늘 빈 목록, 오류면 throw.
+ */
+export async function listAllAssetsUnified(): Promise<InventoryRead> {
   if (DATA_SOURCE === 'sheets') return listAllAssets();
 
   const supabase = createAdminClient();
   const { data, error } = await supabase.from(ASSETS_TABLE).select('*');
   if (error) throw new Error(error.message);
-  return ((data ?? []) as AssetRow[]).map(rowToAsset);
+  return { assets: ((data ?? []) as AssetRow[]).map(rowToAsset), failed: [] };
 }
 
 /**
- * 실재고 조사용 IT재고 읽기 — listAllAssetsUnified 와 같은 곳을 읽되, 못 읽은 탭을 숨기지 않고 돌려줍니다
- * (listAllAssets 는 못 읽은 탭을 빈 목록으로 바꿈 → 조사 목록·위치 목록이 조용히 빠졌음. mergeTabReads 설명).
- * Supabase 모드는 listAllAssetsUnified 그대로(오류면 throw).
+ * 실재고 조사용 IT재고 읽기 — listAllAssetsUnified 와 같은 곳(5탭 한 번에 읽기)을 읽고, 못 읽은 탭을 조사 쪽 모양으로
+ * (못 읽은 탭이 빠진 채 조사 목록이 저장되지 않게 — mergeTabReads 설명). 탭별 실패 로그는 listAllAssets 가 남김.
+ * Supabase 모드는 오류면 throw.
  */
 async function readInventoryForStocktake(): Promise<{ assets: Asset[]; failedTabs: string[]; quota: boolean }> {
-  if (DATA_SOURCE !== 'sheets') return { assets: await listAllAssetsUnified(), failedTabs: [], quota: false };
-  const settled = await Promise.allSettled(CATEGORIES.map((category) => listAssetsFromSheet(category)));
-  const { items, failed } = mergeTabReads<Asset>(CATEGORIES, settled);
-  for (const f of failed) console.error(`[stocktake] IT재고 "${f.tab}" 탭 읽기 실패:`, f.status ?? '-', f.message);
-  return { assets: items, failedTabs: failed.map((f) => f.tab), quota: failed.some((f) => f.status === 429) };
+  const { assets, failed } = await listAllAssetsUnified();
+  return { assets, failedTabs: failed.map((f) => f.tab), quota: failed.some(isQuotaFailure) };
 }
 
 function inventoryReadError(failedTabs: string[], quota: boolean, consequence: string): string {
